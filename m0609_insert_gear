@@ -1,0 +1,163 @@
+## Title : m0609_reset
+## Time : 2026-11-11 19:34:45
+
+
+set_singular_handling(DR_AVOID)
+set_velj(60.0)
+set_accj(100.0)
+set_velx(250.0, 80.625, DR_OFF)
+set_accx(1000.0, 322.5)
+gLoop193445326 = 0
+while gLoop193445326 < 1:
+    # MoveJNode
+    movej(posj(0.00, 0.00, 90.00, 0.00, 90.00, 0.00), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # MoveLNode
+    movel(posx(397.28, 91.14, 180.44, 31.51, -180.00, 31.84), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(396.54, 90.22, 40.40, 23.29, -180.00, 23.68), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # SetNode
+    set_digital_output(1,ON)
+    # SetNode
+    set_digital_output(1,OFF)
+    # WaitNode
+    wait(1.00)
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, -300.00, 0.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, 0.00, -197.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -10.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # RepeatNode
+    while True:
+        if check_force_condition(axis=DR_AXIS_Z, min=5, ref=DR_BASE):
+            break
+            
+        
+    # SetNode
+    set_digital_output(2,ON)
+    # SetNode
+    set_digital_output(2,OFF)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(390.87, 192.58, 241.07, 28.49, -180.00, 28.58), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(390.87, 192.58, 38.54, 28.49, -180.00, 28.58), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # SetNode
+    set_digital_output(1,ON)
+    # SetNode
+    set_digital_output(1,OFF)
+    # WaitNode
+    wait(1.00)
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, -300.00, 0.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, 0.00, -197.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -10.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # RepeatNode
+    while True:
+        if check_force_condition(axis=DR_AXIS_Z, min=5, ref=DR_BASE):
+            break
+            
+        
+    # SetNode
+    set_digital_output(2,ON)
+    # SetNode
+    set_digital_output(2,OFF)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(484.15, 147.07, 238.14, 23.84, -180.00, 23.45), radius=0.00, ref=0, mod=DR_MV_MOD_ABS, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, 0.00, -200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # SetNode
+    set_digital_output(1,ON)
+    # SetNode
+    set_digital_output(1,OFF)
+    # WaitNode
+    wait(1.00)
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, -300.00, 0.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, 0.00, -197.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -10.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # RepeatNode
+    while True:
+        if check_force_condition(axis=DR_AXIS_Z, min=5, ref=DR_BASE):
+            break
+            
+        
+    # SetNode
+    set_digital_output(2,ON)
+    # SetNode
+    set_digital_output(2,OFF)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveJNode
+    movej(posj(0.00, 0.00, 90.00, 0.00, 90.00, 0.00), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # MoveJNode
+    movej(posj(18.29, 16.45, 94.23, 0.11, 70.93, 18.21), radius=0.00, ra=DR_MV_RA_DUPLICATE)
+    # SetNode
+    set_digital_output(1,ON)
+    # SetNode
+    set_digital_output(1,OFF)
+    # WaitNode
+    wait(1.00)
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, -300.00, 0.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # MoveLNode
+    movel(posx(0.00, 0.00, -150.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    # ComplianceNode
+    task_compliance_ctrl()
+    set_stiffnessx([3000.00, 3000.00, 3000.00, 200.00, 200.00, 200.00],time=0.0)
+    # ForceNode
+    set_desired_force([0.00, 0.00, -10.00, 0.00, 0.00, 0.00],[0,0,1,0,0,0],time=0.0,mod=DR_FC_MOD_REL)
+    # RepeatNode
+    while True:
+        move_periodic(amp=[0.00, 0.00, 0.00, 0.00, 0.00, 20.00], period=[0.00, 0.00, 0.00, 0.00, 0.00, 1.00], atime=0.00, repeat=5, ref=0)
+        if check_force_condition(axis=DR_AXIS_Z, min=5, ref=DR_BASE):
+            break
+            
+        
+    # SetNode
+    set_digital_output(2,ON)
+    # SetNode
+    set_digital_output(2,OFF)
+    # ForceNode
+    release_force(time=0.0)
+    # ComplianceNode
+    release_compliance_ctrl()
+    # MoveLNode
+    movel(posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00), radius=0.00, ref=0, mod=DR_MV_MOD_REL, ra=DR_MV_RA_DUPLICATE, app_type=DR_MV_APP_NONE)
+    gLoop193445326 = gLoop193445326 + 1
