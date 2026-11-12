@@ -1,0 +1,224 @@
+
+import rclpy
+import DR_init
+
+# Robot Configuration
+ROBOT_ID = "dsr01"
+ROBOT_MODEL = "m0609"
+DR_OFF = 0
+
+VELOCITY = 60
+ACC = 60
+CYCLE = 3
+
+
+def main(args=None):
+    # 1. ROS2 초기화
+    rclpy.init(args=args)
+
+    # 2. Doosan 로봇 정보 설정
+    DR_init.__dsr__id = ROBOT_ID
+    DR_init.__dsr__model = ROBOT_MODEL
+
+    # 3. ROS2 Node 생성
+    node = rclpy.create_node(
+        "insert_gear",
+        namespace=ROBOT_ID
+    )
+
+    # 4. Doosan 라이브러리에 Node 전달
+    DR_init.__dsr__node = node
+
+    try:
+        # 5. Node 초기화 이후 Doosan API import
+        try:
+            from DSR_ROBOT2 import (
+                DR_AVOID,
+                DR_BASE,
+                DR_AXIS_Z,
+                DR_MV_RA_DUPLICATE,
+                DR_MV_MOD_REL,
+                DR_MV_APP_NONE,
+                DR_FC_MOD_REL,
+                ON,
+                OFF,
+                set_singular_handling,
+                set_velj,
+                set_accj,
+                set_velx,
+                set_accx,
+                set_digital_output,
+                movej,
+                movel,
+                wait,
+                task_compliance_ctrl,
+                set_stiffnessx,
+                set_desired_force,
+                check_force_condition,
+                release_force,
+                release_compliance_ctrl,
+                move_periodic,
+            )
+
+            from DR_common2 import posx, posj
+
+        except ImportError as e:
+            node.get_logger().error(
+                f"Error importing Doosan API: {e}"
+            )
+            return
+
+        # ---------------------------------
+        # Robot Motion Settings
+        # ---------------------------------
+
+        set_singular_handling(DR_AVOID)
+
+        set_velj(60.0)
+        set_accj(100.0)
+
+        set_velx(250.0, 80.625, DR_OFF)
+        set_accx(1000.0, 322.5)
+
+        # ---------------------------------
+        # Move J
+        # ---------------------------------
+
+        movej(
+            posj(0.00, 0.00, 90.00, 0.00, 90.00, 0.00),
+            radius=0.00,
+            ra=DR_MV_RA_DUPLICATE
+        )
+
+        movej(
+            posj(18.29, 16.45, 94.23, 0.11, 70.93, 18.21),
+            radius=0.00,
+            ra=DR_MV_RA_DUPLICATE
+        )
+
+        # ---------------------------------
+        # Digital Output 1
+        # ---------------------------------
+
+        set_digital_output(1, ON)
+        set_digital_output(1, OFF)
+
+        wait(1.00)
+
+        # ---------------------------------
+        # Move L
+        # ---------------------------------
+
+        movel(
+            posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00),
+            radius=0.00,
+            ref=0,
+            mod=DR_MV_MOD_REL,
+            ra=DR_MV_RA_DUPLICATE,
+            app_type=DR_MV_APP_NONE
+        )
+
+        movel(
+            posx(0.00, -300.00, 0.00, 0.00, 0.00, 0.00),
+            radius=0.00,
+            ref=0,
+            mod=DR_MV_MOD_REL,
+            ra=DR_MV_RA_DUPLICATE,
+            app_type=DR_MV_APP_NONE
+        )
+
+        movel(
+            posx(0.00, 0.00, -150.00, 0.00, 0.00, 0.00),
+            radius=0.00,
+            ref=0,
+            mod=DR_MV_MOD_REL,
+            ra=DR_MV_RA_DUPLICATE,
+            app_type=DR_MV_APP_NONE
+        )
+
+        # ---------------------------------
+        # Compliance Control
+        # ---------------------------------
+
+        task_compliance_ctrl()
+
+        set_stiffnessx(
+            [3000.00, 3000.00, 3000.00,
+             200.00, 200.00, 200.00],
+            time=0.0
+        )
+
+        # ---------------------------------
+        # Force Control
+        # ---------------------------------
+
+        set_desired_force(
+            [0.00, 0.00, -10.00, 0.00, 0.00, 0.00],
+            [0, 0, 1, 0, 0, 0],
+            time=0.0,
+            mod=DR_FC_MOD_REL
+        )
+
+        # ---------------------------------
+        # Repeat Motion until Force Condition
+        # ---------------------------------
+
+        while True:
+            move_periodic(
+                amp=[0.00, 0.00, 0.00, 0.00, 0.00, 20.00],
+                period=[0.00, 0.00, 0.00, 0.00, 0.00, 1.00],
+                atime=0.00,
+                repeat=5,
+                ref=0
+            )
+
+            if check_force_condition(
+                axis=DR_AXIS_Z,
+                min=5,
+                ref=DR_BASE
+            ):
+                break
+
+        # ---------------------------------
+        # Digital Output 2
+        # ---------------------------------
+
+        set_digital_output(2, ON)
+        set_digital_output(2, OFF)
+
+        # ---------------------------------
+        # Release Force & Compliance
+        # ---------------------------------
+
+        release_force(time=0.0)
+        release_compliance_ctrl()
+
+        # ---------------------------------
+        # Final Move L
+        # ---------------------------------
+
+        movel(
+            posx(0.00, 0.00, 200.00, 0.00, 0.00, 0.00),
+            radius=0.00,
+            ref=0,
+            mod=DR_MV_MOD_REL,
+            ra=DR_MV_RA_DUPLICATE,
+            app_type=DR_MV_APP_NONE
+        )
+
+    except Exception as e:
+        node.get_logger().error(
+            f"Robot operation error: {e}"
+        )
+        raise
+
+    finally:
+        # ROS2 종료 처리
+        node.destroy_node()
+
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
