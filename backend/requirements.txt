@@ -1,0 +1,4 @@
+# Python 3.12에서 검증한 서버 런타임 버전이다.
+fastapi==0.162.7
+pydantic==2.14.3
+uvicorn==0.54.0

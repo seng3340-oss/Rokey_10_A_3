@@ -1,0 +1,766 @@
+/* 승인 시안의 공통 색상 토큰이다. 강조색과 배경색을 고객 화면 전체에서 공유한다. */
+:root {
+  --accent: #e75238;
+  --accent-dark: #c33a25;
+  --ink: #292721;
+  --muted: #827d75;
+  --border: #e8e3db;
+  --cream: #faf8f3;
+}
+/* 테두리와 여백을 요소 폭에 포함해 반응형 크기 계산을 일정하게 유지한다. */
+* {
+  box-sizing: border-box;
+}
+/* 한글 우선 글꼴과 고객 화면의 기본 배경을 설정한다. */
+body {
+  margin: 0;
+  background: var(--cream);
+  font-family: "Noto Sans KR", "Malgun Gothic", Arial, sans-serif;
+  color: var(--ink);
+}
+/* 탭 입력 지연을 줄인다. 필기와 3D 회전에는 별도 터치 정책을 적용한다. */
+button,
+a {
+  touch-action: manipulation;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+}
+/* 비활성 상태를 시각적으로 구분한다. 실제 입력 차단은 disabled 속성이 담당한다. */
+button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+/* 키보드 사용자에게 현재 조작 대상을 명확히 표시한다. */
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #267088;
+  outline-offset: 3px;
+}
+a {
+  color: inherit;
+}
+button {
+  min-height: 46px;
+}
+button:active {
+  transform: translateY(1px);
+}
+/* 브랜드와 운영 화면 이동 링크를 상단 양 끝에 정렬한다. */
+.masthead {
+  height: 84px;
+  padding: 0 4%;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+/* 심벌과 한글 브랜드를 하나의 클릭 영역으로 묶는다. */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+/* 시안의 문자 심벌을 고정 크기 상자 가운데 배치한다. */
+.logo-symbol {
+  background: var(--accent);
+  color: #fff;
+  font: bold 39px Georgia;
+  width: 45px;
+  height: 45px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  padding-bottom: 8px;
+}
+.logo small {
+  display: block;
+  font-size: 10px;
+  color: #8f877c;
+  letter-spacing: 1px;
+  margin-top: 5px;
+  font-weight: 500;
+}
+/* 이벤트 안내와 운영 링크가 겹치지 않도록 간격을 확보한다. */
+.header-right {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  font-size: 12px;
+  color: #7e786f;
+}
+.preview-label {
+  border: 1px solid #ddd6cb;
+  padding: 6px 9px;
+  border-radius: 4px;
+}
+.header-right a {
+  text-underline-offset: 4px;
+}
+/* 큰 모니터에서도 작업 영역이 지나치게 넓어지지 않도록 본문 폭을 제한한다. */
+main {
+  max-width: 1440px;
+  margin: auto;
+  padding: 28px 4% 12px;
+}
+/* 고객의 첫 행동을 안내하는 제목과 작업 패널 사이에 여유를 둔다. */
+.intro {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 26px;
+}
+.overline {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+h1 {
+  font-size: 32px;
+  letter-spacing: -1.6px;
+  margin: 9px 0 10px;
+  font-weight: 800;
+}
+.intro p {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.7;
+}
+/* 단계 표시용 기존 스타일을 보존한다. 단계 문구는 한 줄을 유지한다. */
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+  color: #a29a8f;
+  white-space: nowrap;
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.steps b {
+  display: grid;
+  place-items: center;
+  border: 1px solid #ded7cd;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.steps .current {
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+.steps .current b {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+/* 필기 영역을 더 넓게 배정하고 3D 영역에는 최소 가독 폭을 확보한다. */
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  gap: 24px;
+  align-items: stretch;
+}
+/* 필기 도구·캔버스·편집 버튼을 한 카드로 묶고 모서리 밖 표시를 자른다. */
+.drawing-panel {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: white;
+  overflow: hidden;
+  min-width: 0;
+}
+/* 그리기 면 선택과 현재 획 수를 같은 행에 배치한다. */
+.drawing-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 14px;
+}
+/* 두 면의 선택 도구를 하나의 배경으로 묶어 전환 관계를 보여 준다. */
+.surface-tabs {
+  display: flex;
+  gap: 6px;
+  background: #f1eee8;
+  padding: 4px;
+  border-radius: 8px;
+}
+.surface-tabs button {
+  border: 0;
+  background: none;
+  color: #8a8277;
+  font-size: 13px;
+  border-radius: 5px;
+  padding: 0 22px;
+  font-weight: 600;
+}
+/* 컨트롤러가 갱신하는 현재 면을 흰 탭과 강조 글자로 표시한다. */
+.surface-tabs .selected {
+  background: #fff;
+  color: var(--accent-dark);
+  box-shadow: 0 1px 4px #39271014;
+}
+#stroke-count {
+  font-size: 11px;
+  color: #9c9286;
+}
+.drawing-stage {
+  background: #fdfcf9;
+}
+/* 현재 펜 색상 안내를 필기 영역 밖에 두어 입력을 가리지 않는다. */
+.stage-label {
+  display: flex;
+  justify-content: space-between;
+  padding: 17px 22px 0;
+  font-size: 11px;
+  color: #968c7d;
+}
+.stage-label > span:last-child {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.ink {
+  width: 12px;
+  height: 12px;
+  background: #795041;
+  display: inline-block;
+  border-radius: 50%;
+}
+/* 원본 좌표계와 같은 4:3 비율을 유지하고 화면 높이에 맞춰 크기를 제한한다. */
+.canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: calc(43vh * 4 / 3);
+  aspect-ratio: 4/3;
+  margin: auto;
+}
+/* 부모 크기에 맞춰 표시하며 터치 스크롤을 막아 필기 포인터가 끊기지 않게 한다. */
+#draw {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+/* 빈 캔버스 안내는 중앙에 겹치되 포인터 입력을 가로채지 않는다. */
+#empty-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+  font-size: 18px;
+  color: #b8a99a;
+  white-space: nowrap;
+  font-weight: 500;
+}
+/* 컨트롤러가 첫 유효 획을 감지하면 빈 화면 안내를 완전히 감춘다. */
+#empty-hint[hidden] {
+  display: none;
+}
+#empty-hint span {
+  display: block;
+  font-size: 11px;
+  margin-top: 9px;
+  color: #bdb2a5;
+  font-weight: 400;
+}
+/* 현재 면의 필기 경계를 캔버스 아래에서 설명한다. */
+#surface-help {
+  font-size: 10px;
+  color: #a39787;
+  text-align: center;
+  margin: 0;
+  padding: 0 12px 15px;
+  line-height: 1.6;
+}
+/* 안내 문구와 현재 면의 편집 도구를 나눠 배치한다. */
+.drawing-bottom {
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+}
+.drawing-bottom p {
+  font-size: 11px;
+  color: #8d8274;
+  line-height: 1.6;
+  margin: 0;
+}
+/* 안내가 길어져도 취소·지우기 버튼의 폭을 보존한다. */
+.drawing-bottom > div {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.drawing-bottom button,
+.quiet {
+  background: #fff;
+  border: 1px solid #e1d9cf;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 0 13px;
+  color: #736556;
+}
+/* 결과 미리보기 영역에 별도 배경을 주어 필기 카드와 구분한다. */
+.preview-panel {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f3eee5;
+  overflow: hidden;
+  padding: 22px;
+  min-width: 0;
+}
+/* 미리보기 제목과 3D 표시를 한 행에 맞춘다. */
+.preview-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+.preview-heading h2 {
+  font-size: 20px;
+  letter-spacing: -0.7px;
+  margin: 7px 0;
+}
+.preview-heading .overline {
+  font-size: 9px;
+  letter-spacing: 2px;
+}
+.live-tag {
+  font-size: 9px;
+  color: #8e7d68;
+  border: 1px solid #dacebd;
+  border-radius: 4px;
+  padding: 5px 7px;
+  white-space: nowrap;
+}
+/* WebGL 표시 높이를 확보하고 회전 드래그를 화면 스크롤과 분리한다. */
+.model-view {
+  height: 250px;
+  min-width: 0;
+  position: relative;
+  touch-action: none;
+  cursor: grab;
+}
+.model-view:active {
+  cursor: grabbing;
+}
+/* 캔버스 표시 크기는 영역에 맞춘다. 실제 픽셀 버퍼는 렌더러에서 관리한다. */
+.model-view canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* 3D 초기화 실패 시 모형 영역 안에 대체 안내를 표시한다. */
+.model-view .model-error {
+  font-size: 12px;
+  color: #9d3b25;
+  line-height: 1.7;
+  padding: 20px;
+}
+.rotate-note {
+  text-align: center;
+  font-size: 10px;
+  color: #a59581;
+  margin: 0 0 13px;
+}
+/* 일반 미리보기와 확인 창의 시점 버튼을 같은 방식으로 배치한다. */
+.view-controls,
+.review-controls {
+  display: flex;
+  gap: 7px;
+  justify-content: center;
+}
+.view-controls button,
+.review-controls button {
+  min-height: 36px;
+  font-size: 11px;
+  border: 1px solid #ded4c6;
+  background: #f9f6f0;
+  color: #82725d;
+  border-radius: 5px;
+  padding: 0 17px;
+}
+/* 모형 아래에 실제 치수를 안내해 미리보기의 기준을 알린다. */
+.cake-spec {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  padding: 17px 0;
+  border-bottom: 1px solid #dfd5c8;
+  margin-top: 6px;
+  color: #7b6e5f;
+}
+.preview-tip {
+  padding-top: 16px;
+}
+.preview-tip b {
+  font-size: 12px;
+}
+.preview-tip p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #9b8c79;
+  margin: 7px 0 0;
+}
+/* 확인 안내와 다음 단계 버튼을 묶는다. 좁은 화면에서는 하단에 고정한다. */
+.bottom-bar {
+  margin-top: 23px;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+.bottom-bar b {
+  font-size: 14px;
+}
+.bottom-bar p {
+  font-size: 11px;
+  color: #9c9081;
+  margin: 7px 0 0;
+}
+/* 확인·제작 요청의 주요 행동 버튼에 기존 강조색과 터치 크기를 적용한다. */
+.primary {
+  min-height: 58px;
+  padding: 16px 25px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  gap: 60px;
+  align-items: center;
+}
+.primary:hover {
+  background: var(--accent-dark);
+}
+/* 실제 결과와 3D 배치의 차이를 작업 영역 아래에서 설명한다. */
+.prototype-note {
+  font-size: 10px;
+  text-align: center;
+  color: #a69c8f;
+  line-height: 1.6;
+  margin: 17px 0 0;
+}
+/* 확인 창의 폭과 높이를 제한하고 긴 내용은 창 안에서 스크롤한다. */
+dialog {
+  max-width: 850px;
+  width: 94%;
+  max-height: 94vh;
+  overflow: auto;
+  border: 0;
+  border-radius: 16px;
+  padding: 28px;
+  background: #faf8f3;
+  color: var(--ink);
+}
+/* 확인 창 뒤의 필기 화면을 어둡게 처리해 현재 작업 대상을 구분한다. */
+dialog::backdrop {
+  background: #30281fc0;
+}
+.review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+.review-heading h2 {
+  font-size: 23px;
+  margin: 8px 0;
+  letter-spacing: -1px;
+}
+/* 확인 창 모형의 기본 영역이다. 파일 아래의 후속 규칙이 최종 높이를 정한다. */
+.review-model {
+  height: 330px;
+  background: #f2ede4;
+  border-radius: 12px;
+  margin: 15px 0;
+}
+.review-controls {
+  margin: 15px 0;
+}
+.summary {
+  display: flex;
+  justify-content: space-between;
+  background: white;
+  border: 1px solid var(--border);
+  padding: 15px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+.review-disclaimer {
+  font-size: 11px;
+  color: #9c8976;
+  line-height: 1.8;
+}
+/* 제작 요청 버튼은 확인 창의 전체 폭을 사용한다. */
+dialog > .primary {
+  width: 100%;
+  justify-content: center;
+}
+/* 긴 제출 좌표를 줄바꿈하고 내부에서 스크롤해 창 바깥으로 넘치지 않게 한다. */
+pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  background: white;
+  padding: 14px;
+}
+#result {
+  font-size: 12px;
+  line-height: 1.7;
+}
+/* 태블릿 가로 폭에서는 두 열을 유지하면서 간격과 캔버스 높이를 줄인다. */
+@media (max-width: 1000px) {
+  main {
+    padding: 22px 3%;
+  }
+  .masthead {
+    height: 74px;
+    padding: 0 3%;
+  }
+  h1 {
+    font-size: 27px;
+  }
+  .intro {
+    margin-bottom: 20px;
+  }
+  .steps {
+    gap: 13px;
+    font-size: 10px;
+  }
+  .workbench {
+    gap: 16px;
+    grid-template-columns: minmax(0, 1.55fr) minmax(240px, 1fr);
+  }
+  .preview-panel {
+    padding: 16px;
+  }
+  .preview-heading h2 {
+    font-size: 18px;
+  }
+  .model-view {
+    height: 210px;
+  }
+  .drawing-toolbar {
+    padding: 10px 12px;
+  }
+  .surface-tabs button {
+    padding: 0 14px;
+  }
+  .drawing-bottom {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+  }
+  .preview-tip {
+    padding-top: 12px;
+  }
+  .canvas-wrap {
+    max-width: calc(40vh * 4 / 3);
+  }
+}
+/* 좁은 화면에서는 필기를 위로, 미리보기를 아래로 옮기고 확인 버튼을 하단에 유지한다. */
+@media (max-width: 760px) {
+  .intro {
+    display: block;
+  }
+  .steps {
+    margin-top: 18px;
+  }
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+  .canvas-wrap {
+    max-width: 100%;
+  }
+  .preview-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 20px;
+  }
+  .preview-heading {
+    grid-column: 1/-1;
+  }
+  .model-view {
+    grid-row: 2/6;
+    height: 230px;
+  }
+  .rotate-note {
+    margin-top: 10px;
+  }
+  .cake-spec {
+    flex-direction: column;
+    gap: 7px;
+  }
+  .preview-tip {
+    padding-top: 8px;
+  }
+  .bottom-bar {
+    position: sticky;
+    bottom: 0;
+    background: #faf8f3f5;
+    padding: 13px 0;
+    margin-top: 16px;
+    z-index: 2;
+  }
+  .bottom-bar b {
+    font-size: 12px;
+  }
+  .bottom-bar p {
+    font-size: 10px;
+  }
+  .primary {
+    gap: 20px;
+    font-size: 13px;
+    padding: 13px 18px;
+  }
+  .header-right a {
+    display: none;
+  }
+  .preview-label {
+    font-size: 10px;
+  }
+  .logo {
+    font-size: 18px;
+  }
+  .stage-label {
+    font-size: 10px;
+  }
+  .drawing-bottom p {
+    font-size: 10px;
+  }
+  .review-heading h2 {
+    font-size: 19px;
+  }
+  .review-model {
+    height: 300px;
+  }
+}
+/* 휴대폰의 좁은 폭에서는 미리보기를 한 열로 펼치고 주요 버튼에 전체 폭을 준다. */
+@media (max-width: 420px) {
+  .bottom-bar > div {
+    display: none;
+  }
+  .bottom-bar > .primary {
+    width: 100%;
+  }
+  .preview-panel {
+    display: block;
+  }
+  .model-view {
+    height: 240px;
+  }
+  .summary {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .review-heading {
+    align-items: flex-start;
+  }
+  .review-heading h2 {
+    font-size: 18px;
+  }
+  dialog {
+    padding: 18px;
+  }
+  .logo-symbol {
+    width: 38px;
+    height: 38px;
+    font-size: 32px;
+  }
+}
+
+/* 입력 캔버스는 투명 합성을 사용하지 않고 명시적인 밝은 배경을 유지한다. */
+#draw {
+  background: #fdfcf9;
+}
+
+/* 전체 확인: 더 큰 모형과 60초 무조작 안내 */
+dialog {
+  max-height: 96vh;
+}
+.review-model {
+  height: clamp(360px, 48vh, 520px);
+}
+/* 남은 시간과 자동 복귀 안내를 모형 위에서 함께 보여 준다. */
+.idle-notice {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 12px 0;
+  color: #8b7b6b;
+  font-size: 11px;
+}
+.idle-notice b {
+  font-weight: 500;
+}
+.idle-notice small {
+  display: block;
+  font-size: 10px;
+  margin-top: 5px;
+  color: #a69a8c;
+}
+/* 컨트롤러가 갱신하는 --remaining 비율을 원형 진행률로 표시한다. */
+.idle-ring {
+  --remaining: 100%;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) var(--remaining), #e5ddd2 0);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
+}
+/* 중앙을 밝은 원으로 채워 진행률을 도넛 모양으로 만들고 남은 초를 겹친다. */
+.idle-ring span {
+  display: grid;
+  place-items: center;
+  background: #faf8f3;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+@media (max-width: 760px) {
+  .review-model {
+    height: clamp(340px, 46vh, 480px);
+  }
+  .idle-notice {
+    justify-content: flex-start;
+  }
+}
