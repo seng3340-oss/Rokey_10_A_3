@@ -1,0 +1,15 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+build/
+install/
+log/
+frontend/dist/
+*.sqlite3
+
+# 일회용 HTML 시안은 프로젝트 소스와 분리
+/design-preview/
