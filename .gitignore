@@ -13,3 +13,7 @@ frontend/dist/
 
 # 일회용 HTML 시안은 프로젝트 소스와 분리
 /design-preview/
+
+# 서버가 생성하는 주문 DB와 테스트 캐시
+/backend/data/
+.pytest_cache/

@@ -1,9 +1,9 @@
 # PM 그림 전달 계약 (2026-11-14)
 
-현재 파일은 합의된 규격을 기록한 설계 문서다. Flask 서버와 ROS 발행은 아직 구현하지 않았다.
-HTML 시안은 실제 전송 없이 이 형식의 JSON 확인·다운로드만 지원한다.
+현재 파일은 PM의 요청 규격을 기록한 문서다. React 프론트와 FastAPI 서버는 이 형식으로 그림 접수·저장까지 연결했다. ROS 발행은 아직 구현하지 않았다.
+현재 접수 응답은 order_id와 status=received이며 서버 저장 성공을 뜻한다. HMI는 정적 화면으로 API를 만들지 않았다.
 
-## 태블릿 → Flask
+## 태블릿 → FastAPI
 
 HTTP POST `/api/drawing`, Content-Type: application/json. 로그인·사용자 구분 없음.
 
@@ -23,10 +23,10 @@ HTTP POST `/api/drawing`, Content-Type: application/json. 로그인·사용자 �
 좌표 원점은 캔버스 좌측 상단, +X 오른쪽, +Y 아래다. CSS 화면 크기와 무관하게 내부 해상도로 환산한다.
 위 JSON은 필드 예시이며 시안의 top 원 경계와는 별개다.
 
-## Flask → 작업 관리 노드
+## FastAPI → 작업 관리 노드
 
 ROS 2 Topic `/drawing/order`, 커스텀 메시지 DrawingOrder.
-백엔드가 order_id를 생성하고 위 데이터를 원시 픽셀 좌표 그대로 변환해 발행한다.
+향후 백엔드가 생성한 order_id와 원시 픽셀 좌표를 전달하는 계약이다. 현재 Topic 발행이나 브리지는 구현하지 않는다.
 예시 order_id: ORD-20261114-001. ID 생성은 동시 요청·재시작에도 중복되지 않아야 한다.
 
 계약상 메시지 정의 (패키지명 cake_interfaces는 제안이며 PM과 확정 필요):

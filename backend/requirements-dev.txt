@@ -1,0 +1,4 @@
+# 테스트는 실제 주문 대신 임시 DB를 사용한다.
+-r requirements.txt
+pytest==9.2.0
+httpx==0.28.1
