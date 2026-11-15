@@ -1,0 +1,17 @@
+# Request: DrawingPath의 해상도를 그대로 전달하여 실제 크기에 맞게 계산한다.
+uint32 canvas_width
+uint32 canvas_height
+# 원본 픽셀 획과 TOP/SIDE, 고정 케이크 위치·치수(m)를 받는다.
+cake_decorator_interfaces/Stroke2D[] strokes_2d
+string surface_type
+geometry_msgs/Pose cake_pose
+float64 cake_radius
+float64 cake_height
+---
+# Response: 경로 계산 결과다. 아직 계산 서비스 서버는 구현하지 않는다.
+bool success
+cake_decorator_interfaces/Waypoint3D[] waypoints_3d
+# 원문에 중복 정의되어 있다. 길이와 값은 waypoint.pen_down과 일치해야 한다.
+bool[] pen_states
+float64 estimated_duration_sec
+string error_msg

@@ -1,0 +1,16 @@
+flowchart TB
+    subgraph A["접수 · 확인"]
+      direction LR
+      I["IDLE"] --> R["RECEIVED"] --> V["VALIDATING"]
+    end
+    subgraph B["케이크 · 펜 준비"]
+      direction LR
+      K["PICKING_CAKE"] --> L["PLACING_CAKE"] --> G["GRASPING_TOOL"]
+    end
+    subgraph C["드로잉 · 정리 · 출고"]
+      direction LR
+      W["DRAWING<br/>TOP / SIDE"] --> T["RETURNING_TOOL"] --> D["DELIVERING"] --> O["COMPLETED"]
+    end
+    A --> B --> C
+    classDef normal fill:#f2f6fa,stroke:#8ba5bb,color:#213c56;
+    class I,R,V,K,L,G,W,T,D,O normal;

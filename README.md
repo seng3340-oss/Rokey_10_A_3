@@ -160,3 +160,9 @@ Real은 기존 강의 브링업을 사용하며, 임시 위치의 테이블·케
 - [그림 데이터 규격](docs/DRAWING_PROTOCOL.md)
 - [로봇 실행환경 이관·빌드](docs/ROBOT_ENVIRONMENT.md)
 - [태블릿 네트워크 연결](docs/NETWORK.md)
+
+- [PM 시퀀스·상태 흐름도](docs/architecture/SYSTEM_DESIGN.md)
+- [ROS 인터페이스 초안과 확인할 항목](docs/architecture/INTERFACES.md)
+- [시스템 설계·통신 규격 보고서 PDF](docs/architecture/report/케이크_시스템설계_통신규격_v0.2.pdf)
+- [확정한 인터페이스 결정](docs/architecture/DECISIONS.md)
+- [인터페이스 패키지 빌드](ws_cobot1/src/cake_decorator_interfaces/README.md)

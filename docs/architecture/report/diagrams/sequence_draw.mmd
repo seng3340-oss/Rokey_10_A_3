@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant B as FastAPI
+    participant M as 작업 관리 TM
+    participant P as 경로 계산 DP
+    participant E as 로봇 실행 RE
+    M->>P: GenerateTrajectory 요청
+    P->>P: 평면/곡면 경로 계산
+    P-->>M: 경로·펜 상태·결과
+    M->>E: DrawOnCake Goal
+    E->>E: 접근·필기·획 사이 이탈
+    E-->>M: Feedback (현재 획 · 진행률)
+    E-->>M: DrawOnCake Result
+    M-->>B: /task_status
+    M->>E: GraspTool Goal (RELEASE)
+    E-->>M: GraspTool Result
+    M->>E: PickAndPlace Goal (출고)
+    E-->>M: PickAndPlace Result
+    M-->>B: CakeOrder Result
+    Note over B,E: 목표 흐름 · 실패/취소 시 성공 처리 금지

@@ -1,0 +1,14 @@
+flowchart LR
+    T["고객 태블릿<br/>그림 · 제출"] -->|"HTTP / JSON<br/>구현됨"| B["FastAPI<br/>검증 · 주문 DB"]
+    B -.->|"CakeOrder Action<br/>연결 예정"| M["task_manager_node<br/>전체 공정"]
+    M -->|"GenerateTrajectory<br/>Service"| P["drawing_path_node<br/>픽셀 → 경로"]
+    P -->|"Waypoint3D[]"| M
+    M -->|"PickAndPlace<br/>GraspTool · DrawOnCake<br/>Action"| E["robot_executor_node<br/>실제 장비 실행"]
+    E -->|"두산 API / Service"| D["두산 드라이버<br/>M0609"]
+    E -->|"RG2 Service"| G["OnRobot 드라이버<br/>RG2"]
+    M -.->|"/task_status Topic<br/>연결 예정"| B
+    B -.->|"WebSocket · 추후"| H["고객 상태 / 운영 HMI<br/>현재 HMI는 정적"]
+    classDef server fill:#edf3f8,stroke:#7895ae,color:#1e3550;
+    classDef node fill:#fff,stroke:#8aa4ba,color:#1e3550;
+    class T,B server;
+    class M,P,E,D,G,H node;

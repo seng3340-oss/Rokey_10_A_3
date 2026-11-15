@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant W as 고객 웹
+    participant B as FastAPI
+    participant M as 작업 관리 TM
+    participant E as 로봇 실행 RE
+    W->>B: POST /api/drawing
+    B->>B: 검증 · ID 생성 · 저장
+    B-->>W: 201 received (서버 저장 성공)
+    Note over B,E: 아래는 목표 흐름 · ROS 노드 미구현
+    B->>M: CakeOrder Goal
+    M-->>B: Goal 수락/거절 · Feedback
+    M->>M: 입력·고정 설정 확인
+    M->>E: PickAndPlace Goal
+    E-->>M: Feedback: 픽업 · 이동 · 배치
+    E-->>M: PickAndPlace Result
+    M->>E: GraspTool Goal (GRASP)
+    E-->>M: GraspTool Result
+    Note over M,E: TCP/Tool 적용·좌표 기준은 별도 확인

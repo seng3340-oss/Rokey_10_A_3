@@ -71,3 +71,13 @@ side는 x=64..960, y≈269.92..498.08의 펼친 띠 편집 영역이다. 높이�
 - 인증 없는 고객 주문 API와 운영자 제어 API의 권한 분리.
 
 데모 화면의 예시 상태는 실제 로봇 상태가 아니다. 로봇 실행 통합은 별도 검증 후 연결한다.
+
+## ROS 설계 문서 갱신
+
+위 `/drawing/order` Topic은 초기 전달안이다. 소은님이 11월14일 공유한 후속 시스템 설계는
+백엔드→TM에 CakeOrder Action을 사용한다. 현재 ROS 연동은 구현하지 않았으며
+두 방식을 동시에 발행하지 않는다. 상세 초안 기준의 타입 생성과 미확정 항목은
+[인터페이스 작업 기준](architecture/INTERFACES.md)을 참고한다.
+웹 HTTP 요청·SQLite 저장 계약은 이번 인터페이스 작업으로 변경하지 않았다.
+
+2026-11-15 합의: ROS 상세 정의 이름을 사용하며 DrawingPath/GenerateTrajectory에 canvas_width/height, Stroke2D에 stroke_id를 보존합니다. is_closed=false로 자동 폐곡선 연결을 금지합니다. [확정 기록](architecture/DECISIONS.md) 참고.

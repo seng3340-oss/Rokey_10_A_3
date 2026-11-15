@@ -1,0 +1,18 @@
+# Goal: 계산된 경로와 TOP/SIDE 면을 실행 노드에 전달한다.
+cake_decorator_interfaces/Waypoint3D[] waypoints
+string drawing_surface
+# 접촉력 N은 현재 미사용이다. 명세 정의만으로 힘제어가 켜지지 않는다.
+float64 contact_force
+# 드로잉 속도 mm/s. waypoint별 speed와 우선순위는 팀 확인 항목이다.
+float64 speed
+---
+# Result: 끝난 획 개수의 집계 규칙은 원본 획 정보 연결 후 정한다.
+bool success
+int32 completed_strokes
+string error_code
+---
+# Feedback: PEN_DOWN / DRAWING / PEN_UP / REPOSITIONING.
+int32 current_stroke_idx
+int32 total_strokes
+float32 progress_pct
+string phase

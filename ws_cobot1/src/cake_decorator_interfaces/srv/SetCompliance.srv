@@ -1,0 +1,9 @@
+# 미사용 서비스의 형식 보존용 정의다. 실제 서비스 서버나 순응/힘제어를 구현하지 않는다.
+# 원문의 미사용 사유는 하드웨어 사실 확인과 별개이므로 README 확인 항목을 참고한다.
+bool enable
+# x,y,z,rx,ry,rz 순서의 여섯 값. 1=유연/0=강체라는 원문 표기이며 실제 API 매핑은 미확정.
+float64[6] axis
+float64[6] stiffness
+---
+bool success
+string error_code
