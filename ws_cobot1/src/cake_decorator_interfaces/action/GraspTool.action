@@ -1,0 +1,13 @@
+# Goal: 도구 식별자, GRASP/RELEASE, BASE 기준 목표 자세와 접근 방향.
+string tool_id
+string action
+geometry_msgs/Pose tool_pose
+geometry_msgs/Vector3 approach_dir
+---
+# Result: 도구 파지/반납 완료 여부. 미검증 성공을 반환하지 않도록 실행 측에서 확인한다.
+bool success
+string error_code
+---
+# Feedback: APPROACHING / GRASPING / RETRACTING / RELEASING.
+string phase
+float32 progress_pct

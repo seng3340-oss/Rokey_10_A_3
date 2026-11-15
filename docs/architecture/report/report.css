@@ -1,0 +1,20 @@
+/* 세로 A4 안에서 구조와 필드 표를 같은 크기로 읽도록 배치한다. */
+@page { size: A4 portrait; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #263746; background: #e8edf1; font-family: 'Noto Sans CJK KR', sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.page { width: 210mm; height: 297mm; padding: 15mm 17mm; position: relative; background: white; break-after: page; }
+.page:last-child { break-after: auto; }
+header { border-bottom: 2px solid #29465d; padding-bottom: 5mm; margin-bottom: 6mm; }
+small { color: #647b8b; font-size: 9pt; }
+h1 { margin: 2mm 0 0; font-size: 23pt; color: #203c53; }
+h2 { font-size: 12pt; margin: 4mm 0 2mm; }
+p { font-size: 9.5pt; line-height: 1.8; margin: 2mm 0 3mm; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
+th { background: #edf2f6; text-align: left; }
+th, td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #dce3e8; vertical-align: top; line-height: 1.5; overflow-wrap: anywhere; }
+th:first-child, td:first-child { width: 43%; }
+.flow { background: #f2f5f8; padding: 3mm; text-align: center; font-size: 10pt; font-weight: 600; line-height: 1.7; }
+.flow div { font-size: 8.5pt; color: #627b8d; font-weight: normal; margin: 1mm 0; }
+.note { color: #617382; font-size: 8.5pt; margin-top: 5mm; }
+footer { position: absolute; left: 17mm; right: 17mm; bottom: 10mm; border-top: 1px solid #dce3e8; padding-top: 3mm; font-size: 8pt; color: #6f8392; display: flex; justify-content: space-between; }
+@media print { body { background: white; } }

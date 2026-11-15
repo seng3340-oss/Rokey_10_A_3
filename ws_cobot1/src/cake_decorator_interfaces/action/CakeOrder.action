@@ -1,0 +1,18 @@
+# Goal: 전체 케이크 제작 주문. 원본 그림의 픽셀 데이터를 전달한다.
+string order_id
+cake_decorator_interfaces/DrawingPath[] drawing_paths
+cake_decorator_interfaces/CakeParams cake_params
+# 원문 후보: marker / cream / chocolate. 미지원 도구는 서버 구현에서 거절해야 한다.
+string tool_type
+---
+# Result: 작업 종료 결과. 서버 저장 성공과 로봇 제작 완료를 구분한다.
+bool success
+string error_code
+string error_msg
+float64 elapsed_time_sec
+---
+# Feedback: 원문 상태 예시 VALIDATING, PICKING_CAKE, PLACING_CAKE,
+# GRASPING_TOOL, DRAWING_TOP, DRAWING_SIDE, RELEASING_TOOL, DELIVERING.
+string current_phase
+float32 progress_pct
+string message

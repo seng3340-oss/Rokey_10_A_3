@@ -1,0 +1,7 @@
+# Request: 원문 transport/drawing은 역할 예시다. 실제 등록 TCP 이름 매핑은 별도 확정한다.
+string tcp_name
+---
+# Response: 실제 적용을 확인한 TCP 이름과 결과. 현재는 서비스 타입만 정의한다.
+bool success
+string current_tcp
+string error_msg

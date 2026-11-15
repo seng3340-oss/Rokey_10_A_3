@@ -1,0 +1,15 @@
+# Goal: BASE 기준 픽업·배치 위치. Pose 위치와 접근 높이는 m다.
+geometry_msgs/Pose pick_pose
+geometry_msgs/Pose place_pose
+float64 approach_height
+# 그리퍼 폭은 원문 기준 mm다. 값이 실제 파지 성공을 보장하지 않는다.
+float64 grip_width
+---
+# Result: 동작 결과와 조회한 최종 배치 자세.
+bool success
+geometry_msgs/Pose actual_place_pose
+string error_code
+---
+# Feedback: APPROACHING / GRIPPING / LIFTING / MOVING / PLACING / RELEASING.
+string phase
+float32 progress_pct
