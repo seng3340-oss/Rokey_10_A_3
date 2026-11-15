@@ -1,0 +1,856 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="cake_workcell" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="fixture_x" default="0.415" />
+  <xacro:arg name="fixture_y" default="-0.085" />
+  <xacro:arg name="fixture_z" default="0.0" />
+  <xacro:arg name="fixture_yaw" default="0.0" />
+  <!-- 길이 단위 m. 로봇 BASE를 기준으로 상판 Z=0, 바닥 Z=-0.960을 유지한다. -->
+  <link name="workcell_root" />
+  <link name="Table_Top">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/table_top.stl" />
+      </geometry>
+      <material name="Table_Top_material">
+        <color rgba="0.78 0.63 0.43 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/table_top.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Top_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Top" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Body_Back">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.02 0.83" />
+      </geometry>
+      <material name="Table_Body_Back_material">
+        <color rgba="0.85 0.87 0.89 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.02 0.83" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Body_Back_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Body_Back" />
+    <origin xyz="0.325 0.300 -0.445" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Body_Front">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.02 0.83" />
+      </geometry>
+      <material name="Table_Body_Front_material">
+        <color rgba="0.85 0.87 0.89 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.02 0.83" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Body_Front_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Body_Front" />
+    <origin xyz="0.325 -0.300 -0.445" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Body_Left">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.58 0.83" />
+      </geometry>
+      <material name="Table_Body_Left_material">
+        <color rgba="0.85 0.87 0.89 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.58 0.83" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Body_Left_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Body_Left" />
+    <origin xyz="-0.215 0 -0.445" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Body_Right">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.58 0.83" />
+      </geometry>
+      <material name="Table_Body_Right_material">
+        <color rgba="0.85 0.87 0.89 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.58 0.83" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Body_Right_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Body_Right" />
+    <origin xyz="0.865 0 -0.445" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Body_Bottom">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.6 0.02" />
+      </geometry>
+      <material name="Table_Body_Bottom_material">
+        <color rgba="0.85 0.87 0.89 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.6 0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Body_Bottom_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Body_Bottom" />
+    <origin xyz="0.325 0 -0.85" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Body_Shelf">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.06 0.56 0.02" />
+      </geometry>
+      <material name="Table_Body_Shelf_material">
+        <color rgba="0.85 0.87 0.89 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="1.06 0.56 0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Body_Shelf_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Body_Shelf" />
+    <origin xyz="0.325 0 -0.44" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Wheel_0_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+      <material name="Table_Wheel_0_0_material">
+        <color rgba="0.09 0.10 0.12 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Wheel_0_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Wheel_0_0" />
+    <origin xyz="-0.14 -0.24 -0.91" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Wheel_0_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+      <material name="Table_Wheel_0_1_material">
+        <color rgba="0.09 0.10 0.12 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Wheel_0_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Wheel_0_1" />
+    <origin xyz="-0.14 0.24 -0.91" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Wheel_1_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+      <material name="Table_Wheel_1_0_material">
+        <color rgba="0.09 0.10 0.12 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Wheel_1_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Wheel_1_0" />
+    <origin xyz="0.79 -0.24 -0.91" rpy="0 0 0" />
+  </joint>
+  <link name="Table_Wheel_1_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+      <material name="Table_Wheel_1_1_material">
+        <color rgba="0.09 0.10 0.12 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.035" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Table_Wheel_1_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Table_Wheel_1_1" />
+    <origin xyz="0.79 0.24 -0.91" rpy="0 0 0" />
+  </joint>
+  <link name="Floor">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="2.2 1.6 0.02" />
+      </geometry>
+      <material name="Floor_material">
+        <color rgba="0.35 0.38 0.42 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="2.2 1.6 0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Floor_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Floor" />
+    <origin xyz="0.325 0 -0.970" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_0_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_0_0_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_0_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_0_0" />
+    <origin xyz="0.275 -0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_0_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_0_0_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_0_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_0_0" />
+    <origin xyz="0.275 -0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_0_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_0_1_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_0_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_0_1" />
+    <origin xyz="0.425 -0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_0_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_0_1_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_0_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_0_1" />
+    <origin xyz="0.425 -0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_0_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_0_2_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_0_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_0_2" />
+    <origin xyz="0.575 -0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_0_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_0_2_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_0_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_0_2" />
+    <origin xyz="0.575 -0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_0_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_0_3_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_0_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_0_3" />
+    <origin xyz="0.725 -0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_0_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_0_3_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_0_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_0_3" />
+    <origin xyz="0.725 -0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_1_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_1_0_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_1_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_1_0" />
+    <origin xyz="0.275 -0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_1_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_1_0_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_1_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_1_0" />
+    <origin xyz="0.275 -0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_1_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_1_1_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_1_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_1_1" />
+    <origin xyz="0.425 -0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_1_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_1_1_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_1_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_1_1" />
+    <origin xyz="0.425 -0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_1_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_1_2_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_1_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_1_2" />
+    <origin xyz="0.575 -0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_1_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_1_2_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_1_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_1_2" />
+    <origin xyz="0.575 -0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_1_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_1_3_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_1_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_1_3" />
+    <origin xyz="0.725 -0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_1_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_1_3_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_1_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_1_3" />
+    <origin xyz="0.725 -0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_2_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_2_0_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_2_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_2_0" />
+    <origin xyz="0.275 0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_2_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_2_0_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_2_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_2_0" />
+    <origin xyz="0.275 0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_2_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_2_1_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_2_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_2_1" />
+    <origin xyz="0.425 0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_2_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_2_1_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_2_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_2_1" />
+    <origin xyz="0.425 0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_2_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_2_2_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_2_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_2_2" />
+    <origin xyz="0.575 0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_2_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_2_2_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_2_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_2_2" />
+    <origin xyz="0.575 0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_2_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_2_3_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_2_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_2_3" />
+    <origin xyz="0.725 0.075 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_2_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_2_3_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_2_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_2_3" />
+    <origin xyz="0.725 0.075 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_3_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_3_0_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_3_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_3_0" />
+    <origin xyz="0.275 0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_3_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_3_0_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_3_0_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_3_0" />
+    <origin xyz="0.275 0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_3_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_3_1_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_3_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_3_1" />
+    <origin xyz="0.425 0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_3_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_3_1_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_3_1_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_3_1" />
+    <origin xyz="0.425 0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_3_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_3_2_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_3_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_3_2" />
+    <origin xyz="0.575 0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_3_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_3_2_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_3_2_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_3_2" />
+    <origin xyz="0.575 0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <link name="Mounting_Insert_3_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_ring.stl" />
+      </geometry>
+      <material name="Mounting_Insert_3_3_material">
+        <color rgba="0.30 0.38 0.46 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Mounting_Insert_3_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Mounting_Insert_3_3" />
+    <origin xyz="0.725 0.225 0.00005" rpy="0 0 0" />
+  </joint>
+  <link name="Hole_Interior_3_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0049" length="0.001" />
+      </geometry>
+      <material name="Hole_Interior_3_3_material">
+        <color rgba="0.015 0.018 0.025 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Hole_Interior_3_3_fixed" type="fixed">
+    <parent link="workcell_root" />
+    <child link="Hole_Interior_3_3" />
+    <origin xyz="0.725 0.225 -0.014" rpy="0 0 0" />
+  </joint>
+  <!-- A안 STL은 mm 원본이며 mesh scale=0.001을 적용한다. 전체 위치만 mount에서 바꾼다. -->
+  <link name="fixture_a_base_link" />
+  <link name="fixture_a_pegboard_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/A_pegboard.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="pegboard_mat">
+        <color rgba="0.82 0.84 0.87 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="fixture_a_base_to_pegboard" type="fixed">
+    <parent link="fixture_a_base_link" />
+    <child link="fixture_a_pegboard_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <link name="fixture_a_frame_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/A_frame.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="frame_mat">
+        <color rgba="0.54 0.67 0.76 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="fixture_a_base_to_frame" type="fixed">
+    <parent link="fixture_a_base_link" />
+    <child link="fixture_a_frame_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <link name="fixture_a_board_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/A_board.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="board_mat">
+        <color rgba="0.97 0.96 0.93 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="fixture_a_base_to_board" type="fixed">
+    <parent link="fixture_a_base_link" />
+    <child link="fixture_a_board_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <link name="fixture_a_cake_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/A_cake.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="cake_mat">
+        <color rgba="0.93 0.82 0.63 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="fixture_a_base_to_cake" type="fixed">
+    <parent link="fixture_a_base_link" />
+    <child link="fixture_a_cake_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <joint name="fixture_a_mount" type="fixed">
+    <parent link="workcell_root" />
+    <child link="fixture_a_base_link" />
+    <origin xyz="$(arg fixture_x) $(arg fixture_y) $(arg fixture_z)" rpy="0 0 $(arg fixture_yaw)" />
+  </joint>
+</robot>
