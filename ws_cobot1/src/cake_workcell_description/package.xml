@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package format="3">
+  <name>cake_workcell_description</name>
+  <version>0.1.0</version>
+  <description>기존 작업대와 A안 케이크 고정구의 독립 시각화 모델</description>
+  <maintainer email="applewlghks321@gmail.com">Cake project team</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>xacro</exec_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

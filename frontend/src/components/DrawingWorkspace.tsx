@@ -1,3 +1,4 @@
+import { CAKE_DIMENSIONS } from "../drawing/cakeDimensions";
 /**
  * 필기와 3D 미리보기를 나란히 배치한다. 동작은 mountDrawing이 고정 ID로 연결한다.
  * ID와 data 속성은 입력 면·시점·버튼의 연결 계약이므로 변경 시 컨트롤러도 확인한다.
@@ -86,7 +87,10 @@ export function DrawingWorkspace() {
           </div>
           <div className="cake-spec">
             <span>화이트 케이크</span>
-            <span>지름 15cm · 높이 8cm</span>
+            <span>
+              지름 {CAKE_DIMENSIONS.diameterMm / 10}cm · 높이{" "}
+              {CAKE_DIMENSIONS.heightMm / 10}cm
+            </span>
           </div>
         </aside>
       </div>

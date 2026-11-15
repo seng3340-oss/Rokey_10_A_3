@@ -1,5 +1,6 @@
 import { cakeView } from "./cake3d.js";
 import { submitDrawing } from "../api/drawing";
+import { DRAWING_LAYOUT } from "./cakeDimensions";
 /**
  * React가 화면을 붙인 뒤 캔버스·미리보기·확인 창의 동작을 연결한다.
  * 그림은 면별 브라우저 메모리에 보관하며, 반환한 정리 함수는 화면 해제 시 호출한다.
@@ -49,9 +50,15 @@ export function mountDrawing() {
   }
   /** 고정 입력 좌표계에서 실제 필기 허용 영역을 판정한다. 점선보다 약간 안쪽이다. */
   function inside(p) {
+    const top = DRAWING_LAYOUT.top;
+    const side = DRAWING_LAYOUT.side;
+    // 점선에서 5px 안쪽으로 제한하여 테두리에 필기가 걸치지 않게 한다.
     return surface === "top"
-      ? Math.hypot(p.x - 512, p.y - 384) <= 315
-      : p.x >= 69 && p.x <= 955 && p.y >= 215 && p.y <= 553;
+      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.radius - 5
+      : p.x >= side.x + 5 &&
+          p.x <= side.x + side.width - 5 &&
+          p.y >= side.y + 5 &&
+          p.y <= side.y + side.height - 5;
   }
   /** 화면 크기와 무관하게 포인터 위치를 원본 1024×768 캔버스 좌표로 환산한다. */
   function point(e) {
@@ -84,15 +91,10 @@ export function mountDrawing() {
       t.setTransform(1, 0, 0, 1, 0, 0);
       t.fillStyle = "#fffaf1";
       t.fillRect(0, 0, c.width, c.height);
-      // 윗면 원의 외접 정사각형(640), 옆면 펼침 영역(896×348)을 기준으로 맞춘다.
-      // 음수 이동은 입력 캔버스에 있던 여백을 텍스처에서 제외하는 역할이다.
-      if (name === "top") {
-        t.scale(c.width / 640, c.height / 640);
-        t.translate(-192, -64);
-      } else {
-        t.scale(c.width / 896, c.height / 348);
-        t.translate(-64, -210);
-      }
+      // 물리 치수에서 계산한 동일 영역을 잘라 3D에 입힌다. 입력 여백은 제외한다.
+      const region = DRAWING_LAYOUT[name];
+      t.scale(c.width / region.width, c.height / region.height);
+      t.translate(-region.x, -region.y);
       paths(t, drawings[name]);
       t.setTransform(1, 0, 0, 1, 0, 0);
     }
@@ -104,8 +106,10 @@ export function mountDrawing() {
     ctx.fillStyle = "#fdfcf9";
     ctx.fillRect(0, 0, 1024, 768);
     ctx.beginPath();
-    if (surface === "top") ctx.arc(512, 384, 320, 0, 2 * Math.PI);
-    else ctx.rect(64, 210, 896, 348);
+    const region = DRAWING_LAYOUT[surface];
+    if (surface === "top")
+      ctx.arc(region.centerX, region.centerY, region.radius, 0, 2 * Math.PI);
+    else ctx.rect(region.x, region.y, region.width, region.height);
     ctx.fillStyle = "#fff";
     ctx.fill();
     ctx.lineWidth = 2;

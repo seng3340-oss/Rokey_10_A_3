@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { MODEL_SIZE } from "./cakeDimensions";
 /**
  * 두 면의 캔버스 텍스처로 회전 가능한 케이크를 만들고 조작·정리 함수를 반환한다.
  * 일반 미리보기와 확인 창이 각각 호출하며, 입력 그림 자체는 변경하지 않는다.
@@ -32,35 +33,47 @@ export function cakeView(container, textures) {
       t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
     }
-    // 반지름 1을 기준으로 지름 15cm·높이 8cm의 비율(높이 약 1.0667)을 표현한다.
+    // A안 치수의 공통 축척을 사용하여 케이크 지름·높이와 판의 크기를 함께 맞춘다.
     // 열린 원통은 옆면만 담당하고, 윗면은 별도 원판으로 올려 서로 다른 그림을 입힌다.
     const side = new THREE.Mesh(
-      new THREE.CylinderGeometry(1, 1, 1.0667, 96, 1, true, Math.PI),
+      new THREE.CylinderGeometry(
+        MODEL_SIZE.cakeRadius,
+        MODEL_SIZE.cakeRadius,
+        MODEL_SIZE.cakeHeight,
+        96,
+        1,
+        true,
+        Math.PI,
+      ),
       new THREE.MeshStandardMaterial({ map: sideTexture, roughness: 0.85 }),
     );
-    side.position.y = 0.6;
+    side.position.y = MODEL_SIZE.cakeBottom + MODEL_SIZE.cakeHeight / 2;
     group.add(side);
     // 원판을 수평으로 눕혀 원통 위에 배치한다. 미세한 높이 차이로 겹침을 피한다.
     const top = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 96),
+      new THREE.CircleGeometry(MODEL_SIZE.cakeRadius, 96),
       new THREE.MeshStandardMaterial({ map: topTexture, roughness: 0.9 }),
     );
     top.rotation.x = -Math.PI / 2;
-    top.position.y = 1.134;
+    top.position.y = MODEL_SIZE.cakeTop + 0.001;
     group.add(top);
     // 받침과 가장자리 장식은 그림 텍스처와 분리해 케이크 윤곽을 유지한다.
     const board = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.16, 1.16, 0.0667, 96),
-      new THREE.MeshStandardMaterial({ color: 0xe6d0a5, roughness: 0.7 }),
+      new THREE.BoxGeometry(
+        MODEL_SIZE.boardWidth,
+        MODEL_SIZE.boardThickness,
+        MODEL_SIZE.boardDepth,
+      ),
+      new THREE.MeshStandardMaterial({ color: 0xf7f5ed, roughness: 0.7 }),
     );
-    board.position.y = 0.033;
+    board.position.y = MODEL_SIZE.boardThickness / 2;
     group.add(board);
     const rim = new THREE.Mesh(
       new THREE.TorusGeometry(0.991, 0.017, 8, 96),
       new THREE.MeshStandardMaterial({ color: 0xfffcf1, roughness: 1 }),
     );
     rim.rotation.x = Math.PI / 2;
-    rim.position.y = 1.131;
+    rim.position.y = MODEL_SIZE.cakeTop - 0.002;
     group.add(rim);
     // 밝은 받침과 그림자가 모형의 높이·바닥 위치를 구분한다.
     const shadowCanvas = document.createElement("canvas");
@@ -72,7 +85,10 @@ export function cakeView(container, textures) {
     sx.fillStyle = grad;
     sx.fillRect(0, 0, 128, 128);
     const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 3.6),
+      new THREE.PlaneGeometry(
+        MODEL_SIZE.boardWidth * 1.5,
+        MODEL_SIZE.boardDepth * 1.5,
+      ),
       new THREE.MeshBasicMaterial({
         map: new THREE.CanvasTexture(shadowCanvas),
         transparent: true,
@@ -86,7 +102,7 @@ export function cakeView(container, textures) {
     let theta = 0;
     let phi = 0.96;
     let drag = null;
-    const radius = 4.8;
+    const radius = 5.8;
     let frame = null;
     /** 예약된 한 프레임을 그린다. 보이지 않는 컨테이너는 크기를 얻을 때까지 건너뛴다. */
     function draw() {
@@ -98,13 +114,13 @@ export function cakeView(container, textures) {
       const size = renderer.getSize(new THREE.Vector2());
       if (size.x !== w || size.y !== h) renderer.setSize(w, h, false);
       camera.aspect = w / h;
-      // 케이크 중심 높이 0.6을 기준으로 카메라를 돌려 모형이 화면 중앙에 남게 한다.
+      // 공통 치수에서 계산한 중심 높이를 기준으로 카메라를 돌린다.
       camera.position.set(
         Math.sin(theta) * Math.sin(phi) * radius,
-        0.6 + Math.cos(phi) * radius,
+        MODEL_SIZE.focalHeight + Math.cos(phi) * radius,
         Math.cos(theta) * Math.sin(phi) * radius,
       );
-      camera.lookAt(0, 0.6, 0);
+      camera.lookAt(0, MODEL_SIZE.focalHeight, 0);
       camera.updateProjectionMatrix();
       renderer.render(scene, camera);
     }
