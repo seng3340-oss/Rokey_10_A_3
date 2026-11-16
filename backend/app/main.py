@@ -12,9 +12,9 @@ from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .database import Database
+from .bridge import router as bridge_router
 from .drawings import router as drawing_router
 from .orders import router as order_router
-
 
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data" / "orders.sqlite3"
@@ -69,6 +69,7 @@ class BodyLimitMiddleware:
 def create_app(
     database_path: Path | None = None,
     max_body_bytes: int = 2 * 1024 * 1024,
+    bridge_token: str | None = None,
 ) -> FastAPI:
     """테스트마다 별도 DB를 주입할 수 있도록 앱 생성과 DB 준비를 분리한다."""
     path = database_path or Path(os.environ.get("CAKE_DATABASE_PATH", DEFAULT_DATABASE))
@@ -83,13 +84,15 @@ def create_app(
     app = FastAPI(
         title="케이크 드로잉 주문 API",
         version="0.1.0",
-        description="그림 접수·저장·조회 전용. HMI/ROS 브리지와 로봇 실행은 미연결 상태입니다.",
+        description="그림 저장·조회와 인증된 ROS 브릿지 내부 연결. HMI는 정적이며 로봇 실행 노드는 미구현입니다.",
         lifespan=lifespan,
     )
     app.state.database = database
+    app.state.bridge_token = bridge_token or os.environ.get("CAKE_BRIDGE_TOKEN", "")
     app.add_middleware(BodyLimitMiddleware, max_bytes=max_body_bytes)
     app.include_router(drawing_router)
     app.include_router(order_router)
+    app.include_router(bridge_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
@@ -110,13 +113,15 @@ def create_app(
         logger.exception("주문 DB 처리 실패", exc_info=error)
         return JSONResponse(
             status_code=503,
-            content={"detail": "주문 저장소를 사용할 수 없습니다. 운영자에게 확인해주세요."},
+            content={
+                "detail": "주문 저장소를 사용할 수 없습니다. 운영자에게 확인해주세요."
+            },
         )
 
     @app.get("/api/health", tags=["서버 확인"])
     def health():
         """웹 서버 상태만 반환한다. ROS나 로봇이 연결된 것으로 오해하지 않게 한다."""
-        return {"status": "ok", "ros_connected": False}
+        return {"status": "ok", "ros_connected": False, "ros_status_monitored": False}
 
     return app
 

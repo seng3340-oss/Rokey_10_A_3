@@ -6,7 +6,11 @@ cake_decorator_interfaces/Stroke2D[] strokes_2d
 string surface_type
 geometry_msgs/Pose cake_pose
 float64 cake_radius
+# 윗면 중심에서 깊이 d일 때 r(d)=cake_radius+(cake_bottom_radius-cake_radius)*d/cake_height.
+float64 cake_bottom_radius
 float64 cake_height
+# 케이크 프레임 자세와 별도로 기록한 펜촉 TCP 자세를 전달한다.
+geometry_msgs/Quaternion tool_orientation
 ---
 # Response: 경로 계산 결과다. 아직 계산 서비스 서버는 구현하지 않는다.
 bool success

@@ -20,7 +20,9 @@ def database_path(tmp_path):
 @pytest.fixture
 def client(database_path):
     """앱의 시작·종료 절차까지 포함해 요청을 시험한다."""
-    with TestClient(create_app(database_path=database_path)) as client:
+    with TestClient(
+        create_app(database_path=database_path, bridge_token="test-secret")
+    ) as client:
         yield client
 
 
@@ -39,6 +41,23 @@ def drawing():
             }
         ],
     }
+
+
+def finish_order(client):
+    """실제 내부 API로 주문을 인수·완료해 다음 접수를 준비한다."""
+    headers = {"Authorization": "Bearer test-secret"}
+    claim = client.post("/internal/bridge/claim", headers=headers).json()
+    for kind in ("dispatching", "accepted", "completed"):
+        response = client.post(
+            f"/internal/bridge/orders/{claim['order_id']}/events",
+            headers=headers,
+            json={
+                "event_id": f"{claim['order_id']}-{kind}",
+                "claim_token": claim["claim_token"],
+                "kind": kind,
+            },
+        )
+        assert response.status_code == 200
 
 
 @pytest.mark.parametrize("surface", ["top", "side"])
@@ -113,27 +132,30 @@ def test_reject_total_point_limit(client, drawing):
 
 def test_orders_survive_restart_and_number_does_not_repeat(database_path, drawing):
     """서버 재시작이 주문을 지우거나 번호를 재사용하지 않는지 확인한다."""
-    with TestClient(create_app(database_path=database_path)) as first:
+    with TestClient(
+        create_app(database_path=database_path, bridge_token="test-secret")
+    ) as first:
         first_id = first.post("/api/drawing", json=drawing).json()["order_id"]
-    with TestClient(create_app(database_path=database_path)) as restarted:
+        finish_order(first)
+    with TestClient(
+        create_app(database_path=database_path, bridge_token="test-secret")
+    ) as restarted:
         assert restarted.get(f"/api/orders/{first_id}").status_code == 200
         second_id = restarted.post("/api/drawing", json=drawing).json()["order_id"]
         assert first_id != second_id
 
 
-def test_concurrent_submissions_have_distinct_ids(client, drawing):
-    """동시 요청의 주문 번호가 겹치지 않고 모두 저장되는지 확인한다."""
-    # 여러 요청이 동시에 들어와도 일련번호와 주문 저장은 한 트랜잭션으로 처리한다.
+def test_rejected_submissions_do_not_consume_order_numbers(client, drawing):
+    """활성 주문 때문에 거절된 요청은 번호를 소비하지 않는다."""
+    first = client.post("/api/drawing", json=drawing).json()["order_id"]
     with ThreadPoolExecutor(max_workers=6) as executor:
         responses = list(
-            executor.map(
-                lambda _: client.post("/api/drawing", json=drawing),
-                range(12),
-            )
+            executor.map(lambda _: client.post("/api/drawing", json=drawing), range(12))
         )
-    assert all(response.status_code == 201 for response in responses)
-    assert len({response.json()["order_id"] for response in responses}) == 12
-    assert client.get("/api/orders").json()["total"] == 12
+    assert all(response.status_code == 409 for response in responses)
+    finish_order(client)
+    second = client.post("/api/drawing", json=drawing).json()["order_id"]
+    assert int(second.rsplit("-", 1)[1]) == int(first.rsplit("-", 1)[1]) + 1
 
 
 def test_unknown_order_and_pagination(client, drawing):
@@ -141,6 +163,7 @@ def test_unknown_order_and_pagination(client, drawing):
     assert client.get("/api/orders/ORD-MISSING").status_code == 404
     for _ in range(3):
         client.post("/api/drawing", json=drawing)
+        finish_order(client)
     page = client.get("/api/orders?limit=1&offset=1").json()
     assert page["total"] == 3
     assert len(page["items"]) == 1
@@ -150,7 +173,9 @@ def test_unknown_order_and_pagination(client, drawing):
 
 def test_body_limit_applies_before_json_parsing(database_path):
     """본문 크기 초과가 JSON 파싱 전에 차단되는지 확인한다."""
-    with TestClient(create_app(database_path=database_path, max_body_bytes=512)) as client:
+    with TestClient(
+        create_app(database_path=database_path, max_body_bytes=512)
+    ) as client:
         response = client.post("/api/drawing", content=b"x" * 513)
         assert response.status_code == 413
         assert client.get("/api/orders").json()["total"] == 0

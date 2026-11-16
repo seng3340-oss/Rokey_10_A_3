@@ -9,3 +9,8 @@
 # 콜백 안에서 응답 처리를 막지 않도록 비동기 호출과 콜백 그룹을 설계한다.
 # 동시 주문 실행 제한·실패·취소·파지 중 복구 규칙은 구현 전에 확정한다.
 # 순서 관리만 담당하며 좌표 계산과 DRL API 호출은 각각 DP·RE에 맡긴다.
+
+# 현재 실측 계약: CakeOrder.cake_params를 DP 요청에 매핑한다.
+# radius/bottom_radius/height는 각각 cake_radius/cake_bottom_radius/cake_height로 전달한다.
+# cake_pose.position은 BASE 윗면 중심, cake_pose.orientation은 케이크 프레임 방향이다.
+# tool_orientation은 별도 필드로 전달한다. 펜 방향을 케이크 프레임 회전으로 쓰지 않는다.

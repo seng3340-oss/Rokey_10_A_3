@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 # 수치를 문자열·불리언에서 자동 변환하지 않는다. NaN/무한대도 좌표로 받지 않는다.
 Pixel = Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]
 CanvasSize = Annotated[int, Field(strict=True, gt=0, le=8192)]
@@ -66,12 +65,31 @@ class DrawingReceipt(ContractModel):
     status: Literal["received"] = "received"
 
 
-class OrderSummary(DrawingReceipt):
+OrderState = Literal[
+    "received",
+    "claimed",
+    "dispatching",
+    "running",
+    "completed",
+    "failed",
+    "rejected",
+    "uncertain",
+    "resolved",
+]
+
+
+class OrderSummary(ContractModel):
     """목록에는 큰 좌표 배열을 제외하고 주문을 식별하는 정보만 싣는다."""
 
+    order_id: str
+    status: OrderState
     drawing_surface: Literal["top", "side"]
     created_at: str
-    robot_dispatched: Literal[False] = False
+    # None은 전송·접수 여부가 불명확함을 뜻하며 미전송으로 단정하지 않는다.
+    robot_dispatched: bool | None = False
+    phase: str = ""
+    progress_pct: float = 0.0
+    message: str = ""
 
 
 class OrderDetail(OrderSummary):

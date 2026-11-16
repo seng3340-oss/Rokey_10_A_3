@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import json
+import hashlib
 import sqlite3
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -9,20 +10,44 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .database import Database
+from .cake import load_cake_settings
 from .schemas import DrawingRequest, OrderDetail, OrderPage, OrderSummary
-
 
 router = APIRouter(prefix="/api/orders", tags=["주문 조회"])
 
 
-def save_order(database: Database, drawing: DrawingRequest) -> str:
+def save_order(
+    database: Database, drawing: DrawingRequest, request_key: str | None = None
+) -> str:
     """날짜별 주문 번호와 그림 저장을 하나의 트랜잭션으로 묶는다."""
+    payload_hash = hashlib.sha256(drawing.model_dump_json().encode()).hexdigest()
     now = datetime.now(ZoneInfo("Asia/Seoul"))
     order_date = now.strftime("%Y%m%d")
 
     with database.connection() as connection:
         # 동시 요청이 같은 번호를 읽지 않도록 번호 조회보다 먼저 쓰기 잠금을 얻는다.
         connection.execute("BEGIN IMMEDIATE")
+        # 동일 요청은 활성 슬롯 검사보다 먼저 조회해 응답 유실 후에도 같은 번호를 돌려준다.
+        if request_key:
+            previous = connection.execute(
+                "SELECT order_id, payload_hash FROM order_execution WHERE request_key=?",
+                (request_key,),
+            ).fetchone()
+            if previous:
+                if previous["payload_hash"] != payload_hash:
+                    raise HTTPException(
+                        409, "같은 요청 키로 다른 그림을 제출할 수 없습니다."
+                    )
+                return previous["order_id"]
+        active = connection.execute(
+            "SELECT order_id FROM order_execution WHERE state NOT IN "
+            "('completed','failed','rejected','resolved') LIMIT 1"
+        ).fetchone()
+        if active:
+            raise HTTPException(
+                409,
+                f"현재 주문 {active['order_id']} 처리 중입니다. 새 주문을 받을 수 없습니다.",
+            )
         connection.execute(
             """
             INSERT INTO daily_sequences(order_date, last_number) VALUES (?, 1)
@@ -42,7 +67,25 @@ def save_order(database: Database, drawing: DrawingRequest) -> str:
             INSERT INTO orders(order_id, drawing_surface, drawing_json, created_at)
             VALUES (?, ?, ?, ?)
             """,
-            (order_id, drawing.drawing_surface, drawing.model_dump_json(), now.isoformat()),
+            (
+                order_id,
+                drawing.drawing_surface,
+                drawing.model_dump_json(),
+                now.isoformat(),
+            ),
+        )
+        # 저장과 활성 슬롯 확보를 같은 트랜잭션으로 묶어 동시 접수를 하나로 제한한다.
+        connection.execute(
+            "INSERT INTO order_execution "
+            "(order_id,state,request_key,payload_hash,cake_json,updated_at) VALUES (?,?,?,?,?,?)",
+            (
+                order_id,
+                "received",
+                request_key,
+                payload_hash,
+                json.dumps(load_cake_settings()),
+                now.isoformat(),
+            ),
         )
         connection.commit()
 
@@ -55,8 +98,15 @@ def summary_from_row(row: sqlite3.Row) -> OrderSummary:
         order_id=row["order_id"],
         drawing_surface=row["drawing_surface"],
         created_at=row["created_at"],
-        status=row["status"],
-        robot_dispatched=False,
+        status=row["execution_state"],
+        phase=row["phase"],
+        progress_pct=row["progress_pct"],
+        message=row["message"],
+        robot_dispatched=(
+            None
+            if row["execution_state"] in ("dispatching", "uncertain")
+            else row["execution_state"] in ("running", "completed", "failed")
+        ),
     )
 
 
@@ -71,8 +121,8 @@ def list_orders(
         connection.execute("BEGIN")
         total = connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
         rows = connection.execute(
-            "SELECT order_id, drawing_surface, created_at, status "
-            "FROM orders ORDER BY id DESC LIMIT ? OFFSET ?",
+            "SELECT o.order_id,o.drawing_surface,o.created_at,e.state AS execution_state,e.phase,e.progress_pct,e.message FROM orders o "
+            "JOIN order_execution e USING(order_id) ORDER BY o.id DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
 
@@ -89,7 +139,8 @@ def read_order(order_id: str, request: Request):
     """저장된 주문과 원본 그림을 조회하며 존재하지 않는 주문은 404로 구분한다."""
     with request.app.state.database.connection() as connection:
         row = connection.execute(
-            "SELECT * FROM orders WHERE order_id = ?",
+            "SELECT o.*, e.state AS execution_state,e.phase,e.progress_pct,e.message FROM orders o "
+            "JOIN order_execution e USING(order_id) WHERE o.order_id = ?",
             (order_id,),
         ).fetchone()
 
