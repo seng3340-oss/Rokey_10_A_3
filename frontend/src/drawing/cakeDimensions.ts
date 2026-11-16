@@ -1,9 +1,8 @@
 import measuredCake from "../../../config/test_cake.json" with { type: "json" };
 
-/** 실측 플라스틱 원뿔대와 판 치수. 실행 위치·TCP 영점을 지정하는 값은 아니다. */
+/** 확정 원통형 케이크와 판 치수. 실행 위치·TCP 영점을 지정하는 값은 아니다. */
 export const CAKE_DIMENSIONS = Object.freeze({
-  diameterMm: measuredCake.top_diameter_mm,
-  bottomDiameterMm: measuredCake.bottom_diameter_mm,
+  diameterMm: measuredCake.diameter_mm,
   heightMm: measuredCake.height_mm,
   boardWidthMm: measuredCake.board_width_mm,
   boardDepthMm: measuredCake.board_depth_mm,
@@ -14,17 +13,11 @@ export const CAKE_DIMENSIONS = Object.freeze({
 const canvasWidth = 1024;
 const canvasHeight = 768;
 const sideWidth = 896;
-// 편집은 평균 둘레의 띠로 표시한다. 실제 3D 표면은 높이에 따라 반지름이 달라진다.
-const circumferenceMm =
-  (Math.PI * (CAKE_DIMENSIONS.diameterMm + CAKE_DIMENSIONS.bottomDiameterMm)) /
-  2;
-const slantHeightMm = Math.hypot(
-  CAKE_DIMENSIONS.heightMm,
-  (CAKE_DIMENSIONS.bottomDiameterMm - CAKE_DIMENSIONS.diameterMm) / 2,
-);
-const sideHeight = (sideWidth * slantHeightMm) / circumferenceMm;
+// 원통의 전체 둘레와 높이를 그대로 펼친 띠 비율이다.
+const circumferenceMm = Math.PI * CAKE_DIMENSIONS.diameterMm;
+const sideHeight = (sideWidth * CAKE_DIMENSIONS.heightMm) / circumferenceMm;
 
-/** 옆면은 원뿔대의 평균 둘레를 기준으로 표시한 편집 띠다. 로봇이 전 둘레에 접근 가능하다는 뜻은 아니다. */
+/** 옆면은 원통의 전체 둘레를 펼친 편집 띠다. 로봇이 전 둘레에 접근 가능하다는 뜻은 아니다. */
 export const DRAWING_LAYOUT = Object.freeze({
   width: canvasWidth,
   height: canvasHeight,
@@ -51,8 +44,6 @@ const boardThickness = CAKE_DIMENSIONS.boardThicknessMm / mmPerUnit;
 const cakeHeight = CAKE_DIMENSIONS.heightMm / mmPerUnit;
 export const MODEL_SIZE = Object.freeze({
   cakeRadius: 1,
-  cakeBottomRadius:
-    CAKE_DIMENSIONS.bottomDiameterMm / CAKE_DIMENSIONS.diameterMm,
   cakeHeight,
   boardWidth: CAKE_DIMENSIONS.boardWidthMm / mmPerUnit,
   boardDepth: CAKE_DIMENSIONS.boardDepthMm / mmPerUnit,

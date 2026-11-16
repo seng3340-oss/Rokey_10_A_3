@@ -1,26 +1,28 @@
-# 작업 관리 노드가 사용할 설정 파일의 자리. 현재는 주석만 있고 실행 설정은 없다.
-# 기존 가상 작업대의 workcell.yaml이나 실물 티칭 좌표를 덮어쓰지 않는다.
-# 구현 시 노드 이름 아래 ros__parameters 형식으로 필요한 값을 등록한다.
-# 예정 항목: 케이크 중심·반지름·높이, 픽업·작업대·펜 거치대·출고 위치.
-# 접근 높이·필기 오프셋·속도는 영점 기준과 단위가 확정된 후 추가한다.
-# CakeOrder.cake_params와 이 설정 중 무엇을 우선할지 먼저 합의해야 한다.
-# 검증하지 않은 좌표나 임시 속도를 실제 로봇 기본값으로 넣지 않는다.
+# 원래의 노드별 ros__parameters 구조를 유지한다.
+# ROS 케이크 위치·치수·접근 거리는 m, 방향은 rad, 선속도는 mm/s다.
+# 케이크 중심은 BASE 기준 윗면 중심이며 실제 위치는 접촉 확인한 TCP로 정한다.
+# 아직 측정하지 않은 픽업·거치대·출고 좌표는 임의의 0으로 채우지 않는다.
 drawing_path_node:
   ros__parameters:
-    # 케이크 치수
-    cake_center_x: 0.0      # 실물 티칭 후 교체
-    cake_center_y: 0.0
-    cake_top_z: 0.0
-    cake_radius: 0.0
-    cake_height: 0.0
+    # 확정된 3D 프린트 원통: 지름100mm, 높이80mm.
+    cake_radius: 0.05
+    cake_height: 0.08
     cake_orientation: 0.0
-    # 변환 설정
+    # 변환 설정은 원래 원통형 노드 기준 단위로 복원한다.
     drawing_speed: 20.0
     travel_speed: 50.0
-    ...
+    approach_height: 0.01
+    drawing_z_offset: 0.0
+    side_margin_ratio: 0.05
+    # cake_center_x/y와 cake_top_z는 티칭 전이므로 기본 실행 좌표로 넣지 않는다.
+    # TM이 기록한 윗면 중심을 GenerateTrajectory.cake_pose로 전달한다.
 
 robot_executor_node:
   ros__parameters:
-    # 로봇/그리퍼 설정
-    # 고정 위치: 픽업, 작업대, 펜 거치대, 출고
-    pickup_x/y/z, worktable_x/y/z, tool_stand_x/y/z, delivery_x/y/z
+    service_timeout: 5.0
+    # 아래 값은 기존 접근·도구 설정이다. 실제 파지·운반은 별도 검증한다.
+    approach_height: 0.05
+    pen_grip_width: 10.0
+    pen_grip_force: 20.0
+    gripper_open_width: 100.0
+    # 픽업·작업대·펜 거치대·출고 좌표는 실물 티칭 후 추가한다.

@@ -13,10 +13,11 @@ float64 cake_radius                                 # 케이크 반지름 (m)
 float64 cake_height                                 # 케이크 높이 (m)
 float64 canvas_width                                # 캔버스 가로 크기 (px)
 float64 canvas_height                               # 캔버스 세로 크기 (px)
----
-# ─── Response ───
+
+# DP → TM. 위치 m·자세 쿼터니언의 경로를 반환한다.
 bool success
 cake_decorator_interfaces/Waypoint3D[] waypoints_3d
+# waypoints_3d[i].pen_down과 길이·값이 일치해야 한다.
 bool[] pen_states
 float64 estimated_duration_sec
 string error_msg

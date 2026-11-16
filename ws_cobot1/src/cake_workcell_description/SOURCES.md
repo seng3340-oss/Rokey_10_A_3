@@ -1,5 +1,9 @@
 # 모델 출처와 단위
 
+현재 기준은 **지름100mm·높이80mm 원통, 원본 픽셀 입력, 윗면 중심**입니다.
+[최신 통신·설정 규격](../../../docs/CYLINDER_PIXEL_CONTRACT.md)을 우선합니다. 아래 원뿔대·이전 치수 설명은 과거 테스트 기록입니다.
+
+
 - A안 모델: 강승묵님, 2026-11-15 13:15 KST, a그룹-3조-실무프로젝트의 ros2_pkg.zip.
 - 메시 링크: https://app.slack.com/archives/C0CGDTN7BPE/p1794716120726689
 - ZIP SHA-256: 31929ba8db6ee898a856b377e09cfe83e48335ab1a4c28ed10283823a3db7104

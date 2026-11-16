@@ -1,4 +1,4 @@
-"""공통 실측 설정으로 원뿔대 STL과 케이크판의 시각·충돌 형상을 갱신한다."""
+"""공통 원통형 설정으로 케이크 STL과 케이크판의 시각·충돌 형상을 갱신한다."""
 
 import json
 import math
@@ -32,8 +32,7 @@ def triangle(a, b, c):
 def generate():
     """원본 A안 자산은 보존하고 새 실측 모델만 생성한다. 위치는 임시 시각화 배치다."""
     cake = json.loads((ROOT / "config/test_cake.json").read_text())
-    top = cake["top_diameter_mm"] / 2000
-    bottom = cake["bottom_diameter_mm"] / 2000
+    top = bottom = cake["diameter_mm"] / 2000
     height = cake["height_mm"] / 1000
     width = cake["board_width_mm"] / 1000
     depth = cake["board_depth_mm"] / 1000

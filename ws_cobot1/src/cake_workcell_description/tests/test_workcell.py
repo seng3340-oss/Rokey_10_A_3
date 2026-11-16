@@ -72,10 +72,10 @@ if __name__ == "__main__":
 
 
 class MeasuredCakeTests(unittest.TestCase):
-    """원본 자산 보존 검사와 별도로 실측 원뿔대·판의 높이 관계를 확인한다."""
+    """원본 자산 보존 검사와 별도로 실측 원통·판의 높이 관계를 확인한다."""
 
     def test_frustum_mesh_and_board_match_shared_dimensions(self):
-        """상면과 밑면 반지름이 서로 다르고 케이크 밑면이 판 위에 놓여야 한다."""
+        """상면과 밑면 반지름이 같고 케이크 밑면이 판 위에 놓여야 한다."""
         config = json.loads((ROOT.parents[2] / "config/test_cake.json").read_text())
         vertices = [
             tuple(map(float, line.split()[1:]))
@@ -87,11 +87,11 @@ class MeasuredCakeTests(unittest.TestCase):
         bottom = [p for p in vertices if p[2] == 0]
         self.assertAlmostEqual(
             max((p[0] ** 2 + p[1] ** 2) ** 0.5 for p in top),
-            config["top_diameter_mm"] / 2000,
+            config["diameter_mm"] / 2000,
         )
         self.assertAlmostEqual(
             max((p[0] ** 2 + p[1] ** 2) ** 0.5 for p in bottom),
-            config["bottom_diameter_mm"] / 2000,
+            config["diameter_mm"] / 2000,
         )
         robot = ET.fromstring(
             subprocess.check_output(

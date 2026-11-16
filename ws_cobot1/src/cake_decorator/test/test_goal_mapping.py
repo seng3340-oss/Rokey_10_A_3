@@ -3,7 +3,7 @@
 import math
 import unittest
 
-from cake_decorator.goal_mapping import build_goal, radius_at_depth
+from cake_decorator.goal_mapping import build_goal
 
 
 class GoalTests(unittest.TestCase):
@@ -25,9 +25,8 @@ class GoalTests(unittest.TestCase):
                 ],
             },
             "cake": {
-                "top_diameter_mm": 113.5,
-                "bottom_diameter_mm": 120.0,
-                "height_mm": 79.0,
+                "diameter_mm": 100.0,
+                "height_mm": 80.0,
                 "board_width_mm": 179.0,
                 "board_depth_mm": 179.0,
                 "board_thickness_mm": 2.0,
@@ -40,8 +39,7 @@ class GoalTests(unittest.TestCase):
         """TCP Z는 상면 중심이다. 높이·판 두께를 다시 더하지 않는다."""
         goal = build_goal(self.claim(), [363.9, 5.4, 75.25, 0.0, 180.0, 0.0])
         self.assertAlmostEqual(goal.cake_params.center.z, 0.07525)
-        self.assertAlmostEqual(goal.cake_params.radius, 0.05675)
-        self.assertAlmostEqual(goal.cake_params.bottom_radius, 0.06)
+        self.assertAlmostEqual(goal.cake_params.radius, 0.05)
         self.assertAlmostEqual(goal.cake_params.board_thickness, 0.002)
         self.assertEqual(goal.cake_params.reference_frame, "base")
         self.assertAlmostEqual(goal.cake_params.tool_orientation.y, 1.0)
@@ -50,7 +48,6 @@ class GoalTests(unittest.TestCase):
         self.assertNotIn(
             "is_closed", goal.drawing_paths[0].strokes[0].get_fields_and_field_types()
         )
-        self.assertAlmostEqual(radius_at_depth(goal.cake_params, 0.079), 0.06)
 
     def test_invalid_or_missing_reference_never_becomes_zero_pose(self):
         """영점 누락·NaN을 BASE 원점으로 대체하지 않는다."""

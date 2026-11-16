@@ -3,3 +3,4 @@
 string stroke_id                                    # 획 식별자
 string color                                        # 획 색상 (예: "black")
 cake_decorator_interfaces/Point2D[] points          # 캔버스 픽셀 좌표 리스트
+
