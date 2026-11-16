@@ -1,0 +1,607 @@
+"""drawing_path_node.py 테스트 — 경로 변환 서비스 노드.
+
+ROS 의존성을 mock하여 pytest로 실행 가능.
+  pytest test_drawing_path_node.py -v
+"""
+
+from __future__ import annotations
+
+import math
+import sys
+from dataclasses import dataclass, field
+from types import ModuleType
+from unittest.mock import MagicMock
+
+import pytest
+
+
+# =====================================================================
+# ROS mock 설정 (ROS 없이 테스트)
+# =====================================================================
+
+
+def _setup_ros_mocks():
+    """ROS2 패키지를 mock으로 대체한다."""
+
+    # geometry_msgs mock
+    @dataclass
+    class MockPoint:
+        x: float = 0.0
+        y: float = 0.0
+        z: float = 0.0
+
+    @dataclass
+    class MockQuaternion:
+        x: float = 0.0
+        y: float = 0.0
+        z: float = 0.0
+        w: float = 1.0
+
+    @dataclass
+    class MockPose:
+        position: MockPoint = field(default_factory=MockPoint)
+        orientation: MockQuaternion = field(default_factory=MockQuaternion)
+
+    geometry_msgs_msg = ModuleType('geometry_msgs.msg')
+    geometry_msgs_msg.Point = MockPoint
+    geometry_msgs_msg.Quaternion = MockQuaternion
+    geometry_msgs_msg.Pose = MockPose
+    sys.modules['geometry_msgs'] = ModuleType('geometry_msgs')
+    sys.modules['geometry_msgs.msg'] = geometry_msgs_msg
+
+    # cake_decorator_interfaces mock
+    @dataclass
+    class MockWaypoint3D:
+        pose: MockPose = field(default_factory=MockPose)
+        speed: float = 0.0
+        pen_down: bool = False
+        contact_force: float = 0.0
+
+    @dataclass
+    class MockPointMM:
+        x: float = 0.0
+        y: float = 0.0
+
+    @dataclass
+    class MockPointMM3D:
+        x: float = 0.0
+        y: float = 0.0
+        z: float = 0.0
+
+    @dataclass
+    class MockStrokeMM:
+        stroke_id: str = ''
+        color: str = ''
+        original_mm: list = field(default_factory=list)
+        simplified_mm: list = field(default_factory=list)
+        target_mm: list = field(default_factory=list)
+
+    class MockGenerateTrajectory:
+        class Request:
+            pass
+
+        class Response:
+            def __init__(self):
+                self.success = False
+                self.waypoints_3d = []
+                self.pen_states = []
+                self.estimated_duration_sec = 0.0
+                self.error_msg = ''
+
+    interfaces_msg = ModuleType('cake_decorator_interfaces.msg')
+    interfaces_msg.Waypoint3D = MockWaypoint3D
+    interfaces_msg.PointMM = MockPointMM
+    interfaces_msg.PointMM3D = MockPointMM3D
+    interfaces_msg.StrokeMM = MockStrokeMM
+
+    interfaces_srv = ModuleType('cake_decorator_interfaces.srv')
+    interfaces_srv.GenerateTrajectory = MockGenerateTrajectory
+
+    sys.modules['cake_decorator_interfaces'] = ModuleType('cake_decorator_interfaces')
+    sys.modules['cake_decorator_interfaces.msg'] = interfaces_msg
+    sys.modules['cake_decorator_interfaces.srv'] = interfaces_srv
+
+    # rclpy mock
+    mock_rclpy = MagicMock()
+    sys.modules['rclpy'] = mock_rclpy
+    sys.modules['rclpy.node'] = MagicMock()
+
+    return {
+        'Point': MockPoint,
+        'Quaternion': MockQuaternion,
+        'Pose': MockPose,
+        'Waypoint3D': MockWaypoint3D,
+        'PointMM': MockPointMM,
+        'PointMM3D': MockPointMM3D,
+        'StrokeMM': MockStrokeMM,
+        'GenerateTrajectory': MockGenerateTrajectory,
+    }
+
+
+# mock 먼저 설정
+_mocks = _setup_ros_mocks()
+
+# 이제 import 가능
+# drawing_geometry는 순수 Python이므로 직접 import
+from cake_decorator.drawing_geometry import FrustumCake
+
+# drawing_path_node의 static 메서드·유틸만 테스트
+# (Node 생성은 ROS 초기화가 필요하므로 mock에서는 static만 테스트)
+# 대신 핵심 변환 로직을 직접 테스트
+
+
+# =====================================================================
+# 픽스처
+# =====================================================================
+
+
+@pytest.fixture
+def mocks():
+    return _mocks
+
+
+@pytest.fixture
+def frustum_cake():
+    return FrustumCake(
+        r_top=80.0, r_bottom=120.0, height=100.0,
+        cx=300.0, cy=200.0, cz=50.0,
+    )
+
+
+@pytest.fixture
+def cylinder_cake():
+    return FrustumCake(
+        r_top=100.0, r_bottom=100.0, height=80.0,
+        cx=300.0, cy=200.0, cz=50.0,
+    )
+
+
+# =====================================================================
+# _extract_points 테스트
+# =====================================================================
+
+
+class TestExtractPoints:
+    """스트로크에서 좌표 추출 우선순위 테스트."""
+
+    def test_target_mm_priority(self, mocks):
+        """target_mm이 있으면 최우선."""
+        StrokeMM = mocks['StrokeMM']
+        PointMM = mocks['PointMM']
+        PointMM3D = mocks['PointMM3D']
+
+        stroke = StrokeMM(
+            original_mm=[PointMM(1, 2), PointMM(3, 4)],
+            simplified_mm=[PointMM(5, 6)],
+            target_mm=[PointMM3D(10, 20, 30), PointMM3D(40, 50, 60)],
+        )
+
+        pts = _extract_points(stroke)
+        assert len(pts) == 2
+        assert pts[0] == (10.0, 20.0)
+        assert pts[1] == (40.0, 50.0)
+
+    def test_simplified_mm_fallback(self, mocks):
+        """target_mm 없으면 simplified_mm."""
+        StrokeMM = mocks['StrokeMM']
+        PointMM = mocks['PointMM']
+
+        stroke = StrokeMM(
+            original_mm=[PointMM(1, 2)],
+            simplified_mm=[PointMM(5, 6), PointMM(7, 8)],
+            target_mm=[],
+        )
+
+        pts = _extract_points(stroke)
+        assert len(pts) == 2
+        assert pts[0] == (5.0, 6.0)
+
+    def test_original_mm_fallback(self, mocks):
+        """둘 다 없으면 original_mm."""
+        StrokeMM = mocks['StrokeMM']
+        PointMM = mocks['PointMM']
+
+        stroke = StrokeMM(
+            original_mm=[PointMM(1, 2), PointMM(3, 4)],
+            simplified_mm=[],
+            target_mm=[],
+        )
+
+        pts = _extract_points(stroke)
+        assert len(pts) == 2
+        assert pts[0] == (1.0, 2.0)
+
+    def test_empty_stroke(self, mocks):
+        """모두 비어있으면 빈 리스트."""
+        stroke = mocks['StrokeMM']()
+        pts = _extract_points(stroke)
+        assert pts == []
+
+
+# =====================================================================
+# TOP 면 변환 테스트
+# =====================================================================
+
+
+class TestTopConversion:
+    """TOP 면 웨이포인트 생성 테스트."""
+
+    def test_top_waypoint_count(self, frustum_cake, mocks):
+        """단일 획(3점) → 웨이포인트 5개 (접근+접촉+2점+이탈)."""
+        pts = [(0, 0), (10, 0), (20, 0)]
+        waypoints, pen_states = _convert_stroke_top(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # 접근(1) + 접촉(1) + 나머지(2) + 이탈(1) = 5
+        assert len(waypoints) == 5
+        assert len(pen_states) == 5
+
+    def test_top_pen_states(self, frustum_cake, mocks):
+        """TOP: False, True, True, ..., False 패턴."""
+        pts = [(0, 0), (10, 0), (20, 0)]
+        _, pen_states = _convert_stroke_top(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        assert pen_states[0] is False   # 접근
+        assert pen_states[1] is True    # 접촉
+        assert pen_states[2] is True    # 그리기
+        assert pen_states[3] is True    # 그리기
+        assert pen_states[4] is False   # 이탈
+
+    def test_top_z_approach(self, frustum_cake, mocks):
+        """접근 위치 Z = 윗면 + approach_height."""
+        pts = [(0, 0)]
+        waypoints, _ = _convert_stroke_top(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # 윗면 Z = 50 + 100 = 150mm → m = 0.15
+        # 접근 Z = (150 + 10) / 1000 = 0.16
+        assert waypoints[0].pose.position.z == pytest.approx(0.16)
+
+    def test_top_z_contact(self, frustum_cake, mocks):
+        """접촉 위치 Z = 윗면 + z_offset."""
+        pts = [(0, 0)]
+        waypoints, _ = _convert_stroke_top(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=-0.5,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # 접촉 Z = (150 + (-0.5)) / 1000 = 0.1495
+        assert waypoints[1].pose.position.z == pytest.approx(0.1495)
+
+    def test_top_xy_absolute(self, frustum_cake, mocks):
+        """TOP: XY = cake_center + offset → m 단위."""
+        pts = [(10, -5)]
+        waypoints, _ = _convert_stroke_top(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # cake_x=300, pt_x=10 → 310mm → 0.31m
+        assert waypoints[0].pose.position.x == pytest.approx(0.31)
+        # cake_y=200, pt_y=-5 → 195mm → 0.195m
+        assert waypoints[0].pose.position.y == pytest.approx(0.195)
+
+    def test_top_speeds(self, frustum_cake, mocks):
+        """접근/이탈 = travel_speed, 접촉 = draw*0.5, 그리기 = draw."""
+        pts = [(0, 0), (10, 0)]
+        waypoints, _ = _convert_stroke_top(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        assert waypoints[0].speed == pytest.approx(80.0)   # 접근
+        assert waypoints[1].speed == pytest.approx(10.0)    # 접촉 (20*0.5)
+        assert waypoints[2].speed == pytest.approx(20.0)    # 그리기
+        assert waypoints[3].speed == pytest.approx(80.0)    # 이탈
+
+
+# =====================================================================
+# SIDE 면 변환 테스트
+# =====================================================================
+
+
+class TestSideConversion:
+    """SIDE 면 웨이포인트 생성 테스트."""
+
+    def test_side_waypoint_count(self, frustum_cake, mocks):
+        """단일 획(3점) → 웨이포인트 5개."""
+        pts = [(0, 50), (20, 50), (40, 50)]
+        waypoints, pen_states = _convert_stroke_side(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        assert len(waypoints) == 5
+
+    def test_side_pen_states(self, frustum_cake, mocks):
+        """SIDE: 동일한 pen 패턴."""
+        pts = [(0, 50), (20, 50)]
+        _, pen_states = _convert_stroke_side(
+            pts, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        assert pen_states[0] is False   # 접근
+        assert pen_states[1] is True    # 접촉
+        assert pen_states[2] is True    # 그리기
+        assert pen_states[3] is False   # 이탈
+
+    def test_side_approach_along_normal(self, cylinder_cake, mocks):
+        """접근 위치가 법선 방향으로 offset됨."""
+        pts = [(0, 40)]
+        waypoints, _ = _convert_stroke_side(
+            pts, cylinder_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # x_arc=0 → 법선이 +X 방향
+        # 표면: cx + r = 300 + 100 = 400mm → 0.4m
+        # 접근: 400 + 10 = 410mm → 0.41m
+        assert waypoints[0].pose.position.x == pytest.approx(0.41)
+
+    def test_side_contact_on_surface(self, cylinder_cake, mocks):
+        """접촉 위치가 표면 위."""
+        pts = [(0, 40)]
+        waypoints, _ = _convert_stroke_side(
+            pts, cylinder_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # 접촉: 표면 위 (offset=0)
+        # x = 300 + 100 = 400mm → 0.4m
+        assert waypoints[1].pose.position.x == pytest.approx(0.4)
+
+    def test_side_frustum_radius_varies(self, frustum_cake, mocks):
+        """원뿔대: 높이에 따라 표면 거리가 다름."""
+        # 바닥(y=0, r=120) vs 중간(y=50, r=100)
+        pts_bot = [(0, 0)]
+        pts_mid = [(0, 50)]
+
+        wp_bot, _ = _convert_stroke_side(
+            pts_bot, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        wp_mid, _ = _convert_stroke_side(
+            pts_mid, frustum_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+
+        # 바닥 접촉점이 더 멀리 (r_bottom > r(50))
+        assert wp_bot[1].pose.position.x > wp_mid[1].pose.position.x
+
+    def test_side_orientation_varies(self, cylinder_cake, mocks):
+        """SIDE: 점마다 다른 쿼터니언."""
+        pts = [(0, 40), (50, 40)]
+        waypoints, _ = _convert_stroke_side(
+            pts, cylinder_cake,
+            approach_h=10.0, z_offset=0.0,
+            draw_spd=20.0, travel_spd=80.0, force=0.5,
+        )
+        # 접촉 점(index 1)과 그리기 점(index 2)의 orientation이 다름
+        q1 = waypoints[1].pose.orientation
+        q2 = waypoints[2].pose.orientation
+        assert (q1.x, q1.y, q1.z, q1.w) != (q2.x, q2.y, q2.z, q2.w)
+
+
+# =====================================================================
+# 시간 추정 테스트
+# =====================================================================
+
+
+class TestEstimateDuration:
+    """소요 시간 추정 테스트."""
+
+    def test_empty(self, mocks):
+        """빈 웨이포인트 → 0초."""
+        assert _estimate_duration([]) == pytest.approx(0.0)
+
+    def test_single(self, mocks):
+        """웨이포인트 1개 → 0초."""
+        Waypoint3D = mocks['Waypoint3D']
+        Pose = mocks['Pose']
+        Point = mocks['Point']
+        wp = Waypoint3D(pose=Pose(position=Point(0, 0, 0)), speed=20.0)
+        assert _estimate_duration([wp]) == pytest.approx(0.0)
+
+    def test_straight_line(self, mocks):
+        """직선 이동: 거리 / 속도."""
+        Waypoint3D = mocks['Waypoint3D']
+        Pose = mocks['Pose']
+        Point = mocks['Point']
+
+        # 0.1m 이동, 속도 100mm/s = 0.1m/s → 1초
+        wp1 = Waypoint3D(pose=Pose(position=Point(0, 0, 0)), speed=100.0)
+        wp2 = Waypoint3D(pose=Pose(position=Point(0.1, 0, 0)), speed=100.0)
+
+        duration = _estimate_duration([wp1, wp2])
+        assert duration == pytest.approx(1.0)
+
+    def test_multiple_segments(self, mocks):
+        """여러 구간 합산."""
+        Waypoint3D = mocks['Waypoint3D']
+        Pose = mocks['Pose']
+        Point = mocks['Point']
+
+        # 구간1: 0.1m, 100mm/s → 1s
+        # 구간2: 0.2m, 200mm/s → 1s
+        wp1 = Waypoint3D(pose=Pose(position=Point(0, 0, 0)), speed=100.0)
+        wp2 = Waypoint3D(pose=Pose(position=Point(0.1, 0, 0)), speed=100.0)
+        wp3 = Waypoint3D(pose=Pose(position=Point(0.3, 0, 0)), speed=200.0)
+
+        duration = _estimate_duration([wp1, wp2, wp3])
+        assert duration == pytest.approx(2.0)
+
+
+# =====================================================================
+# 다중 스트로크 통합 테스트
+# =====================================================================
+
+
+class TestMultiStroke:
+    """여러 획 변환 통합 테스트."""
+
+    def test_two_strokes_top(self, cylinder_cake, mocks):
+        """TOP 2획 → 각각 접근/접촉/그리기/이탈."""
+        strokes_pts = [
+            [(0, 0), (10, 0)],   # 2점 → 4 wp
+            [(30, 0), (40, 0)],  # 2점 → 4 wp
+        ]
+
+        all_wp = []
+        all_pen = []
+        for pts in strokes_pts:
+            wp, ps = _convert_stroke_top(
+                pts, cylinder_cake,
+                10.0, 0.0, 20.0, 80.0, 0.5,
+            )
+            all_wp.extend(wp)
+            all_pen.extend(ps)
+
+        assert len(all_wp) == 8  # 4 + 4
+        # 각 획 시작은 False, 끝은 False
+        assert all_pen[0] is False
+        assert all_pen[3] is False
+        assert all_pen[4] is False
+        assert all_pen[7] is False
+
+    def test_mixed_top_side(self, frustum_cake, mocks):
+        """TOP + SIDE 혼합 변환."""
+        pts_top = [(0, 0), (10, 0)]
+        pts_side = [(0, 50), (20, 50)]
+
+        wp_top, ps_top = _convert_stroke_top(
+            pts_top, frustum_cake,
+            10.0, 0.0, 20.0, 80.0, 0.5,
+        )
+        wp_side, ps_side = _convert_stroke_side(
+            pts_side, frustum_cake,
+            10.0, 0.0, 20.0, 80.0, 0.5,
+        )
+
+        assert len(wp_top) == 4
+        assert len(wp_side) == 4
+
+        # TOP과 SIDE의 orientation이 다름
+        q_top = wp_top[1].pose.orientation
+        q_side = wp_side[1].pose.orientation
+        assert (q_top.x, q_top.y, q_top.z, q_top.w) != \
+               (q_side.x, q_side.y, q_side.z, q_side.w)
+
+
+# =====================================================================
+# 핵심 로직 함수 (Node 없이 직접 테스트)
+# =====================================================================
+# Node를 생성하지 않고 변환 로직만 추출해서 테스트한다.
+
+
+def _extract_points(stroke) -> list[tuple[float, float]]:
+    """DrawingPathNode._extract_points 로직 복제."""
+    if stroke.target_mm:
+        return [(pt.x, pt.y) for pt in stroke.target_mm]
+    if stroke.simplified_mm:
+        return [(pt.x, pt.y) for pt in stroke.simplified_mm]
+    if stroke.original_mm:
+        return [(pt.x, pt.y) for pt in stroke.original_mm]
+    return []
+
+
+def _wp(x_mm, y_mm, z_mm, quat, speed, force):
+    """DrawingPathNode._wp 로직 복제."""
+    Waypoint3D = _mocks['Waypoint3D']
+    Pose = _mocks['Pose']
+    Point = _mocks['Point']
+    Quaternion = _mocks['Quaternion']
+
+    msg = Waypoint3D()
+    msg.pose = Pose(
+        position=Point(x=x_mm / 1000.0, y=y_mm / 1000.0, z=z_mm / 1000.0),
+        orientation=Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3]),
+    )
+    msg.speed = speed
+    msg.pen_down = False
+    msg.contact_force = force
+    return msg
+
+
+def _convert_stroke_top(pts, cake, approach_h, z_offset, draw_spd, travel_spd, force):
+    """DrawingPathNode._convert_stroke_top 로직 복제."""
+    from cake_decorator.drawing_geometry import pen_quat_top
+    quat = pen_quat_top()
+    waypoints = []
+    pen_states = []
+
+    fx, fy, fz = cake.top_to_abs(pts[0][0], pts[0][1])
+    waypoints.append(_wp(fx, fy, fz + approach_h, quat, travel_spd, force))
+    pen_states.append(False)
+
+    waypoints.append(_wp(fx, fy, fz + z_offset, quat, draw_spd * 0.5, force))
+    pen_states.append(True)
+
+    for pt in pts[1:]:
+        ax, ay, az = cake.top_to_abs(pt[0], pt[1])
+        waypoints.append(_wp(ax, ay, az + z_offset, quat, draw_spd, force))
+        pen_states.append(True)
+
+    lx, ly, lz = cake.top_to_abs(pts[-1][0], pts[-1][1])
+    waypoints.append(_wp(lx, ly, lz + approach_h, quat, travel_spd, force))
+    pen_states.append(False)
+
+    return waypoints, pen_states
+
+
+def _convert_stroke_side(pts, cake, approach_h, z_offset, draw_spd, travel_spd, force):
+    """DrawingPathNode._convert_stroke_side 로직 복제."""
+    from cake_decorator.drawing_geometry import pen_quat_side
+    waypoints = []
+    pen_states = []
+
+    x0, y0 = pts[0][0], pts[0][1]
+    quat0 = pen_quat_side(x0, y0, cake)
+    ax0, ay0, az0 = cake.side_abs_with_offset(x0, y0, approach_h)
+    waypoints.append(_wp(ax0, ay0, az0, quat0, travel_spd, force))
+    pen_states.append(False)
+
+    cx0, cy0, cz0 = cake.side_abs_with_offset(x0, y0, z_offset)
+    waypoints.append(_wp(cx0, cy0, cz0, quat0, draw_spd * 0.5, force))
+    pen_states.append(True)
+
+    for pt in pts[1:]:
+        xi, yi = pt[0], pt[1]
+        qi = pen_quat_side(xi, yi, cake)
+        cxi, cyi, czi = cake.side_abs_with_offset(xi, yi, z_offset)
+        waypoints.append(_wp(cxi, cyi, czi, qi, draw_spd, force))
+        pen_states.append(True)
+
+    xn, yn = pts[-1][0], pts[-1][1]
+    quatn = pen_quat_side(xn, yn, cake)
+    axn, ayn, azn = cake.side_abs_with_offset(xn, yn, approach_h)
+    waypoints.append(_wp(axn, ayn, azn, quatn, travel_spd, force))
+    pen_states.append(False)
+
+    return waypoints, pen_states
+
+
+def _estimate_duration(waypoints):
+    """DrawingPathNode._estimate_duration 로직 복제."""
+    if len(waypoints) < 2:
+        return 0.0
+    total = 0.0
+    for i in range(1, len(waypoints)):
+        p = waypoints[i - 1].pose.position
+        c = waypoints[i].pose.position
+        dist = math.sqrt(
+            (c.x - p.x) ** 2 + (c.y - p.y) ** 2 + (c.z - p.z) ** 2,
+        )
+        speed_m_s = waypoints[i].speed / 1000.0
+        if speed_m_s > 0:
+            total += dist / speed_m_s
+    return total

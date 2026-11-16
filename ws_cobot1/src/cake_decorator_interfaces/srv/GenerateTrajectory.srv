@@ -1,21 +1,21 @@
-# Request: DrawingPath의 해상도를 그대로 전달하여 실제 크기에 맞게 계산한다.
-uint32 canvas_width
-uint32 canvas_height
-# 원본 픽셀 획과 TOP/SIDE, 고정 케이크 위치·치수(m)를 받는다.
-cake_decorator_interfaces/Stroke2D[] strokes_2d
-string surface_type
-geometry_msgs/Pose cake_pose
-float64 cake_radius
-# 윗면 중심에서 깊이 d일 때 r(d)=cake_radius+(cake_bottom_radius-cake_radius)*d/cake_height.
-float64 cake_bottom_radius
-float64 cake_height
-# 케이크 프레임 자세와 별도로 기록한 펜촉 TCP 자세를 전달한다.
-geometry_msgs/Quaternion tool_orientation
+# 프론트엔드 JSON 형식에 맞춘 경로 변환 서비스
+# task_manager_node가 프론트엔드에서 받은 데이터를 그대로 전달한다.
+# 좌표는 모두 mm 단위 (케이크 중심 기준)이다.
+# 케이크는 원뿔대(frustum) 형태 — 윗면·아랫면 반지름이 다를 수 있다.
+
+# ─── Request ───
+string order_id                                     # 주문 ID
+uint32 operation_speed_percent                      # 작업 속도 (0~100%)
+cake_decorator_interfaces/StrokeMM[] strokes        # 획 데이터 (mm)
+string surface_type                                 # "TOP" 또는 "SIDE"
+geometry_msgs/Pose cake_pose                        # 케이크 바닥면 중심 절대 좌표 (m)
+float64 cake_radius_top                             # 윗면 반지름 (m)
+float64 cake_radius_bottom                          # 아랫면 반지름 (m)
+float64 cake_height                                 # 케이크 높이 (m)
 ---
-# Response: 경로 계산 결과다. 아직 계산 서비스 서버는 구현하지 않는다.
+# ─── Response ───
 bool success
 cake_decorator_interfaces/Waypoint3D[] waypoints_3d
-# 원문에 중복 정의되어 있다. 길이와 값은 waypoint.pen_down과 일치해야 한다.
 bool[] pen_states
 float64 estimated_duration_sec
 string error_msg
