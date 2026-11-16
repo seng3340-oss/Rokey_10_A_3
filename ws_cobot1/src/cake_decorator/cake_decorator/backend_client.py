@@ -1,7 +1,80 @@
-"""브릿지에서 사용할 백엔드 통신 모듈의 자리. 전송 방식과 API는 미정이다."""
+"""브릿지의 내부 HTTP 연결. DB에 직접 접근하거나 주문을 임의로 재할당하지 않는다."""
 
-# 예정 역할: 주문을 전달받고 ROS의 접수·진행·최종 결과를 백엔드에 돌려준다.
-# 실제 통신 방식이 정해지면 재접속·시간 초과·중복 전달 처리를 이곳에 모은다.
-# FastAPI의 기존 그림 검증·SQLite 저장 로직을 옮기거나 중복 구현하지 않는다.
-# ROS 타입 변환은 ros_bridge_node.py, 점 선별은 drawing_geometry.py에서 수행한다.
-# 현재 새 HTTP API·WebSocket·폴링·DB 접근은 만들지 않는다.
+import json
+import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
+from uuid import uuid4
+
+
+class BackendError(RuntimeError):
+    """접수 여부를 알 수 없는 전송 오류도 호출자가 구분할 수 있게 HTTP 상태를 보존한다."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+class BackendClient:
+    """백엔드와 같은 호스트에서 인증된 내부 API를 호출한다."""
+
+    def __init__(self, base_url, token, timeout=3.0):
+        parsed = urlparse(base_url)
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.hostname
+            or not token
+            or not token.isascii()
+        ):
+            raise ValueError(
+                "백엔드 주소와 ASCII 문자로 된 CAKE_BRIDGE_TOKEN이 필요합니다."
+            )
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout = timeout
+
+    def post(self, path, body=None):
+        """204는 인수할 주문이 없다는 뜻이다. 실패한 claim은 자동 재시도하지 않는다."""
+        request = Request(
+            self.base_url + path,
+            data=json.dumps(body or {}).encode(),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.token}",
+            },
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                if response.status == 204:
+                    return None
+                return json.load(response)
+        except HTTPError as error:
+            raise BackendError(f"백엔드 HTTP {error.code}", error.code) from error
+        except (URLError, TimeoutError, OSError, ValueError) as error:
+            raise BackendError("백엔드 응답을 확인할 수 없습니다.") from error
+
+    def claim(self):
+        """서버가 원자적으로 잠근 주문을 한 번 가져온다."""
+        return self.post("/internal/bridge/claim")
+
+    def event(self, claim, kind, **details):
+        """상태 기록은 같은 이벤트 ID로만 재시도한다. Goal을 다시 보내지는 않는다."""
+        body = {
+            "event_id": str(uuid4()),
+            "claim_token": claim["claim_token"],
+            "kind": kind,
+            **details,
+        }
+        path = f"/internal/bridge/orders/{quote(claim['order_id'], safe='')}/events"
+        for attempt in range(3):
+            try:
+                return self.post(path, body)
+            except BackendError as error:
+                # 인증·순서 오류는 재시도로 해결하지 않는다.
+                if error.status is not None and error.status < 500:
+                    raise
+                if attempt == 2:
+                    raise
+                time.sleep(0.2)

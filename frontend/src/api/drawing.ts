@@ -23,6 +23,50 @@ export interface DrawingReceipt {
   order_id: string;
   status: "received";
 }
+// 응답 유실 후 같은 그림을 다시 보낼 때 같은 키를 쓴다. 정상 접수 뒤에는 지운다.
+let pendingRequest: { body: string; key: string } | null = null;
+const pendingStorageKey = "cake.pending-request.v1";
+
+/** 브라우저 재시작에도 미확정 요청 키를 보존한다. 저장 차단 시 메모리로 유지한다. */
+function requestKey(body: string): string {
+  try {
+    const stored = globalThis.localStorage?.getItem(pendingStorageKey);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (typeof parsed.body === "string" && typeof parsed.key === "string")
+        pendingRequest = parsed;
+    }
+  } catch {
+    // 저장소 접근 제한은 그림 제출 자체를 막지 않는다.
+  }
+  if (pendingRequest?.body !== body) {
+    const key =
+      globalThis.crypto?.randomUUID?.() ||
+      `cake-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    pendingRequest = { body, key };
+  }
+  try {
+    globalThis.localStorage?.setItem(
+      pendingStorageKey,
+      JSON.stringify(pendingRequest),
+    );
+  } catch {
+    // 같은 페이지에서의 재시도는 위 메모리 값을 사용한다.
+  }
+  return pendingRequest!.key;
+}
+
+/** 확인된 접수의 키만 해제한다. 이후 같은 그림을 새 주문으로 제출할 수 있다. */
+function clearRequest(key: string): void {
+  if (pendingRequest?.key !== key) return;
+  pendingRequest = null;
+  try {
+    globalThis.localStorage?.removeItem(pendingStorageKey);
+  } catch {
+    // 저장소를 쓸 수 없는 경우에도 접수 결과는 유효하다.
+  }
+}
+
 /**
  * 선택한 면을 제출하고 주문 식별자가 검증된 접수 응답만 반환한다.
  * 통신·응답 오류는 사용자 안내용 예외로 전달하며 입력 그림은 수정하지 않는다.
@@ -36,16 +80,26 @@ export async function submitDrawing(
       "선택한 면에 그림이 없습니다. 그림이 있는 면을 선택해주세요.",
     );
   // 15초 동안 응답이 없으면 대기를 종료한다. 서버 접수 여부는 별도 확인이 필요하다.
+  const body = JSON.stringify(payload);
+  const key = requestKey(body);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     // 개발 중에는 Vite 프록시, 배포 시에는 동일 출처의 /api가 이 요청을 전달한다.
     const response = await fetch("/api/drawing", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+      body,
       signal: controller.signal,
     });
+    if (response.status === 409) {
+      const problem = await response.json();
+      throw new Error(
+        typeof problem.detail === "string"
+          ? problem.detail
+          : "현재 주문이 처리 중입니다.",
+      );
+    }
     if (!response.ok)
       throw new Error(
         "제작 요청을 확인하지 못했습니다. 서버 연결과 운영 상태를 확인해주세요.",
@@ -65,6 +119,7 @@ export async function submitDrawing(
         "서버의 주문 접수 응답을 확인할 수 없습니다. 운영자에게 확인해주세요.",
       );
     }
+    clearRequest(key);
     return { order_id: result.order_id, status: "received" };
     // 타임아웃·잘못된 JSON·네트워크 단절을 구별해 재요청 판단에 필요한 안내를 준다.
   } catch (error) {

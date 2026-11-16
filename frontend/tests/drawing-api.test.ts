@@ -63,3 +63,32 @@ test("order_id 또는 received 없는 성공 응답도 접수로 간주하지 �
   );
   await assert.rejects(submitDrawing(drawing), /주문 접수 응답/);
 });
+
+// 서버가 저장한 뒤 응답만 유실되어도 같은 그림의 재시도 키는 유지되어야 한다.
+test("네트워크 실패 후 재시도는 같은 요청 키를 사용한다", async (t) => {
+  const keys: string[] = [];
+  let count = 0;
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (_url: string, init: RequestInit) => {
+      keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
+      if (++count === 1) throw new TypeError("연결 끊김");
+      return Response.json({ order_id: "ORD-RETRY-1", status: "received" });
+    },
+  );
+  await assert.rejects(submitDrawing(drawing), /연결할 수 없습니다/);
+  await submitDrawing(drawing);
+  assert.ok(keys[0]);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("활성 주문이 있으면 백엔드의 접수 제한 안내를 보여준다", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json(
+      { detail: "현재 주문 처리 중입니다. 새 주문을 받을 수 없습니다." },
+      { status: 409 },
+    ),
+  );
+  await assert.rejects(submitDrawing(drawing), /현재 주문 처리 중/);
+});

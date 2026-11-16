@@ -1,20 +1,39 @@
-/* 세로 A4 안에서 구조와 필드 표를 같은 크기로 읽도록 배치한다. */
+/* 세로 A4 네 쪽. 제목 → 연결 관계 → 데이터 순서로 읽도록 계층을 둔다. */
 @page { size: A4 portrait; margin: 0; }
 * { box-sizing: border-box; }
-body { margin: 0; color: #263746; background: #e8edf1; font-family: 'Noto Sans CJK KR', sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-.page { width: 210mm; height: 297mm; padding: 15mm 17mm; position: relative; background: white; break-after: page; }
+body { margin: 0; color: #273b4c; background: #e8edf1; font-family: 'Noto Sans CJK KR', sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.page { width: 210mm; height: 297mm; padding: 12mm 15mm; position: relative; background: white; break-after: page; }
 .page:last-child { break-after: auto; }
-header { border-bottom: 2px solid #29465d; padding-bottom: 5mm; margin-bottom: 6mm; }
-small { color: #647b8b; font-size: 9pt; }
-h1 { margin: 2mm 0 0; font-size: 23pt; color: #203c53; }
-h2 { font-size: 12pt; margin: 4mm 0 2mm; }
-p { font-size: 9.5pt; line-height: 1.8; margin: 2mm 0 3mm; }
-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
-th { background: #edf2f6; text-align: left; }
-th, td { padding: 1.6mm 2.5mm; border-bottom: 1px solid #dce3e8; vertical-align: top; line-height: 1.5; overflow-wrap: anywhere; }
-th:first-child, td:first-child { width: 43%; }
-.flow { background: #f2f5f8; padding: 3mm; text-align: center; font-size: 10pt; font-weight: 600; line-height: 1.7; }
-.flow div { font-size: 8.5pt; color: #627b8d; font-weight: normal; margin: 1mm 0; }
-.note { color: #617382; font-size: 8.5pt; margin-top: 5mm; }
-footer { position: absolute; left: 17mm; right: 17mm; bottom: 10mm; border-top: 1px solid #dce3e8; padding-top: 3mm; font-size: 8pt; color: #6f8392; display: flex; justify-content: space-between; }
+header { border-bottom: 2px solid #29465d; padding-bottom: 4mm; margin-bottom: 5mm; }
+small { color: #647b8b; font-size: 8.5pt; }
+h1 { margin: 1.5mm 0 0; font-size: 22pt; color: #203c53; }
+header p { font-size: 9pt; color: #647b8b; margin-bottom: 0; }
+h2 { font-size: 11.5pt; margin: 4mm 0 2mm; }
+p { font-size: 9pt; line-height: 1.7; margin: 2mm 0 3mm; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.5pt; }
+th { background: #eaf0f5; text-align: left; color: #203c53; }
+th, td { padding: 2mm 2.5mm; border-bottom: 1px solid #dce3e8; vertical-align: top; line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
+tr:nth-child(even) td { background: #fafbfd; }
+.caption { color: #5d7486; font-size: 8.3pt; line-height: 1.65; }
+.note { background: #f0f4f7; border-left: 3px solid #7395af; padding: 3mm; color: #526a7d; font-size: 8.2pt; line-height: 1.8; margin-top: 4mm; }
+footer { position: absolute; left: 15mm; right: 15mm; bottom: 9mm; border-top: 1px solid #dce3e8; padding-top: 3mm; font-size: 8pt; color: #6f8392; display: flex; justify-content: space-between; }
+/* 도식의 경로 계산 분기는 작업 관리 노드와만 왕복한다. */
+.architecture { text-align: center; }
+.node { background: #eff4f8; border: 1px solid #b5c7d6; border-radius: 2mm; padding: 2mm; font-size: 9pt; }
+.node span { display: block; color: #5a7285; font-size: 8pt; }
+.web { background: #faf6ed; border-color: #d5c9af; }
+.arrow { font-size: 8pt; color: #4e708b; padding: 1mm 0; }
+.planned { border-bottom: 1px dashed #a9bbc9; margin-bottom: 2mm; }
+.ros { border: 1px dashed #93aec2; padding: 2mm; }
+.ros label { display: block; font-size: 8pt; text-align: left; color: #5b778e; margin-bottom: 2mm; }
+.branch { display: grid; grid-template-columns: 1fr 35mm 1fr; align-items: center; }
+.side-arrow { color: #456985; font-size: 20pt; line-height: 1; }
+.side-arrow small { display: block; font-size: 7pt; line-height: 1.5; margin-top: 1mm; }
+.executor { width: 70%; margin: auto; }
+.driver-row { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; }
+.types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
+.types > div { background: #eff4f8; padding: 3mm; border-top: 2px solid #7898b1; }
+.types b { font-size: 9pt; }
+.types p { font-size: 8.3pt; margin: 2mm 0 0; }
+.steps { font-size: 9pt; line-height: 1.9; background: #f5f7fa; padding: 3mm; }
 @media print { body { background: white; } }

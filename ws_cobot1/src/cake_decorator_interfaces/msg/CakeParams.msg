@@ -1,6 +1,14 @@
-# 물리 치수는 m, 방향은 rad다. 웹 원본 픽셀 값과 혼동하지 않는다.
+# 치수는 m다. radius는 윗면 반지름이며 경사 옆면은 bottom_radius와 함께 사용한다.
 float64 radius
+float64 bottom_radius
 float64 height
-# 로봇 BASE 기준 케이크 중심. 중심 Z의 정확한 의미는 팀 확인 항목이다.
+float64 board_width
+float64 board_depth
+float64 board_thickness
+# center는 BASE 기준 윗면 중심이다. 사용자가 접촉 확인한 현재 활성 TCP에서 읽는다.
 geometry_msgs/Point center
+# 케이크 평면 회전 rad. 최초 테스트는 BASE X/Y와 나란한 수평 상면을 가정한다.
 float64 orientation
+string reference_frame
+# 영점에서 기록한 펜촉 TCP 자세. 케이크 상면 법선과 혼동하지 않는다.
+geometry_msgs/Quaternion tool_orientation

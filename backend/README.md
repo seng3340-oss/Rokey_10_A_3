@@ -1,7 +1,7 @@
 # 그림 접수 서버
 
 FastAPI로 PM 형식의 그림을 검증하고 SQLite에 저장합니다.
-접수 성공은 서버 저장 성공입니다. ROS 브리지·HMI API·로봇 제어는 포함하지 않습니다.
+접수 성공은 서버 저장 성공입니다. 별도 ROS 브릿지용 내부 HTTP 연결을 제공합니다. HMI API·로봇 제어는 포함하지 않습니다.
 
 ## 실행
 
@@ -53,10 +53,10 @@ FastAPI는 schemas 검증에 성공한 요청만 drawings 함수에 전달합니
 이것은 프론트와 맞춘 서버 접수 응답이며 로봇 접수·제작 완료와 다릅니다.
 
 - `GET /api/orders?limit=20&offset=0`: 최신 순 목록. items, total, limit, offset 반환. 좌표 배열 제외.
-- `GET /api/orders/{order_id}`: 원본 drawing과 상세. robot_dispatched는 false. 없는 주문은 404.
+- `GET /api/orders/{order_id}`: 원본 drawing과 상세. robot_dispatched는 미전송 false / 수락 확인 true / 불명확 null입니다. 없는 주문은 404.
 - `GET /api/health`: 서버 상태. ros_connected는 false.
 
-HMI·브리지 API와 주문 상태 변경 API는 만들지 않았습니다.
+HMI API는 없습니다. 브릿지는 토큰 인증된 `/internal/bridge` 인수·상태 기록 API를 사용합니다.
 주문 목록·상세는 향후 연결용이며 현재 정적 HMI가 사용하지 않습니다.
 두 면을 한 주문으로 묶는 형식은 팀에서 확정해야 합니다.
 
@@ -72,8 +72,9 @@ DB를 삭제하면 주문과 번호 기록도 지워집니다. DB와 WAL 파일�
 실제 원형/곡면 작업 영역, mm 치수, TCP 자세와 로봇 도달 가능성은 아직 검사하지 않습니다.
 검증 오류 422, 본문 초과 413, 저장소 오류 503으로 응답합니다.
 
-재전송은 별도 주문으로 생성됩니다. 응답 타임아웃 후에는 재요청 전 주문 조회로 접수 여부를 확인해야 합니다.
-권한 분리와 요청 idempotency 키는 팀 규격 확정 후 추가합니다.
+활성 주문이 있으면 HTTP 409로 새 접수를 거부합니다. 프론트가 보낸 `Idempotency-Key`와 본문이 같으면 기존 주문 번호를 반환합니다.
+다른 본문으로 같은 키를 재사용하면 409입니다. 키 없이 종료 후 재전송하면 새 주문으로 구분됩니다.
+기존 DB 주문은 실행 여부가 불명확해 확인 대기로 보존합니다. 상세 상태·내부 API·수동 확인은 [브릿지 안내](../docs/BRIDGE_TEST.md)를 참고합니다.
 
 ## 테스트
 
@@ -84,3 +85,10 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 
 ROS를 source한 셸의 pytest 플러그인이 섞이지 않도록 자동 로드를 끕니다.
 테스트별 임시 DB를 사용하므로 개발 주문을 변경하지 않습니다.
+
+## 브릿지 연결 설정
+
+백엔드와 ROS 브릿지 터미널에 같은 `CAKE_BRIDGE_TOKEN`을 export합니다.
+`config/test_cake.json`은 실측 치수이며 주문 접수 시 사본을 저장합니다.
+`order_execution`은 상태·인수 토큰·요청 키를, `bridge_events`는 이벤트 중복 처리를 기록합니다.
+기존 `orders`와 날짜별 주문 번호는 보존합니다.

@@ -818,14 +818,14 @@
   </joint>
   <link name="fixture_a_board_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://cake_workcell_description/meshes/A_board.stl" scale="0.001 0.001 0.001" />
-      </geometry>
-      <material name="board_mat">
-        <color rgba="0.97 0.96 0.93 1" />
-      </material>
+      <origin xyz="0.085 0.085 0.061000" rpy="0 0 0" />
+      <geometry><box size="0.179000 0.179000 0.002000" /></geometry>
+      <material name="board_mat"><color rgba="0.97 0.96 0.93 1" /></material>
     </visual>
+    <collision>
+      <origin xyz="0.085 0.085 0.061000" rpy="0 0 0" />
+      <geometry><box size="0.179000 0.179000 0.002000" /></geometry>
+    </collision>
   </link>
   <joint name="fixture_a_base_to_board" type="fixed">
     <parent link="fixture_a_base_link" />
@@ -834,14 +834,14 @@
   </joint>
   <link name="fixture_a_cake_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://cake_workcell_description/meshes/A_cake.stl" scale="0.001 0.001 0.001" />
-      </geometry>
-      <material name="cake_mat">
-        <color rgba="0.93 0.82 0.63 1" />
-      </material>
+      <origin xyz="0.085 0.085 0.062000" rpy="0 0 0" />
+      <geometry><mesh filename="package://cake_workcell_description/meshes/test_cake.stl" /></geometry>
+      <material name="cake_mat"><color rgba="0.93 0.82 0.63 1" /></material>
     </visual>
+    <collision>
+      <origin xyz="0.085 0.085 0.062000" rpy="0 0 0" />
+      <geometry><mesh filename="package://cake_workcell_description/meshes/test_cake.stl" /></geometry>
+    </collision>
   </link>
   <joint name="fixture_a_base_to_cake" type="fixed">
     <parent link="fixture_a_base_link" />

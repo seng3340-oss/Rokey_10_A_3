@@ -7,7 +7,6 @@ import subprocess
 import unittest
 import xml.etree.ElementTree as ET
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -16,9 +15,14 @@ class WorkcellTests(unittest.TestCase):
 
     def model(self, *arguments):
         """설치된 xacro로 치환한 결과를 읽는다. 인자는 m/rad 단위다."""
-        result = subprocess.check_output([
-            "xacro", str(ROOT / "urdf/workcell.urdf.xacro"), *arguments,
-        ], text=True)
+        result = subprocess.check_output(
+            [
+                "xacro",
+                str(ROOT / "urdf/workcell.urdf.xacro"),
+                *arguments,
+            ],
+            text=True,
+        )
         return ET.fromstring(result)
 
     def test_table_dimensions_and_no_robot_frame_collision(self):
@@ -45,7 +49,9 @@ class WorkcellTests(unittest.TestCase):
         """mm인 A안만 축소하고 테이블 자산은 원래 m 단위를 유지한다."""
         for mesh in self.model().findall(".//mesh"):
             filename = mesh.get("filename")
-            self.assertTrue(filename.startswith("package://cake_workcell_description/meshes/"))
+            self.assertTrue(
+                filename.startswith("package://cake_workcell_description/meshes/")
+            )
             path = ROOT / "meshes" / filename.rsplit("/", 1)[1]
             self.assertTrue(path.exists())
             if path.name.startswith("A_"):
@@ -55,8 +61,54 @@ class WorkcellTests(unittest.TestCase):
         """이관한 형상이 실수로 덮어써지지 않았는지 체크섬으로 확인한다."""
         checksums = json.loads((ROOT / "mesh_checksums.json").read_text())
         for name, checksum in checksums.items():
-            self.assertEqual(hashlib.sha256((ROOT / "meshes" / name).read_bytes()).hexdigest(), checksum)
+            self.assertEqual(
+                hashlib.sha256((ROOT / "meshes" / name).read_bytes()).hexdigest(),
+                checksum,
+            )
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MeasuredCakeTests(unittest.TestCase):
+    """원본 자산 보존 검사와 별도로 실측 원뿔대·판의 높이 관계를 확인한다."""
+
+    def test_frustum_mesh_and_board_match_shared_dimensions(self):
+        """상면과 밑면 반지름이 서로 다르고 케이크 밑면이 판 위에 놓여야 한다."""
+        config = json.loads((ROOT.parents[2] / "config/test_cake.json").read_text())
+        vertices = [
+            tuple(map(float, line.split()[1:]))
+            for line in (ROOT / "meshes/test_cake.stl").read_text().splitlines()
+            if line.startswith("vertex ")
+        ]
+        self.assertAlmostEqual(max(p[2] for p in vertices), config["height_mm"] / 1000)
+        top = [p for p in vertices if abs(p[2] - config["height_mm"] / 1000) < 1e-9]
+        bottom = [p for p in vertices if p[2] == 0]
+        self.assertAlmostEqual(
+            max((p[0] ** 2 + p[1] ** 2) ** 0.5 for p in top),
+            config["top_diameter_mm"] / 2000,
+        )
+        self.assertAlmostEqual(
+            max((p[0] ** 2 + p[1] ** 2) ** 0.5 for p in bottom),
+            config["bottom_diameter_mm"] / 2000,
+        )
+        robot = ET.fromstring(
+            subprocess.check_output(
+                ["xacro", str(ROOT / "urdf/workcell.urdf.xacro")], text=True
+            )
+        )
+        board = robot.find("link[@name='fixture_a_board_link']")
+        self.assertEqual(
+            list(map(float, board.find("visual/geometry/box").get("size").split())),
+            [
+                config["board_width_mm"] / 1000,
+                config["board_depth_mm"] / 1000,
+                config["board_thickness_mm"] / 1000,
+            ],
+        )
+        board_z = float(board.find("visual/origin").get("xyz").split()[2])
+        cake = robot.find("link[@name='fixture_a_cake_link']")
+        cake_z = float(cake.find("visual/origin").get("xyz").split()[2])
+        self.assertAlmostEqual(board_z + config["board_thickness_mm"] / 2000, cake_z)
+        self.assertIsNotNone(cake.find("collision/geometry/mesh"))

@@ -33,12 +33,12 @@ export function cakeView(container, textures) {
       t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
     }
-    // A안 치수의 공통 축척을 사용하여 케이크 지름·높이와 판의 크기를 함께 맞춘다.
-    // 열린 원통은 옆면만 담당하고, 윗면은 별도 원판으로 올려 서로 다른 그림을 입힌다.
+    // 실측 치수의 공통 축척을 사용하여 케이크 지름·높이와 판의 크기를 함께 맞춘다.
+    // 위아래 반지름이 다른 원뿔대는 옆면만 담당하고, 윗면은 별도 원판으로 올려 서로 다른 그림을 입힌다.
     const side = new THREE.Mesh(
       new THREE.CylinderGeometry(
         MODEL_SIZE.cakeRadius,
-        MODEL_SIZE.cakeRadius,
+        MODEL_SIZE.cakeBottomRadius,
         MODEL_SIZE.cakeHeight,
         96,
         1,

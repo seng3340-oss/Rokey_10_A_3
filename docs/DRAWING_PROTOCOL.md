@@ -81,3 +81,10 @@ side는 x=64..960, y≈269.92..498.08의 펼친 띠 편집 영역이다. 높이�
 웹 HTTP 요청·SQLite 저장 계약은 이번 인터페이스 작업으로 변경하지 않았다.
 
 2026-11-15 합의: ROS 상세 정의 이름을 사용하며 DrawingPath/GenerateTrajectory에 canvas_width/height, Stroke2D에 stroke_id를 보존합니다. is_closed=false로 자동 폐곡선 연결을 금지합니다. [확정 기록](architecture/DECISIONS.md) 참고.
+
+## 2026-11-16 실물 테스트 연결
+
+현재 전달 구조는 원본 픽셀 → 백엔드 저장 → 내부 HTTP 인수 → ROS 브릿지 → CakeOrder Action입니다.
+한 활성 주문만 받고 Idempotency-Key로 재시도를 구분합니다. is_closed는 제거했으며 자동 연결을 하지 않습니다.
+실측 원뿔대·판 치수는 config/test_cake.json에서 공유합니다. 상면 중심은 브릿지가 YES 후 조회한 TCP입니다.
+이 문서 위의 A안 치수와 미구현 브릿지 설명은 이전 단계 기록입니다. 현재 규격과 실행은 [브릿지 안내](BRIDGE_TEST.md)를 참고합니다.

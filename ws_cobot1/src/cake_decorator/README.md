@@ -1,9 +1,10 @@
 # 케이크 ROS 업무 코드 틀
 
 팀원이 나눠 개발할 파일 위치와 역할을 먼저 정리했습니다.
-**Python 파일에는 역할 주석만 있습니다. 아직 노드·서버·로봇 제어는 구현하지 않았습니다.**
-패키지는 빌드·설치할 수 있지만 실행 명령은 등록하지 않았습니다.
-`application.launch.py`와 설정 파일도 주석으로 된 자리만 마련했습니다.
+**브릿지와 백엔드 HTTP 연결, Goal 변환을 구현했습니다. TM·DP·RE와 로봇 제어는 아직 역할 주석만 있습니다.**
+`ros2 run cake_decorator ros_bridge_node`를 등록했습니다.
+실측 치수·영점·토큰 설정·단일 주문 정책과 실행 순서는 [브릿지 안내](../../../docs/BRIDGE_TEST.md)를 참고합니다.
+`application.launch.py`와 업무 좌표 YAML은 여전히 주석으로 된 자리입니다.
 
 ## 데이터 흐름
 
@@ -34,7 +35,8 @@ cake_decorator/
 │   ├── task_manager_node.py           # 제작 순서·상태 관리
 │   ├── drawing_path_node.py           # 경로 계산 Service
 │   ├── robot_executor_node.py         # 동작 실행 Action
-│   ├── backend_client.py              # 백엔드 통신. 방식 미정
+│   ├── backend_client.py              # 인증된 내부 HTTP 통신
+│   ├── goal_mapping.py                # 원본 픽셀·실측 치수·TCP → Goal
 │   ├── drawing_geometry.py            # 중복점 정리·필요점 선별·좌표 변환
 │   ├── drawing_motion.py              # 접근·그리기·획 사이 이탈
 │   └── doosan_robot.py                # DRL 호출·단위 변환·장비 연결
@@ -50,7 +52,7 @@ cake_decorator/
 | 경로 계산 DP | GenerateTrajectory Service Server | drawing_geometry의 일반 Python 함수 |
 | 로봇 실행 RE | DrawOnCake, PickAndPlace, GraspTool Action Server | drawing_motion과 장비 연결 모듈 |
 
-Action·Service의 실제 ROS 주소는 아직 정하지 않았습니다.
+브릿지의 기본 제작 Action 주소는 `/cake/order`이며 옵션으로 바꿀 수 있습니다. 나머지 주소는 아직 미정입니다.
 타입 정의는 기존 [cake_decorator_interfaces](../cake_decorator_interfaces/README.md)를 사용합니다.
 TCP·순응제어 서비스의 제공 위치와 실제 적용 정책은 이 틀에서 추가 확정하지 않습니다.
 
@@ -87,5 +89,5 @@ ros2 pkg prefix cake_decorator
 ```
 
 빌드 성공은 파일 설치 확인이며 노드 실행·좌표 계산·로봇 동작 검증을 의미하지 않습니다.
-노드 구현 전에는 `ros2 run cake_decorator ...` 또는 이 패키지의 launch를 실행하지 않습니다.
+브릿지만 실행할 수 있으며 TM·DP·RE나 이 패키지의 launch는 아직 실행하지 않습니다.
 기존 frontend·backend·가상 작업대·ws_dsr 파일은 이번 틀 추가로 변경하지 않았습니다.

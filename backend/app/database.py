@@ -46,4 +46,36 @@ class Database:
                 );
                 """
             )
+            # 원본 orders 테이블은 그대로 보존하고 실행·중복 처리만 별도 기록한다.
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS order_execution (
+                    order_id TEXT PRIMARY KEY REFERENCES orders(order_id),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'received','claimed','dispatching','running',
+                        'completed','failed','rejected','uncertain','resolved'
+                    )),
+                    request_key TEXT UNIQUE,
+                    payload_hash TEXT NOT NULL,
+                    cake_json TEXT NOT NULL,
+                    claim_token TEXT,
+                    phase TEXT NOT NULL DEFAULT '',
+                    progress_pct REAL NOT NULL DEFAULT 0,
+                    message TEXT NOT NULL DEFAULT '',
+                    result_json TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS bridge_events (
+                    event_id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL,
+                    payload_hash TEXT NOT NULL
+                );
+                """
+            )
+            # 기존 주문은 실행 이력을 알 수 없으므로 재전송하지 않고 확인 대기로 이관한다.
+            connection.execute(
+                """INSERT OR IGNORE INTO order_execution
+                (order_id, state, payload_hash, cake_json, updated_at)
+                SELECT order_id, 'uncertain', '', '{}', created_at FROM orders"""
+            )
             connection.commit()

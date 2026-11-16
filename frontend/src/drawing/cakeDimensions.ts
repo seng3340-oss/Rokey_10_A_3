@@ -1,25 +1,30 @@
-/**
- * Slack A안 STL의 치수(mm). 화면 표기·3D 형상·옆면 편집 영역의 공통 기준이다.
- * A_cake는 약 지름100×높이80, A_board는 150×150×10이다.
- * 원본 경로·단위는 ws_cobot1/src/cake_workcell_description/SOURCES.md를 참고한다.
- * 시각화 비율이며 실제 TCP 영점·로봇 작업 좌표를 자동 설정하는 값은 아니다.
- */
+import measuredCake from "../../../config/test_cake.json" with { type: "json" };
+
+/** 실측 플라스틱 원뿔대와 판 치수. 실행 위치·TCP 영점을 지정하는 값은 아니다. */
 export const CAKE_DIMENSIONS = Object.freeze({
-  diameterMm: 100,
-  heightMm: 80,
-  boardWidthMm: 150,
-  boardDepthMm: 150,
-  boardThicknessMm: 10,
+  diameterMm: measuredCake.top_diameter_mm,
+  bottomDiameterMm: measuredCake.bottom_diameter_mm,
+  heightMm: measuredCake.height_mm,
+  boardWidthMm: measuredCake.board_width_mm,
+  boardDepthMm: measuredCake.board_depth_mm,
+  boardThicknessMm: measuredCake.board_thickness_mm,
 });
 
 // 전송 계약의 캔버스 해상도는 유지한다. 편집 영역만 물리적 종횡비에 맞춘다.
 const canvasWidth = 1024;
 const canvasHeight = 768;
 const sideWidth = 896;
-const circumferenceMm = Math.PI * CAKE_DIMENSIONS.diameterMm;
-const sideHeight = (sideWidth * CAKE_DIMENSIONS.heightMm) / circumferenceMm;
+// 편집은 평균 둘레의 띠로 표시한다. 실제 3D 표면은 높이에 따라 반지름이 달라진다.
+const circumferenceMm =
+  (Math.PI * (CAKE_DIMENSIONS.diameterMm + CAKE_DIMENSIONS.bottomDiameterMm)) /
+  2;
+const slantHeightMm = Math.hypot(
+  CAKE_DIMENSIONS.heightMm,
+  (CAKE_DIMENSIONS.bottomDiameterMm - CAKE_DIMENSIONS.diameterMm) / 2,
+);
+const sideHeight = (sideWidth * slantHeightMm) / circumferenceMm;
 
-/** 옆면은 원통의 전체 둘레를 펼친 띠다. 로봇이 전 둘레에 접근 가능하다는 뜻은 아니다. */
+/** 옆면은 원뿔대의 평균 둘레를 기준으로 표시한 편집 띠다. 로봇이 전 둘레에 접근 가능하다는 뜻은 아니다. */
 export const DRAWING_LAYOUT = Object.freeze({
   width: canvasWidth,
   height: canvasHeight,
@@ -46,6 +51,8 @@ const boardThickness = CAKE_DIMENSIONS.boardThicknessMm / mmPerUnit;
 const cakeHeight = CAKE_DIMENSIONS.heightMm / mmPerUnit;
 export const MODEL_SIZE = Object.freeze({
   cakeRadius: 1,
+  cakeBottomRadius:
+    CAKE_DIMENSIONS.bottomDiameterMm / CAKE_DIMENSIONS.diameterMm,
   cakeHeight,
   boardWidth: CAKE_DIMENSIONS.boardWidthMm / mmPerUnit,
   boardDepth: CAKE_DIMENSIONS.boardDepthMm / mmPerUnit,

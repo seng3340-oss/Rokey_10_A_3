@@ -38,11 +38,12 @@ class InterfaceTests(unittest.TestCase):
         for surface in ("TOP", "SIDE"):
             stroke = Stroke2D(stroke_id=0)
             stroke.points = [Point32(x=500.5, y=350.25, z=0.0)]
-            stroke.is_closed = False
             goal.drawing_paths.append(
                 DrawingPath(
-                    canvas_width=1024, canvas_height=768,
-                    surface=surface, strokes=[stroke],
+                    canvas_width=1024,
+                    canvas_height=768,
+                    surface=surface,
+                    strokes=[stroke],
                 )
             )
         restored = self.roundtrip(goal)
@@ -53,21 +54,28 @@ class InterfaceTests(unittest.TestCase):
         for path in restored.drawing_paths:
             self.assertEqual((path.canvas_width, path.canvas_height), (1024, 768))
             self.assertEqual(path.strokes[0].stroke_id, 0)
-            self.assertFalse(path.strokes[0].is_closed)
+            self.assertNotIn("is_closed", path.strokes[0].get_fields_and_field_types())
 
     def test_trajectory_receives_canvas_size_and_multiple_stroke_ids(self):
         """두 개의 획 끝을 자동 연결하지 않고 번호·해상도를 함께 전달한다."""
         request = GenerateTrajectory.Request(
-            canvas_width=1024, canvas_height=768, surface_type="TOP",
+            canvas_width=1024,
+            canvas_height=768,
+            surface_type="TOP",
             strokes_2d=[
-                Stroke2D(stroke_id=0, is_closed=False, points=[Point32(x=50.0, y=80.0)]),
-                Stroke2D(stroke_id=1, is_closed=False, points=[Point32(x=60.0, y=90.0)]),
+                Stroke2D(stroke_id=0, points=[Point32(x=50.0, y=80.0)]),
+                Stroke2D(stroke_id=1, points=[Point32(x=60.0, y=90.0)]),
             ],
         )
         restored = self.roundtrip(request)
         self.assertEqual((restored.canvas_width, restored.canvas_height), (1024, 768))
         self.assertEqual([stroke.stroke_id for stroke in restored.strokes_2d], [0, 1])
-        self.assertTrue(all(not stroke.is_closed for stroke in restored.strokes_2d))
+        self.assertTrue(
+            all(
+                "is_closed" not in stroke.get_fields_and_field_types()
+                for stroke in restored.strokes_2d
+            )
+        )
 
     def test_waypoints_preserve_pose_and_pen_state(self):
         """목표 위치 m·속도 mm/s·펜 상태를 별도 필드로 보존한다."""
@@ -75,7 +83,9 @@ class InterfaceTests(unittest.TestCase):
         waypoint.pose.position.x = 0.5
         waypoint.pose.orientation.w = 1.0
         response = GenerateTrajectory.Response(
-            success=True, waypoints_3d=[waypoint], pen_states=[False],
+            success=True,
+            waypoints_3d=[waypoint],
+            pen_states=[False],
             estimated_duration_sec=3.0,
         )
         restored = self.roundtrip(response)
@@ -98,7 +108,9 @@ class InterfaceTests(unittest.TestCase):
     def test_compliance_axes_are_six_values_without_enabling_control(self):
         """미사용 서비스의 고정 배열 형식만 검사하며 실제 순응제어는 하지 않는다."""
         request = SetCompliance.Request(
-            enable=False, axis=[0.0] * 6, stiffness=[0.0] * 6,
+            enable=False,
+            axis=[0.0] * 6,
+            stiffness=[0.0] * 6,
         )
         restored = self.roundtrip(request)
         self.assertFalse(restored.enable)
