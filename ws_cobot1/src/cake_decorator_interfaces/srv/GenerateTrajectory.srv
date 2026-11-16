@@ -1,17 +1,18 @@
-# 프론트엔드 JSON 형식에 맞춘 경로 변환 서비스
-# task_manager_node가 프론트엔드에서 받은 데이터를 그대로 전달한다.
-# 좌표는 모두 mm 단위 (케이크 중심 기준)이다.
-# 케이크는 원뿔대(frustum) 형태 — 윗면·아랫면 반지름이 다를 수 있다.
+# 프론트엔드 캔버스 픽셀 좌표 → 로봇 3D 좌표 변환 서비스
+# TM이 웹·브릿지에서 받은 원본 픽셀 좌표를 그대로 전달한다.
+# DP 노드 내부에서 픽셀→mm 변환 후 좌표 계산을 수행한다.
+# 케이크는 원통형(cylinder) — 반지름 하나 + 높이.
 
 # ─── Request ───
 string order_id                                     # 주문 ID
 uint32 operation_speed_percent                      # 작업 속도 (0~100%)
-cake_decorator_interfaces/StrokeMM[] strokes        # 획 데이터 (mm)
+cake_decorator_interfaces/Stroke2D[] strokes        # 획 데이터 (캔버스 픽셀 좌표)
 string surface_type                                 # "TOP" 또는 "SIDE"
-geometry_msgs/Pose cake_pose                        # 케이크 바닥면 중심 절대 좌표 (m)
-float64 cake_radius_top                             # 윗면 반지름 (m)
-float64 cake_radius_bottom                          # 아랫면 반지름 (m)
+geometry_msgs/Pose cake_pose                        # 케이크 윗면 중심 절대 좌표 (TCP 기록, m)
+float64 cake_radius                                 # 케이크 반지름 (m)
 float64 cake_height                                 # 케이크 높이 (m)
+float64 canvas_width                                # 캔버스 가로 크기 (px)
+float64 canvas_height                               # 캔버스 세로 크기 (px)
 ---
 # ─── Response ───
 bool success

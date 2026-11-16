@@ -7,7 +7,9 @@ from setuptools import find_packages, setup
 PACKAGE_NAME = "cake_decorator"
 
 # 설명서와 주석으로 된 설정·launch 틀을 함께 설치한다.
-# 구현된 브릿지만 등록한다. TM·DP·RE는 아직 실행할 수 없다.
+# 브릿지에 더해 좌표 변환 노드(DP)와 로봇 실행 노드(RE)도 ros2 run으로 실행할 수
+# 있도록 등록한다. 가상 로봇 환경에서 2D→3D 변환과 드로잉 실행을 검증하려면
+# 이 두 엔트리포인트가 필요하다. TM(task_manager)는 아직 등록하지 않는다.
 setup(
     name=PACKAGE_NAME,
     version="0.1.0",
@@ -39,6 +41,10 @@ setup(
     entry_points={
         "console_scripts": [
             "ros_bridge_node = cake_decorator.ros_bridge_node:main",
+            # 2D→3D 경로 변환 서비스 서버. TM이 호출하는 generate_trajectory를 제공한다.
+            "drawing_path_node = cake_decorator.drawing_path_node:main",
+            # DrawOnCake·GraspTool·PickAndPlace 액션 서버. 가상 로봇에 MoveLine을 보낸다.
+            "robot_executor_node = cake_decorator.robot_executor_node:main",
         ],
     },
 )
