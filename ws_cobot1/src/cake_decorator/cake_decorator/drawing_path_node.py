@@ -11,6 +11,9 @@
 
 TM(task_manager)이 요청하면 2D 스트로크를 3D 경로로 변환해 응답한다.
 실제 로봇 이동은 수행하지 않는다.
+
+케이크 치수(pose, radius, height)는 srv Request로 TM에서 전달받는다.
+drawing_speed 등 변환 설정만 yaml 파라미터로 관리한다.
 """
 
 from cake_decorator_interfaces.msg import Waypoint3D as Waypoint3DMsg
@@ -34,20 +37,12 @@ class DrawingPathNode(Node):
     def __init__(self):
         super().__init__('drawing_path_node')
 
-        # 파라미터 선언
+        # ── 변환 설정 파라미터 (yaml에서 로드) ──
         self.declare_parameter('drawing_speed', 20.0)
         self.declare_parameter('travel_speed', 50.0)
         self.declare_parameter('approach_height', 0.01)
         self.declare_parameter('drawing_z_offset', 0.0)
-
         self.declare_parameter('side_margin_ratio', 0.05)
-        # ── 케이크 치수 파라미터 ──
-        self.declare_parameter('cake_center_x', 0.0)
-        self.declare_parameter('cake_center_y', 0.0)
-        self.declare_parameter('cake_top_z', 0.0)
-        self.declare_parameter('cake_radius', 0.0)
-        self.declare_parameter('cake_height', 0.0)
-        self.declare_parameter('cake_orientation', 0.0)
 
         # 서비스 서버 등록
         self.srv = self.create_service(
@@ -75,44 +70,43 @@ class DrawingPathNode(Node):
             f'canvas={request.canvas_width}x{request.canvas_height}'
         )
 
-        # ROS 메시지 → 순수 Python 데이터 변환
+        # ── ROS 메시지 → 순수 Python 데이터 변환 ──
         strokes = []
         for s in request.strokes_2d:
             points = [Point2D(x=p.x, y=p.y) for p in s.points]
-
             strokes.append(Stroke2D(
                 stroke_id=s.stroke_id,
                 points=points,
                 is_closed=s.is_closed,
             ))
 
+        # ── 케이크 치수: srv Request에서 받아옴 ──
         cake_pose = CakePose(
-            x=self.get_parameter('cake_center_x').value,
-            y=self.get_parameter('cake_center_y').value,
-            z=self.get_parameter('cake_top_z').value
+            x=request.cake_pose.position.x,
+            y=request.cake_pose.position.y,
+            z=request.cake_pose.position.z,
         )
 
         config = self._load_config()
 
-        # 변환 실행
+        # ── 변환 실행 ──
         result = generate_trajectory(
             canvas_width=request.canvas_width,
             canvas_height=request.canvas_height,
             strokes=strokes,
             surface_type=request.surface_type,
             cake=cake_pose,
-            cake_radius=self.get_parameter('cake_radius').value,
-            cake_height=self.get_parameter('cake_height').value,
+            cake_radius=request.cake_radius,
+            cake_height=request.cake_height,
             config=config,
         )
 
-        # 순수 Python 결과 → ROS 메시지 변환
+        # ── 순수 Python 결과 → ROS 메시지 변환 ──
         response.success = result.success
         response.error_msg = result.error_msg
         response.estimated_duration_sec = result.estimated_duration_sec
 
         for wp in result.waypoints:
-
             msg = Waypoint3DMsg()
             msg.pose = Pose(
                 position=Point(
@@ -143,7 +137,6 @@ class DrawingPathNode(Node):
             self.get_logger().warn(f'경로 변환 실패: {result.error_msg}')
 
         return response
-
 
 
 def main(args=None):
