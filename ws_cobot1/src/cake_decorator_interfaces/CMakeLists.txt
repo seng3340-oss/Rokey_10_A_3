@@ -14,7 +14,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CakeParams.msg"
   "msg/WorkspaceCoords.msg"
   "msg/DrawingPath.msg"
+  # 임시 우회: StrokeMM 계열 메시지도 등록해 GenerateTrajectory.srv 빌드를 통과시킨다.
+  # 빌드 후 원본 CMakeLists로 되돌릴 예정이다.
   "msg/Stroke2D.msg"
+  "msg/StrokeMM.msg"
+  "msg/PointMM.msg"
+  "msg/PointMM3D.msg"
   "msg/Waypoint3D.msg"
   "srv/GenerateTrajectory.srv"
   "srv/SwitchTCP.srv"
