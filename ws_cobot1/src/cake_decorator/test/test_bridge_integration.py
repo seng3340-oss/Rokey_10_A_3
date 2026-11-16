@@ -209,7 +209,6 @@ class BridgeIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.tm.goals), 1)
         goal = self.tm.goals[0]
         self.assertAlmostEqual(goal.cake_params.center.z, 0.07525)
-        self.assertAlmostEqual(goal.cake_params.bottom_radius, 0.06)
         self.assertEqual(goal.drawing_paths[0].strokes[0].points[0].x, 500.5)
         self.assertTrue(
             self.http("/api/drawing", DRAWING)["order_id"] != receipt["order_id"]

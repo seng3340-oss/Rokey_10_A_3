@@ -1,21 +1,22 @@
-# 프론트엔드 JSON 형식에 맞춘 경로 변환 서비스
-# task_manager_node가 프론트엔드에서 받은 데이터를 그대로 전달한다.
-# 좌표는 모두 mm 단위 (케이크 중심 기준)이다.
-# 케이크는 원뿔대(frustum) 형태 — 윗면·아랫면 반지름이 다를 수 있다.
-
-# ─── Request ───
-string order_id                                     # 주문 ID
-uint32 operation_speed_percent                      # 작업 속도 (0~100%)
-cake_decorator_interfaces/StrokeMM[] strokes        # 획 데이터 (mm)
-string surface_type                                 # "TOP" 또는 "SIDE"
-geometry_msgs/Pose cake_pose                        # 케이크 바닥면 중심 절대 좌표 (m)
-float64 cake_radius_top                             # 윗면 반지름 (m)
-float64 cake_radius_bottom                          # 아랫면 반지름 (m)
-float64 cake_height                                 # 케이크 높이 (m)
+# TM → DP. 웹 원본 픽셀과 해상도를 전달하며 DP에서 점 선별·좌표 변환을 수행한다.
+uint32 canvas_width
+uint32 canvas_height
+cake_decorator_interfaces/Stroke2D[] strokes_2d
+# TOP 또는 SIDE. 그릴 면을 구분한다.
+string surface_type
+# BASE 기준 케이크 윗면 중심(m)과 케이크 프레임 방향(쿼터니언)이다.
+# 바닥 중심이 아니다. 실물에서는 접촉 TCP로 기록한 상면 위치를 사용한다.
+geometry_msgs/Pose cake_pose
+# 원통형 케이크. 반지름 0.05m, 높이 0.08m를 YAML에서 설정한다.
+float64 cake_radius
+float64 cake_height
+# 케이크 프레임과 구분되는 영점의 펜촉 TCP 자세다.
+geometry_msgs/Quaternion tool_orientation
 ---
-# ─── Response ───
+# DP → TM. 위치 m·자세 쿼터니언의 경로를 반환한다.
 bool success
 cake_decorator_interfaces/Waypoint3D[] waypoints_3d
+# waypoints_3d[i].pen_down과 길이·값이 일치해야 한다.
 bool[] pen_states
 float64 estimated_duration_sec
 string error_msg

@@ -7,13 +7,6 @@ from cake_decorator_interfaces.action import CakeOrder
 from cake_decorator_interfaces.msg import CakeParams, DrawingPath, Stroke2D
 
 
-def radius_at_depth(cake, depth):
-    """윗면에서 아래로 잰 깊이(m)에 따른 원뿔대 반지름을 반환한다."""
-    if not 0 <= depth <= cake.height or cake.height <= 0:
-        raise ValueError("깊이가 케이크 높이 밖입니다.")
-    return cake.radius + (cake.bottom_radius - cake.radius) * depth / cake.height
-
-
 def validate_reference(pose):
     """BASE mm·ZYZ degree 6값을 검사한다. 실제 접촉 여부는 사용자가 확인한다."""
     if len(pose) != 6 or not all(math.isfinite(float(value)) for value in pose):
@@ -27,11 +20,14 @@ def build_goal(claim, reference):
     cake = claim["cake"]
     if cake["reference"] != "tcp_at_top_center":
         raise ValueError("지원하지 않는 케이크 원점입니다.")
+    if "diameter_mm" not in cake:
+        raise ValueError(
+            "이전 경사 케이크 주문입니다. 새 원통형 설정으로 다시 접수해야 합니다."
+        )
     dimensions = [
         cake[key]
         for key in (
-            "top_diameter_mm",
-            "bottom_diameter_mm",
+            "diameter_mm",
             "height_mm",
             "board_width_mm",
             "board_depth_mm",
@@ -40,12 +36,11 @@ def build_goal(claim, reference):
     ]
     if not all(math.isfinite(value) and value > 0 for value in dimensions):
         raise ValueError("실측 치수가 유효하지 않습니다.")
-    top, bottom, height, width, depth, thickness = dimensions
-    if top > bottom or bottom > min(width, depth):
+    diameter, height, width, depth, thickness = dimensions
+    if diameter > min(width, depth):
         raise ValueError("케이크와 판의 크기가 맞지 않습니다.")
     params = CakeParams(
-        radius=top / 2000,
-        bottom_radius=bottom / 2000,
+        radius=diameter / 2000,
         height=height / 1000,
         board_width=width / 1000,
         board_depth=depth / 1000,
