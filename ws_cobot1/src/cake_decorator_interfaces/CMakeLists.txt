@@ -7,6 +7,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 
+# 원본 픽셀용 Stroke2D를 등록한다. mm 전용 입력 타입은 등록하지 않는다.
 # 별칭 타입을 추가하지 않는다. 표/다이어그램과의 이름 차이는 README에 기록한다.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TaskStatus.msg"

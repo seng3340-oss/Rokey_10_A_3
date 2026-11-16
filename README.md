@@ -30,7 +30,7 @@ ws_cobot_pjt/
 │   │   └── cake_workcell_bringup/      # 가상 로봇과 작업 환경 통합 launch
 │   └── doc/                   # 가상 환경 실행·설정 문서
 ├── ws_dsr/src/                # 두산·OnRobot RG2 드라이버와 강의 브링업
-├── config/                    # 웹·백엔드 공통 실측 케이크 치수
+├── config/                    # 웹·백엔드 공통 원통형 케이크 치수
 ├── scripts/                   # 실행·실측 형상 생성 스크립트
 ├── docs/                      # 설계·데이터 규격·환경 설명
 ├── docker/                    # Docker 설정을 둘 자리
@@ -119,11 +119,11 @@ ros2 launch cake_workcell_bringup virtual.launch.py
 ### 현재 모델 크기와 위치
 
 - 테이블: 가로 1200 × 세로 650mm, 상판 높이 960mm
-- 실측 플라스틱 케이크: 윗면 지름 113.5 / 아랫면 지름 120 / 높이 79mm
+- 확정 3D 프린트 원통형 케이크: 지름100 / 높이80mm
 - 케이크판: 179 × 179 × 두께 2mm 사각판
 - 타공판 조립체: 임시 배치. 현재 케이크 중심은 로봇 BASE 기준 X=500, Y=0mm
 
-실측 치수는 웹과 백엔드가 함께 읽는 `config/test_cake.json`에서 관리합니다.
+원통형 치수는 웹과 백엔드가 함께 읽는 `config/test_cake.json`에서 관리합니다.
 RViz 형상 갱신은 `python3 scripts/generate_test_cake_model.py`로 수행합니다.
 고정구 위치는 `ws_cobot1/src/cake_workcell_bringup/config/workcell.yaml`의 임시값입니다.
 실행 원점은 이 배치가 아니라 브릿지 시작 시 접촉 확인한 현재 TCP의 윗면 중심입니다.
@@ -171,7 +171,9 @@ Real은 기존 강의 브링업을 사용하며, 임시 위치의 테이블·케
 - [확정한 인터페이스 결정](docs/architecture/DECISIONS.md)
 - [인터페이스 패키지 빌드](ws_cobot1/src/cake_decorator_interfaces/README.md)
 
-## 플라스틱 케이크 주문 브릿지
+## 원통형 케이크와 주문 브릿지
 
-[실측 치수·영점·단일 주문·브릿지 실행 방법](docs/BRIDGE_TEST.md)을 참고합니다.
+[단일 주문·브릿지 실행 방법](docs/BRIDGE_TEST.md)을 참고합니다.
 TM은 `/cake/order` Action을 제공해야 하며 브릿지는 TM이 준비된 뒤에만 주문을 인수합니다.
+
+현재 원통형·원본 픽셀 계약은 [확정 통신 규격](docs/CYLINDER_PIXEL_CONTRACT.md)을 기준으로 합니다.

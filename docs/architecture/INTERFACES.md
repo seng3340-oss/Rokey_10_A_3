@@ -1,5 +1,7 @@
 # ROS 인터페이스 작업 기준
 
+현재 계약은 [원통형·원본 픽셀 규격](../CYLINDER_PIXEL_CONTRACT.md)이 우선합니다.
+
 기준 자료는 소은님이 2026-11-14 19:23 KST에 공유한
 「ROS2 케이크 데코레이션 자동화 시스템 아키텍처 설계 (1).pdf」입니다.
 [원문과 스레드](https://app.slack.com/archives/C0CGDTN7BPE/p1794651834002869)
