@@ -764,3 +764,50 @@ dialog {
     justify-content: flex-start;
   }
 }
+/* 독립 옆면 테스트만 감싼다. 기존 드로잉·HMI의 배치와 제어 스타일에 영향을 주지 않는다. */
+.side-midline-test {
+  margin: 24px 4% 40px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+}
+.side-midline-test h2 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+.side-midline-test p {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+/* 라벨·입력·실행을 가까이 두고 좁은 화면에서는 자연스럽게 줄바꿈한다. */
+.side-midline-test form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.side-midline-test input {
+  width: 120px;
+  min-height: 46px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+.side-midline-test input:focus-visible {
+  outline: 3px solid #267088;
+  outline-offset: 3px;
+}
+.side-midline-test button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent-dark);
+  color: #fff;
+}
+.side-midline-test .side-midline-test-error {
+  color: #a32618;
+  font-weight: 600;
+}

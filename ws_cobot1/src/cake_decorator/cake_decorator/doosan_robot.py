@@ -307,6 +307,33 @@ class DoosanRobotClient:
                 return False
             time.sleep(0.05)
 
+    def move_task_joint(self, target: DsrPos) -> bool:
+        """테스트의 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
+        joints = self._call("current_joints", GetCurrentPosj.Request())
+        if joints is None or not joints.success:
+            return False
+        solution = self._call(
+            "solution", GetSolutionSpace.Request(pos=list(joints.pos))
+        )
+        if solution is None or not solution.success:
+            return False
+        self._logger.info(
+            f"옆면 자세 전환: 현재 팔꿈치 해 {solution.sol_space} 유지, "
+            f"목표 TCP={target.to_list()}"
+        )
+        request = MoveJointx.Request(
+            pos=target.to_list(),
+            vel=10.0,
+            acc=20.0,
+            sol=solution.sol_space,
+            ref=DR_BASE,
+            mode=DR_MV_MOD_ABS,
+            sync_type=SYNC,
+        )
+        return self._call_checked("move_jointx", request) and self.verify_pose(
+            target.to_list()
+        )
+
     def execute_drawing_command(self, command) -> bool:
         """이동 종류만 분기한다. 액션 반복·획 완료 판단은 RE에 그대로 둔다."""
         if command.motion_type == MotionType.MOVE_SPLINE:

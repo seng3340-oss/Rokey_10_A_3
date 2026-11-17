@@ -306,3 +306,98 @@ def test_cleanup_survives_second_ctrl_c(tmp_path):
         interrupt.join()
         processes._signal_group(processes.children[0][1].pid, signal.SIGKILL)
         processes.close(grace=0.01, terminate_grace=0.01)
+
+
+def test_real_launch_defaults_to_local_discovery_without_changing_domain():
+    """실제 드라이버도 외부 검색 서버가 끊기면 모델 Topic을 못 받는 회귀를 막는다."""
+    env = {
+        "ROS_DISCOVERY_SERVER": "172.16.0.217:11811",
+        "ROS_SUPER_CLIENT": "TRUE",
+        "ROS_DOMAIN_ID": "30",
+        "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET",
+    }
+    launcher.configure_discovery("real", env)
+    assert "ROS_DISCOVERY_SERVER" not in env
+    assert "ROS_SUPER_CLIENT" not in env
+    assert env["ROS_DOMAIN_ID"] == "30"
+    assert env["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "LOCALHOST"
+
+
+def test_explicit_real_discovery_server_option_preserves_environment():
+    """교육장 외부 ROS 노드와 연동할 때만 명시적으로 기존 서버를 재사용한다."""
+    env = {
+        "CAKE_USE_DISCOVERY_SERVER": "1",
+        "ROS_DISCOVERY_SERVER": "host:11811",
+        "ROS_SUPER_CLIENT": "TRUE",
+        "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET",
+    }
+    before = env.copy()
+    launcher.configure_discovery("real", env)
+    assert env == before
+
+
+def test_virtual_discovery_stays_local_even_when_real_server_option_is_set():
+    """실제 모드용 옵션이 가상 로봇의 검색 격리를 해제하지 않게 한다."""
+    env = {"CAKE_USE_DISCOVERY_SERVER": "1", "ROS_DISCOVERY_SERVER": "host:11811"}
+    launcher.configure_discovery("virtual", env)
+    assert "ROS_DISCOVERY_SERVER" not in env
+    assert env["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "LOCALHOST"
+
+
+def test_input_prompt_keeps_driver_output_in_file_and_resumes_console(tmp_path, capsys):
+    """YES 입력 중 출력은 파일에만 남기고 확인 뒤 새 로그부터 다시 표시한다."""
+    processes = launcher.Processes(tmp_path, os.environ.copy())
+    during, after = tmp_path / "during", tmp_path / "after"
+    script = (
+        "import pathlib,sys,time\n"
+        "while not pathlib.Path(sys.argv[1]).exists():time.sleep(.01)\n"
+        "print('영점 대기 중 드라이버 로그',flush=True)\n"
+        "while not pathlib.Path(sys.argv[2]).exists():time.sleep(.01)\n"
+        "print('확인 후 드라이버 로그',flush=True)\n"
+    )
+    try:
+        processes.start(
+            "driver", [sys.executable, "-c", script, str(during), str(after)]
+        )
+        capsys.readouterr()
+        with processes.pause_console():
+            print("마지막 YES 안내", flush=True)
+            during.touch()
+            deadline = time.monotonic() + 3
+            while "영점 대기 중" not in (tmp_path / "driver.log").read_text():
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            output = capsys.readouterr().out
+            assert "마지막 YES 안내" in output
+            assert "영점 대기 중 드라이버 로그" not in output
+        after.touch()
+        processes.children[0][1].wait(timeout=3)
+    finally:
+        processes.close(grace=0.3, terminate_grace=0.3)
+    assert "[driver] 확인 후 드라이버 로그" in capsys.readouterr().out
+    assert (
+        tmp_path / "driver.log"
+    ).read_text() == "영점 대기 중 드라이버 로그\n확인 후 드라이버 로그\n"
+
+
+def test_input_cancel_restores_console_output(tmp_path):
+    """입력 취소·Ctrl+C에서도 로그 표시 상태가 복구되어 종료 로그가 보이게 한다."""
+    import pytest
+
+    processes = launcher.Processes(tmp_path, os.environ.copy())
+    with pytest.raises(KeyboardInterrupt):
+        with processes.pause_console():
+            raise KeyboardInterrupt
+    assert not processes._console_paused
+
+
+def test_tcp_diagnostic_distinguishes_flange_but_does_not_certify_pen():
+    """이름만 믿지 않고 플랜지 기준 TCP를 구분하되 교정 완료로 단정하지 않는다."""
+    flange = [393.0, -58.0, 504.0, 0.0, 180.0, 0.0]
+    assert launcher.describe_tcp("Pen_TCP", flange, flange)["tcp_at_flange"]
+    details = launcher.describe_tcp(
+        "GripperDA_v1", [393.0, -58.0, 264.0, 0.0, 180.0, 0.0], flange
+    )
+    assert details["flange_to_tcp_distance_mm"] == 240.0
+    assert not details["tcp_at_flange"]
+    assert details["tcp_name"] == "GripperDA_v1"

@@ -17,10 +17,24 @@ router = APIRouter(prefix="/api/orders", tags=["주문 조회"])
 
 
 def save_order(
-    database: Database, drawing: DrawingRequest, request_key: str | None = None
+    database: Database,
+    drawing: DrawingRequest,
+    request_key: str | None = None,
+    *,
+    cake_override: dict | None = None,
 ) -> str:
     """날짜별 주문 번호와 그림 저장을 하나의 트랜잭션으로 묶는다."""
     payload_hash = hashlib.sha256(drawing.model_dump_json().encode()).hexdigest()
+    # 별도 테스트는 그 주문에만 중간 단면 치수를 적용한다. 일반 주문의 설정이나
+    # 저장 형식은 바꾸지 않으며 테스트 치수도 재시도 식별에 포함한다.
+    cake_snapshot = load_cake_settings() if cake_override is None else cake_override
+    if cake_override is not None:
+        payload_hash = hashlib.sha256(
+            json.dumps(
+                {"drawing": drawing.model_dump(), "cake": cake_snapshot},
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
     now = datetime.now(ZoneInfo("Asia/Seoul"))
     order_date = now.strftime("%Y%m%d")
 
@@ -83,7 +97,7 @@ def save_order(
                 "received",
                 request_key,
                 payload_hash,
-                json.dumps(load_cake_settings()),
+                json.dumps(cake_snapshot),
                 now.isoformat(),
             ),
         )

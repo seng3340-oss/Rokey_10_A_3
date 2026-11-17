@@ -491,6 +491,12 @@ class RobotExecutorNode(Node):
     # 공통 액션 콜백
     # ==================================================================
 
+    def _execute_midline_command(self, command, index):
+        """임시 테스트 전용: 바깥으로 나온 세 번째 경유점에서만 관절 자세를 바꾼다."""
+        if index == 2:
+            return self._robot.move_task_joint(command.pos)
+        return self._robot.execute_drawing_command(command)
+
     def _execute_motion_command(self, command, index):
         """가상 첫 접근의 특이점 보완만 분리하며 획 완료·취소 판단은 유지한다."""
         if (
@@ -543,6 +549,13 @@ class RobotExecutorNode(Node):
 
         # 명령 실행
         total = len(plan.commands)
+        if request.drawing_surface == 'SIDE_MIDLINE_TEST':
+            contact = next(cmd for cmd in plan.commands if cmd.pen_down)
+            self.get_logger().info(
+                f'옆면 테스트: 접근 시작 Z={plan.commands[0].pos.z:.3f}mm, '
+                f'그리기 Z={contact.pos.z:.3f}mm, '
+                f'펜 몸통은 바깥·위쪽, 수직 기준 30도'
+            )
         completed_strokes = 0
         prev_stroke_idx = 0
 
@@ -571,7 +584,14 @@ class RobotExecutorNode(Node):
                     f'{cmd.phase.value}, {cmd.motion_type.value}'
                 )
             # DP가 지정한 직선·원호·스플라인 명령을 실행한다.
-            if not self._execute_motion_command(cmd, i):
+            if request.drawing_surface == 'SIDE_MIDLINE_TEST':
+                moved = self._execute_midline_command(cmd, i)
+            elif request.drawing_surface == 'SIDE' and i == 2 and not cmd.pen_down:
+                # 표면 바깥에서만 펜 자세를 바꾸고 현재 관절 해를 사용한다.
+                moved = self._robot.move_task_joint(cmd.pos)
+            else:
+                moved = self._execute_motion_command(cmd, i)
+            if not moved:
                 self.get_logger().error(
                     f'{cmd.motion_type.value} 실패 (#{i}): {cmd.pos.to_list()}'
                 )

@@ -50,7 +50,7 @@ class WebDrawingContractTests(unittest.TestCase):
         expected = (
             [False, True, True, False]
             if surface == "TOP"
-            else [False, False, False, True, True, False]
+            else [False, False, False, False, True, True, False]
         )
         self.assertEqual(response.pen_states, expected)
         return response.waypoints_3d
@@ -67,7 +67,7 @@ class WebDrawingContractTests(unittest.TestCase):
         """캔버스 여백을 제외한 옆면 띠 상하 끝이 케이크 상하단에 대응해야 한다."""
         strip_height = 896 * 80 / (math.pi * 100)
         top = (768 - strip_height) / 2
-        path = self.convert("SIDE", [(512, top), (512, top + strip_height)])[2:]
+        path = self.convert("SIDE", [(512, top), (512, top + strip_height)])[3:]
         self.assertAlmostEqual(path[1].pose.position.x, 0.45, places=6)
         self.assertAlmostEqual(path[1].pose.position.z, 0.142, places=6)
         self.assertAlmostEqual(path[2].pose.position.z, 0.062, places=6)

@@ -165,6 +165,11 @@ class DrawingPathNode(Node):
         )
 
         surface = request.surface_type.upper()
+        midline_test = surface == "SIDE_MIDLINE_TEST"
+        if midline_test:
+            surface = "SIDE"
+            if len(request.strokes_2d) != 1:
+                raise ValueError("중간 높이 테스트는 한 획만 허용합니다.")
         if surface not in ("TOP", "SIDE"):
             raise ValueError(f"지원하지 않는 surface_type입니다: {request.surface_type}")
         if not all(
@@ -201,7 +206,19 @@ class DrawingPathNode(Node):
             )
             total_input += len(raw_mm)
             total_selected += len(selected.points)
-            if surface == "TOP":
+            if midline_test:
+                self._convert_midline_test(
+                    selected.points,
+                    cake,
+                    approach_h,
+                    draw_spd,
+                    travel_spd,
+                    force,
+                    top_quat,
+                    waypoints,
+                    pen_states,
+                )
+            elif surface == "TOP":
                 self._convert_top_mm(
                     selected.points,
                     cake,
@@ -228,6 +245,7 @@ class DrawingPathNode(Node):
                     tilt_deg,
                     waypoints,
                     pen_states,
+                    reference_quat=top_quat,
                 )
             if len(waypoints) > 50000:
                 raise ValueError("표면 경로 명령 한도를 초과했습니다.")
@@ -241,6 +259,66 @@ class DrawingPathNode(Node):
         if pen_states != waypoint_states:
             raise ValueError("웨이포인트와 펜 상태 배열이 일치하지 않습니다.")
         return waypoints, waypoint_states
+
+    def _convert_midline_test(
+        self,
+        points,
+        cake,
+        clearance,
+        draw_speed,
+        travel_speed,
+        force,
+        reference_quat,
+        waypoints,
+        states,
+    ):
+        """원뿔대 중간 수평 단면 한 획만 검증한다. 일반 SIDE와 독립된 임시 경로다.
+
+        영점 자세로 상승→바깥 이동→그 자리에서 옆면 자세→중간 높이 접근→
+        접촉→원호→바깥으로 펜 떼기→상면 위로 복귀 순서를 명시한다.
+        세 번째 경유점의 자세 전환은 RE가 관절 속도로 제한해 실행한다.
+        """
+        if len(points) != 2:
+            raise ValueError("중간 높이 테스트는 선의 양 끝점 두 개만 허용합니다.")
+        first, last = points
+        length = last[0] - first[0]
+        # Point32가 ROS 직렬화를 거치며 생기는 수십 마이크로미터 미만의
+        # 반올림으로 허용 끝값 5mm·50mm를 잘못 거절하지 않게 한다.
+        tolerance = 0.001
+        if (
+            not 5.0 - tolerance <= length <= 50.0 + tolerance
+            or any(abs(height - cake.height / 2) > tolerance for _, height in points)
+            or abs((first[0] + last[0]) / 2 - math.pi * cake.radius) > tolerance
+        ):
+            raise ValueError("테스트는 로봇 방향의 중간 높이 5~50mm 수평선이어야 합니다.")
+        vertical_angle = self._param("side_pen_vertical_deg")
+        if not math.isfinite(vertical_angle) or not 0 < vertical_angle < 90:
+            raise ValueError("옆면 펜의 수직 기준 각도는 0~90도 사이여야 합니다.")
+        tilt = 90.0 - vertical_angle
+        start_quat = pen_quat_side(first[0], cake, tilt_deg=tilt)
+        end_quat = pen_quat_side(last[0], cake, tilt_deg=tilt)
+        upper_z = cake.cz + cake.height + clearance
+        outer_start = cake.side_abs_with_offset(*first, clearance)
+        outer_end = cake.side_abs_with_offset(*last, clearance)
+        upper_start = (outer_start[0], outer_start[1], upper_z)
+
+        def append(point, quat, speed, pen_down=False):
+            """펜 상태 배열과 각 경유점의 상태를 항상 함께 기록한다."""
+            waypoints.append(self._wp(*point, quat, speed, force, pen_down=pen_down))
+            states.append(pen_down)
+
+        append((cake.cx, cake.cy, upper_z), reference_quat, travel_speed)
+        append(upper_start, reference_quat, travel_speed)
+        append(upper_start, start_quat, travel_speed)
+        append(outer_start, start_quat, travel_speed)
+        append(cake.side_to_abs(*first), start_quat, draw_speed * 0.5, True)
+        # 높이가 일정하므로 실제 단면을 따라가는 단일 movec 원호가 된다.
+        self._side_leg(
+            first, last, cake, 0.0, draw_speed, force, tilt,
+            True, waypoints, states,
+        )
+        append(outer_end, end_quat, travel_speed)
+        append((outer_end[0], outer_end[1], upper_z), end_quat, travel_speed)
 
     def _convert_top_mm(
         self,
@@ -318,6 +396,7 @@ class DrawingPathNode(Node):
         tilt,
         waypoints,
         states,
+        reference_quat=None,
     ):
         """첫 접근은 상면 위, 획 사이는 바깥 반지름의 원호를 따라 이동한다."""
         first, last = points[0], points[-1]
@@ -332,7 +411,9 @@ class DrawingPathNode(Node):
         if previous is None:
             # 시작 TCP가 상면 중심인 계약을 따른다. 먼저 위로 빠져나와 원통 밖으로 간다.
             # 옆면 자세를 상면 위부터 유지해 수직 자세의 손목 특이점을 반복 통과하지 않는다.
-            top_quat = quat
+            # 영점 자세로 먼저 들어 올리고 케이크 바깥으로 이동한다.
+            # 펜 자세 변경은 그 다음 바깥 경유점에서 수행한다.
+            top_quat = reference_quat if reference_quat is not None else quat
             waypoints.append(
                 self._wp(
                     cake.cx,
@@ -345,11 +426,9 @@ class DrawingPathNode(Node):
             )
             states.append(False)
             x, y, _ = cake.side_abs_with_offset(first[0], cake.height, clearance)
-            waypoints.append(
-                self._wp(
-                    x, y, cake.cz + cake.height + clearance, quat, travel_speed, force
-                )
-            )
+            waypoints.append(self._wp(x, y, cake.cz + cake.height + clearance, top_quat, travel_speed, force))
+            states.append(False)
+            waypoints.append(self._wp(x, y, cake.cz + cake.height + clearance, quat, travel_speed, force))
             states.append(False)
             x, y, z = cake.side_abs_with_offset(*first, clearance)
             waypoints.append(self._wp(x, y, z, quat, travel_speed, force))

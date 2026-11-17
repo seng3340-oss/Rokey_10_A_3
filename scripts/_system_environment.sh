@@ -19,9 +19,6 @@ fi
 source "$robot_setup"
 source "$project_root/ws_cobot1/install/local_setup.bash"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-30}"
-if [[ "$mode" == virtual ]]; then
-  # 교육장 검색 서버에 연결하지 않고 이 컴퓨터 안의 가상 노드끼리만 통신한다.
-  unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
-  export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-fi
+# 가상·실제 모드의 검색 정책은 Python에서 ROS 초기화 전에 함께 적용한다.
+# source한 환경의 외부 검색 서버가 실제 모드에만 남는 불일치를 막는다.
 exec python3 "$project_root/scripts/system_launcher.py" --mode "$mode" "$@"

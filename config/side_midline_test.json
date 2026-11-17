@@ -1,0 +1,8 @@
+{
+  "top_diameter_mm": 113.5,
+  "bottom_diameter_mm": 120.0,
+  "height_mm": 79.0,
+  "default_line_length_mm": 30.0,
+  "min_line_length_mm": 5.0,
+  "max_line_length_mm": 50.0
+}

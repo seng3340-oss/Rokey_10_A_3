@@ -17,3 +17,6 @@ frontend/dist/
 # 서버가 생성하는 주문 DB와 테스트 캐시
 /backend/data/
 .pytest_cache/
+
+# 실제 펜 장착 상태별 실측 교정값은 각 로봇에서 따로 보관한다.
+/config/local/

@@ -15,6 +15,7 @@ from .database import Database
 from .bridge import router as bridge_router
 from .drawings import router as drawing_router
 from .orders import router as order_router
+from .side_midline import router as side_midline_router
 
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data" / "orders.sqlite3"
@@ -92,6 +93,7 @@ def create_app(
     app.add_middleware(BodyLimitMiddleware, max_bytes=max_body_bytes)
     app.include_router(drawing_router)
     app.include_router(order_router)
+    app.include_router(side_midline_router)
     app.include_router(bridge_router)
 
     @app.exception_handler(RequestValidationError)
