@@ -59,7 +59,7 @@ class DrawingPathNode(Node):
         self.declare_parameter("side_path_error_mm", 0.1)
         self.declare_parameter("side_diagonal_mode", "spline")
         self.declare_parameter("side_pen_vertical_deg", 30.0)
-        self.declare_parameter("pen_tilt_deg", 30.0)  # 펜 기울기 (도)
+        self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
         # TOP: 수직에서 기울어지는 각도 (0=수직, 30=30도 기울임)
         # SIDE: 법선에서 아래로 기울어지는 각도
 
@@ -152,6 +152,17 @@ class DrawingPathNode(Node):
         z_offset = self._param("drawing_z_offset")
         force = self._param("default_contact_force")
         tilt_deg = self._param("pen_tilt_deg")
+        # 실제 주문은 YES 시점의 펜 자세를 고정해 쓴다. 이전 클라이언트처럼
+        # 쿼터니언이 모두 0이면 기본 수직 자세로 대체한다. 옆면은 별도 계산한다.
+        reference = request.cake_pose.orientation
+        top_quat = (reference.x, reference.y, reference.z, reference.w)
+        norm = math.sqrt(sum(value * value for value in top_quat))
+        if not math.isfinite(norm):
+            raise ValueError("영점 펜 자세가 유효하지 않습니다.")
+        top_quat = (
+            tuple(value / norm for value in top_quat)
+            if norm > 1e-8 else pen_quat_top(tilt_deg=tilt_deg)
+        )
 
         surface = request.surface_type.upper()
         if surface not in ("TOP", "SIDE"):
@@ -202,6 +213,7 @@ class DrawingPathNode(Node):
                     tilt_deg,
                     waypoints,
                     pen_states,
+                    reference_quat=top_quat,
                 )
             else:
                 previous_side_end = self._convert_side_mm(
@@ -242,9 +254,10 @@ class DrawingPathNode(Node):
         tilt,
         waypoints,
         states,
+        reference_quat=None,
     ):
         """선별된 상면 점을 변환한다. 획 시작·끝과 펜 상태 전환은 바꾸지 않는다."""
-        quat = pen_quat_top(tilt_deg=tilt)
+        quat = reference_quat if reference_quat is not None else pen_quat_top(tilt_deg=tilt)
         x, y, z = cake.top_to_abs(*points[0])
         waypoints.append(self._wp(x, y, z + clearance, quat, travel_speed, force))
         states.append(False)

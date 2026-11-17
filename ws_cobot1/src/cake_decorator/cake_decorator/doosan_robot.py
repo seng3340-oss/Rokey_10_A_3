@@ -140,7 +140,21 @@ class DoosanRobotClient:
             return False
         if not result.success:
             self._logger.warn(f"{key} 명령 실패")
-        return result.success
+            return False
+        # 실제 제어기도 도달 불가 경고와 함께 success=True를 반환한 사례가 있다.
+        # 동기 BASE 절대 이동은 TCP 위치·자세까지 확인해야 완료로 처리할 수 있다.
+        if (
+            key in {"move_line", "move_circle", "move_spline"}
+            and request.sync_type == SYNC
+            and request.ref == DR_BASE
+            and request.mode == DR_MV_MOD_ABS
+        ):
+            target = (
+                list(request.pos)
+                if key == "move_line" else list(request.pos[-1].data)
+            )
+            return self.verify_pose(target)
+        return True
 
     # ------------------------------------------------------------------
     # 이동 명령
@@ -265,17 +279,18 @@ class DoosanRobotClient:
             )
             if not self._call_checked("move_jointx", request):
                 return False
-            if not self._verify_virtual_pose(goal):
+            if not self.verify_pose(goal):
                 return False
         return True
 
-    def _verify_virtual_pose(self, target) -> bool:
-        """응답만 성공한 가상 이동을 걸러내고 실제 TCP 도달을 확인한다."""
+    def verify_pose(self, target) -> bool:
+        """가상·실제 모두 응답만 성공한 이동을 걸러내고 TCP 도달을 확인한다."""
         from scipy.spatial.transform import Rotation
 
         deadline = time.monotonic() + 1.0
         expected = Rotation.from_euler("ZYZ", target[3:], degrees=True)
         while True:
+            actual = None
             result = self._call("current_pose", GetCurrentPosx.Request(ref=DR_BASE))
             if result and result.success and result.task_pos_info:
                 actual = list(result.task_pos_info[0].data[:6])
@@ -285,7 +300,10 @@ class DoosanRobotClient:
                 if math.dist(actual[:3], target[:3]) < 0.5 and angle < 0.5:
                     return True
             if time.monotonic() >= deadline:
-                self._logger.error(f"가상 접근 목표 미도달: 목표={target}")
+                self._logger.error(
+                    f"이동 목표 미도달: 목표={target}, "
+                    f"관측={actual if actual is not None else '조회 실패'}"
+                )
                 return False
             time.sleep(0.05)
 

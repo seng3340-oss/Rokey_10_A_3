@@ -20,6 +20,9 @@ drawing_path_node:
     side_diagonal_mode: spline
     side_pen_vertical_deg: 30.0
     drawing_z_offset: 0.0
+    # TOP은 YES 시점의 펜 자세를 우선 유지하고, 영점 자세가 없을 때만 수직을 쓴다.
+    # SIDE의 수직 기준 30도 설정과 별개다.
+    pen_tilt_deg: 0.0
     side_margin_ratio: 0.05
     # cake_center_x/y와 cake_top_z는 티칭 전이므로 기본 실행 좌표로 넣지 않는다.
     # TM이 기록한 윗면 중심을 GenerateTrajectory.cake_pose로 전달한다.

@@ -155,14 +155,14 @@ class TaskManagerNode(Node):
 
     # ── 드로잉 실행 (GenerateTrajectory → DrawOnCake) ──
 
+    @staticmethod
+    def _reference_pose(cake):
+        """브릿지가 YES 시점에 기록한 펜촉 위치·자세를 DP까지 보존한다."""
+        return Pose(position=cake.center, orientation=cake.tool_orientation)
+
     def _execute_drawing(self, request: CakeOrder.Goal, goal_handle) -> bool:
         cake = request.cake_params
-
-        cake_pose = Pose()
-        cake_pose.position = Point(
-            x=cake.center.x, y=cake.center.y, z=cake.center.z,
-        )
-        cake_pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
+        cake_pose = self._reference_pose(cake)
 
         total_paths = len(request.drawing_paths)
         drawing_speed = self.get_parameter('drawing_speed').value
