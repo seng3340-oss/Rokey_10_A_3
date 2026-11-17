@@ -188,12 +188,15 @@
       </geometry>
       <material name="tray_line" />
     </visual>
-    <visual name="corner_grip">
-      <origin xyz="0.065 -0.065 0.025" rpy="-0.27 0 0.785398163" />
+    <!-- 틀의 원점은 윗면 중심이다. 케이크 메시의 밑면 Z=0을 여기에 맞춘다. -->
+    <visual name="drawing_cake">
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.032 0.007 0.054" />
+        <mesh filename="package://cake_workcell_description/meshes/test_cake.stl" />
       </geometry>
-      <material name="tray_white" />
+      <material name="drawing_cake_cream">
+        <color rgba="0.97 0.83 0.60 1" />
+      </material>
     </visual>
   </link>
   <joint name="station_to_tray" type="fixed">

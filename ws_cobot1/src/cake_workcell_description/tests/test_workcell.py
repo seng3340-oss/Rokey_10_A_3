@@ -104,6 +104,19 @@ class WorkcellTests(unittest.TestCase):
                 box = robot.find(f"link[@name='{tray}']/visual/geometry/box")
                 self.assertEqual(box.get("size"), "0.15 0.15 0.003")
 
+    def test_station_tray_shows_cake_and_separate_opener(self):
+        """기존 원통 메시를 틀 상면 중심에 놓고 따개의 독립 배치를 확인한다."""
+        robot = self.model()
+        tray = robot.find("link[@name='cake_tray_surface']")
+        self.assertIsNone(tray.find("visual[@name='corner_grip']"))
+        cake = tray.find("visual[@name='drawing_cake']")
+        self.assertEqual(cake.find("origin").get("xyz"), "0 0 0")
+        self.assertEqual(
+            cake.find("geometry/mesh").get("filename"),
+            "package://cake_workcell_description/meshes/test_cake.stl",
+        )
+        self.assertIsNotNone(robot.find("link[@name='cake_opener']/visual/geometry/mesh"))
+
     def test_station_opening_and_base_contacts(self):
         """실제 메시에서 아랫판 접합과 40mm 개구부, 10mm 돌출을 확인한다."""
         def bounds(stem):
