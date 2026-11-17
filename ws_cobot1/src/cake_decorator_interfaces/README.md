@@ -1,7 +1,7 @@
-# 케이크 ROS 인터페이스 초안
+# 케이크 ROS 인터페이스
 
-현재 기준은 **지름100mm·높이80mm 원통, 원본 픽셀 입력, 윗면 중심**입니다.
-[최신 통신·설정 규격](../../../docs/CYLINDER_PIXEL_CONTRACT.md)을 우선합니다. 아래 원뿔대·이전 치수 설명은 과거 테스트 기록입니다.
+현재 인터페이스는 **원뿔대·원통형 공통 치수(윗면/아랫면 반지름), 원본 픽셀 입력, 윗면 중심**을 사용합니다.
+두 반지름이 같으면 원통형으로 표현됩니다. 현재 공유 설정은 윗지름113.5mm·밑지름120mm·높이79mm입니다.
 
 
 소은님이 2026-11-14 19:23 KST에 공유한 시스템 설계 PDF의 **상세 정의 파일**을 옮겼습니다.
@@ -17,7 +17,7 @@
 cake_decorator_interfaces/
 ├── msg/
 │   ├── TaskStatus.msg        # /task_status로 전달할 공정 상태
-│   ├── CakeParams.msg        # 케이크 중심·반지름·높이·방향
+│   ├── CakeParams.msg        # 윗면·아랫면 중심 반지름·높이·방향
 │   ├── WorkspaceCoords.msg   # 사전 지정 작업 위치
 │   ├── DrawingPath.msg       # TOP/SIDE별 원본 획 배열
 │   ├── Stroke2D.msg          # Point32 원본 픽셀 좌표·획 번호
@@ -59,8 +59,11 @@ PDF 폴더 트리의 cake_decoration_interfaces는 참조 이름과 달라 확�
 - 기본 생성된 Pose는 측정·검증한 목표가 아닙니다. 위치와 쿼터니언 유효성을 실행 전에 검사해야 합니다.
 - 사용자 승인: canvas_width/height를 DrawingPath와 GenerateTrajectory에 추가하고 stroke_id를 Stroke2D에 보존합니다.
 - 2026-11-16: is_closed 필드를 제거했습니다. 원본 좌표에 없는 끝점 연결을 하지 않습니다.
-- CakeParams는 실측 원뿔대·판 치수와 BASE 윗면 중심·TCP 자세를 전달합니다.
-- GenerateTrajectory에는 cake_bottom_radius를 추가했습니다. DP는 경사 옆면을 반영해야 합니다.
-- 웹 top/side는 ROS 경계에서 TOP/SIDE로 바꿉니다. 실제 변환·요청 전달 코드는 아직 연결하지 않았습니다.
+- CakeParams의 radius와 bottom_radius는 각각 윗면·아랫면 반지름(m)입니다.
+- GenerateTrajectory는 두 반지름(m), 높이(m), BASE 윗면 중심 Pose와 원본 픽셀 획을 DP로 전달합니다.
+- bottom_radius가 radius와 다르면 DP가 높이에 따른 반지름과 경사 법선을 반영합니다.
+- 웹 top/side는 ROS 경계에서 TOP/SIDE로 바꿉니다. TM은 원본 픽셀과 두 반지름을 DP 서비스에 전달합니다.
 - SetCompliance 형식이 생성되더라도 순응제어가 활성화되는 것은 아닙니다.
 - 브릿지는 별도 cake_decorator 패키지에 구현했습니다. TM·DP·RE와 실제 이동은 구현 전입니다.
+
+`GenerateTrajectory.cake_pose.orientation`은 영점 펜 TCP 자세입니다. 케이크 평면 회전은 별도 `cake_yaw`(rad)로 보냅니다. 해상도 서비스 필드는 float64이므로 TM은 float로 변환해 직렬화합니다.

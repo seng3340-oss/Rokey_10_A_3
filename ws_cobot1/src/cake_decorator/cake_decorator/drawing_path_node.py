@@ -1,12 +1,12 @@
-"""GenerateTrajectory 서비스 서버 노드 — 원통형(cylinder) 케이크.
+"""GenerateTrajectory 서비스 서버 노드 — 원뿔대(frustum) 케이크.
 
 TM이 프론트엔드에서 받은 캔버스 픽셀 좌표를 그대로 전달하면,
-DP(이 노드) 내부에서 픽셀→mm 변환 후 원통형 좌표 계산을 수행하여
+DP(이 노드) 내부에서 픽셀→mm 변환 후 원뿔대 좌표 계산을 수행하여
 로봇 절대 좌표 3D 경로로 응답한다.
 
 전체 흐름:
   웹(픽셀) → 백엔드 → 브릿지·TM → 이 노드(DP)
-  DP 내부: 픽셀→mm → 원통형 3D 계산 → Waypoint3D[]
+  DP 내부: 픽셀→mm → 원뿔대 3D 계산 → Waypoint3D[]
   → robot_executor_node → 로봇 이동
 
 좌표계 약속:
@@ -25,6 +25,7 @@ from geometry_msgs.msg import Point, Pose, Quaternion
 import rclpy
 from rclpy.node import Node
 
+from .frustum_path import DrawingFrustum, pixel_to_path_mm
 from .path_simplification import simplify_stroke_mm
 from .surface_path import (
     side_surface_leg,
@@ -34,10 +35,8 @@ from .surface_path import (
 )
 
 from .drawing_geometry import (
-    CylinderCake,
     pen_quat_side,
     pen_quat_top,
-    pixel_to_mm_side,
     pixel_to_mm_top,
 )
 
@@ -68,7 +67,7 @@ class DrawingPathNode(Node):
             "generate_trajectory",
             self._handle_request,
         )
-        self.get_logger().info("drawing_path_node 서비스 서버 시작 (pixel→cylinder)")
+        self.get_logger().info("drawing_path_node 서비스 서버 시작 (pixel→frustum)")
 
     def _param(self, name: str):
         return self.get_parameter(name).value
@@ -120,7 +119,7 @@ class DrawingPathNode(Node):
         """캔버스 픽셀 좌표 → 로봇 절대 좌표 Waypoint3D 변환.
 
         1. 윗면 중심(TCP) → 바닥 중심으로 변환
-        2. CylinderCake 생성
+        2. DrawingFrustum 생성
         3. 각 스트로크의 픽셀 좌표 → mm → 3D 절대 좌표
         """
         # ── 윗면 중심 → 바닥 중심 변환 (m → mm) ──
@@ -130,11 +129,15 @@ class DrawingPathNode(Node):
         cake_height_mm = request.cake_height * 1000.0
         cake_radius_mm = request.cake_radius * 1000.0
 
+        if not math.isfinite(request.cake_yaw):
+            raise ValueError("케이크 회전각은 유한 값이어야 합니다.")
         bottom_z = top_z - cake_height_mm  # 바닥 중심 Z
 
-        # ── CylinderCake 생성 (바닥 중심 기준, mm) ──
-        cake = CylinderCake(
-            radius=cake_radius_mm,
+        # ── 실제 반지름과 고정 경로 호 좌표를 연결한다 (바닥 중심 기준, mm). ──
+        cake = DrawingFrustum(
+            r_top=cake_radius_mm,
+            r_bottom=request.cake_bottom_radius * 1000.0,
+            yaw=request.cake_yaw,
             height=cake_height_mm,
             cx=top_x,  # X, Y는 윗면·바닥 동일
             cy=top_y,
@@ -169,7 +172,7 @@ class DrawingPathNode(Node):
             raise ValueError(f"지원하지 않는 surface_type입니다: {request.surface_type}")
         if not all(
             math.isfinite(v) and v > 0
-            for v in (canvas_w, canvas_h, cake.radius, cake.height, approach_h)
+            for v in (canvas_w, canvas_h, cake.r_top, cake.r_bottom, cake.height, approach_h)
         ):
             raise ValueError("해상도·케이크 치수·접근 거리는 양수여야 합니다.")
         if surface == "SIDE" and z_offset < 0:
@@ -187,13 +190,23 @@ class DrawingPathNode(Node):
             if len(pts_px) < 2:
                 continue
 
-            converter = pixel_to_mm_top if surface == "TOP" else pixel_to_mm_side
+            converter = pixel_to_mm_top if surface == "TOP" else pixel_to_path_mm
             args = (
-                (canvas_w, canvas_h, cake.radius)
+                (canvas_w, canvas_h, cake.r_top)
                 if surface == "TOP"
-                else (canvas_w, canvas_h, cake.radius, cake.height)
+                else (canvas_w, canvas_h, cake)
             )
+            if not all(
+                math.isfinite(x) and math.isfinite(y)
+                and 0 <= x <= canvas_w and 0 <= y <= canvas_h
+                for x, y in pts_px
+            ):
+                raise ValueError("원본 픽셀이 캔버스 범위를 벗어났습니다.")
             raw_mm = [converter(x, y, *args) for x, y in pts_px]
+            if surface == "TOP" and any(
+                math.hypot(x, y) > cake.r_top + 1e-4 for x, y in raw_mm
+            ):
+                raise ValueError("점이 윗면 원형 영역 밖입니다.")
             selected = simplify_stroke_mm(
                 raw_mm,
                 self._param("simplify_tolerance_mm"),
@@ -327,7 +340,9 @@ class DrawingPathNode(Node):
         if not math.isfinite(vertical_angle) or not 0 < vertical_angle < 90:
             raise ValueError("옆면 펜의 수직 기준 각도는 0~90도 사이여야 합니다.")
         # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 30도면 해당 함수에는 60도.
-        tilt = 90.0 - vertical_angle
+        # 경사 법선은 이미 아래로 기울어져 있다. 그 각도를 빼야 PR #16의
+        # 수직 기준 펜 각도가 원뿔대에서도 그대로 유지된다.
+        tilt = 90.0 - vertical_angle - math.degrees(cake.slant_angle)
         if not all(0 <= h <= cake.height for _, h in points):
             raise ValueError("옆면 입력이 편집 띠 높이 밖입니다.")
         quat = pen_quat_side(first[0], cake, tilt_deg=tilt)

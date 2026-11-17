@@ -1,18 +1,20 @@
-# 프론트엔드 캔버스 픽셀 좌표 → 로봇 3D 좌표 변환 서비스
-# TM이 웹·브릿지에서 받은 원본 픽셀 좌표를 그대로 전달한다.
-# DP 노드 내부에서 픽셀→mm 변환 후 좌표 계산을 수행한다.
-# 케이크는 원통형(cylinder) — 반지름 하나 + 높이.
+# 원본 픽셀 획 → 원뿔대 표면 기준 로봇 3D 좌표 변환 서비스
+# TM은 픽셀 획과 해상도, 케이크 실측 치수를 그대로 전달한다.
+# DP가 픽셀→mm 변환과 원뿔대 표면 좌표·자세 계산을 수행한다.
 
 # ─── Request ───
 string order_id                                     # 주문 ID
 uint32 operation_speed_percent                      # 작업 속도 (0~100%)
 cake_decorator_interfaces/Stroke2D[] strokes_2d     # 획 데이터 (캔버스 픽셀, 왼쪽 위 = (0,0))
 string surface_type                                 # "TOP" 또는 "SIDE"
+# cake_pose.orientation은 영점 TCP 펜 자세이며 케이크 평면 회전과 별개다.
+float64 cake_yaw                                     # 케이크 평면 회전(rad)
 geometry_msgs/Pose cake_pose                        # 케이크 윗면 중심 절대 좌표 (TCP 기록, m)
-float64 cake_radius                                 # 케이크 반지름 (m)
+float64 cake_radius                                 # 윗면 반지름 (m)
+float64 cake_bottom_radius                          # 아랫면 반지름 (m)
 float64 cake_height                                 # 케이크 높이 (m)
-float64 canvas_width                                # 캔버스 가로 크기 (px)
-float64 canvas_height                               # 캔버스 세로 크기 (px)
+float64 canvas_width                                  # 캔버스 가로 크기 (px)
+float64 canvas_height                                 # 캔버스 세로 크기 (px)
 
 ---
 # 요청과 응답을 나누는 이 구분자(---)가 없으면 rosidl이 서비스로 인식하지 못해

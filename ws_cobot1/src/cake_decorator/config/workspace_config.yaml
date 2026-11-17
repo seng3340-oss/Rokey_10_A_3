@@ -4,11 +4,13 @@
 # 아직 측정하지 않은 픽업·거치대·출고 좌표는 임의의 0으로 채우지 않는다.
 drawing_path_node:
   ros__parameters:
-    # 확정된 3D 프린트 원통: 지름100mm, 높이80mm.
-    cake_radius: 0.05
-    cake_height: 0.08
+    # 확정 원뿔대: 윗지름113.5mm, 밑지름120mm, 높이79mm.
+    # 실제 경로 치수는 주문 요청이 전달하며 이 값은 문서용 기본 치수다.
+    cake_radius: 0.05675
+    cake_bottom_radius: 0.06
+    cake_height: 0.079
     cake_orientation: 0.0
-    # 변환 설정은 원래 원통형 노드 기준 단위로 복원한다.
+    # 아래 접근·속도 설정은 PR #16의 실행 계약을 유지한다.
     # 테스트2 종이 검증의 30mm/s를 기준으로 한다. 웹 비율은 이 값에 곱한다.
     drawing_speed: 30.0
     travel_speed: 80.0

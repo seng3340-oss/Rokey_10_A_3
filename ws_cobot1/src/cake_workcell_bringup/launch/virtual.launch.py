@@ -9,7 +9,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Opaq
 import runpy
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PythonExpression
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 import yaml
@@ -55,7 +55,6 @@ def generate_launch_description():
         DeclareLaunchArgument("fixture_z", default_value=str(config["z_mm"] / 1000)),
         DeclareLaunchArgument("fixture_yaw", default_value=str(math.radians(config["yaw_deg"]))),
         DeclareLaunchArgument("show_rviz", default_value="true"),
-        DeclareLaunchArgument("show_contact_ink", default_value="true"),
         DeclareLaunchArgument("pen_extension_cm", default_value=""),
     ]
 
@@ -88,28 +87,6 @@ def generate_launch_description():
             package="tf2_ros", executable="static_transform_publisher",
             name="robot_to_workcell",
             arguments=["--x", "0", "--y", "0", "--z", "0", "--frame-id", "base_link", "--child-frame-id", "workcell_root"],
-        ),
-        # 관측 전용 잉크 표시: 가상 펜촉 TF가 실제 표면 허용거리 안에 있을 때만 남긴다.
-        # 고정구 설치 위치를 바꾸면 케이크 중심도 같은 변환을 적용한다.
-        Node(
-            package="cake_decorator", executable="virtual_ink_node",
-            condition=IfCondition(LaunchConfiguration("show_contact_ink")),
-            parameters=[{
-                "center_x": ParameterValue(PythonExpression([
-                    LaunchConfiguration("fixture_x"), "+0.085*math.cos(",
-                    LaunchConfiguration("fixture_yaw"), ")-0.085*math.sin(",
-                    LaunchConfiguration("fixture_yaw"), ")",
-                ]), value_type=float),
-                "center_y": ParameterValue(PythonExpression([
-                    LaunchConfiguration("fixture_y"), "+0.085*math.sin(",
-                    LaunchConfiguration("fixture_yaw"), ")+0.085*math.cos(",
-                    LaunchConfiguration("fixture_yaw"), ")",
-                ]), value_type=float),
-                "top_z": ParameterValue(PythonExpression([
-                    LaunchConfiguration("fixture_z"), "+0.142",
-                ]), value_type=float),
-            }],
-            output="screen",
         ),
         Node(
             package="rviz2", executable="rviz2", name="workcell_rviz",

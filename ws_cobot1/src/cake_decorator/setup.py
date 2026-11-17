@@ -42,8 +42,6 @@ setup(
     entry_points={
         "console_scripts": [
             "ros_bridge_node = cake_decorator.ros_bridge_node:main",
-            "virtual_ink_node = cake_decorator.virtual_ink_node:main",
-            "surface_wave_test = cake_decorator.surface_wave_test:main",
             # 2D→3D 경로 변환 서비스 서버. TM이 호출하는 generate_trajectory를 제공한다.
             "drawing_path_node = cake_decorator.drawing_path_node:main",
             # DrawOnCake·GraspTool·PickAndPlace 액션 서버. 가상 로봇에 MoveLine을 보낸다.

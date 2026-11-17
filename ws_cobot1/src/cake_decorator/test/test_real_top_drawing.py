@@ -28,6 +28,7 @@ def test_top_path_keeps_reference_orientation_including_lift():
         request = GenerateTrajectory.Request()
         request.canvas_width, request.canvas_height = 1024.0, 768.0
         request.cake_radius, request.cake_height = 0.05, 0.08
+        request.cake_bottom_radius = 0.05
         request.cake_pose.position.x, request.cake_pose.position.z = 0.373, 0.528
         request.cake_pose.orientation = Quaternion(
             x=0.002, y=math.sqrt(1 - 0.002**2), z=0.0, w=0.0

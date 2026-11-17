@@ -157,6 +157,8 @@ class VirtualDrawDemo(Node):
         request.surface_type = 'TOP'
         request.cake_pose = CAKE_POSE
         request.cake_radius = CAKE_RADIUS
+        # 이 데모는 기존 원통 검증이므로 두 반지름을 같게 지정한다.
+        request.cake_bottom_radius = CAKE_RADIUS
         request.cake_height = CAKE_HEIGHT
         request.canvas_width = float(CANVAS_W)
         request.canvas_height = float(CANVAS_H)

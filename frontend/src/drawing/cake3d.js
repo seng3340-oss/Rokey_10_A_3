@@ -34,11 +34,11 @@ export function cakeView(container, textures) {
       t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
     }
     // 실측 치수의 공통 축척을 사용하여 케이크 지름·높이와 판의 크기를 함께 맞춘다.
-    // 위아래 반지름이 같은 원통는 옆면만 담당하고, 윗면은 별도 원판으로 올려 서로 다른 그림을 입힌다.
+    // 윗면·아랫면 반지름을 따로 적용한 원뿔대에 옆면 그림을 입힌다.
     const side = new THREE.Mesh(
       new THREE.CylinderGeometry(
         MODEL_SIZE.cakeRadius,
-        MODEL_SIZE.cakeRadius,
+        MODEL_SIZE.cakeBottomRadius,
         MODEL_SIZE.cakeHeight,
         96,
         1,
@@ -49,7 +49,7 @@ export function cakeView(container, textures) {
     );
     side.position.y = MODEL_SIZE.cakeBottom + MODEL_SIZE.cakeHeight / 2;
     group.add(side);
-    // 원판을 수평으로 눕혀 원통 위에 배치한다. 미세한 높이 차이로 겹침을 피한다.
+    // 원판을 수평으로 눕혀 원뿔대 위에 배치한다. 미세한 높이 차이로 겹침을 피한다.
     const top = new THREE.Mesh(
       new THREE.CircleGeometry(MODEL_SIZE.cakeRadius, 96),
       new THREE.MeshStandardMaterial({ map: topTexture, roughness: 0.9 }),

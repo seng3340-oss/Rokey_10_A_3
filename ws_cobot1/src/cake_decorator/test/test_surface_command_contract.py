@@ -42,6 +42,7 @@ class SurfaceContractTests(unittest.TestCase):
         request = GenerateTrajectory.Request()
         request.canvas_width, request.canvas_height = 1024.0, 768.0
         request.cake_radius, request.cake_height = 0.05, 0.08
+        request.cake_bottom_radius = 0.05
         request.cake_pose.position.x = 0.5
         request.cake_pose.position.z = 0.15
         request.operation_speed_percent = 100

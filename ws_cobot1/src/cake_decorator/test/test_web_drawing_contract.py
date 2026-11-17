@@ -32,6 +32,7 @@ class WebDrawingContractTests(unittest.TestCase):
         request.canvas_height = 768.0
         request.surface_type = surface
         request.cake_radius = 0.05
+        request.cake_bottom_radius = 0.05
         request.cake_height = 0.08
         request.cake_pose.position.x = 0.5
         request.cake_pose.position.z = 0.142
@@ -91,6 +92,7 @@ def test_default_drawing_speed_matches_test2_and_scales_once():
         request = GenerateTrajectory.Request()
         request.canvas_width, request.canvas_height = 1024.0, 768.0
         request.cake_radius, request.cake_height = 0.05, 0.08
+        request.cake_bottom_radius = 0.05
         request.cake_pose.position.x, request.cake_pose.position.z = 0.5, 0.142
         request.surface_type = "TOP"
         request.strokes_2d = [

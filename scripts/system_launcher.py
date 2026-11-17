@@ -161,7 +161,6 @@ class RobotSession:
             Fkin,
         )
         from cake_decorator.doosan_robot import DoosanRobotClient
-        from std_msgs.msg import Empty
         import yaml
 
         # 이 함수 자체에서도 모드를 검사해 실제 대상에서는 이동할 수 없게 한다.
@@ -238,9 +237,6 @@ class RobotSession:
         pose = self.pose()
         if math.dist(pose[:3], [x, y, z]) > 0.1:
             raise RuntimeError(f"가상 펜촉이 중심에 도달하지 않았습니다: {pose}")
-        publisher = self.node.create_publisher(Empty, "/cake/ink_clear", 1)
-        time.sleep(0.3)
-        publisher.publish(Empty())
         return pose
 
     def wait_controller(self):

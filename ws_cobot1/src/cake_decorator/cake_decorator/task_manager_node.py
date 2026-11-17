@@ -203,7 +203,10 @@ class TaskManagerNode(Node):
             traj_req.strokes_2d = dp.strokes
             traj_req.surface_type = dp.surface
             traj_req.cake_pose = cake_pose
+            # 펜 자세는 cake_pose에 보존하고 케이크 평면 회전은 별도로 보낸다.
+            traj_req.cake_yaw = cake.orientation
             traj_req.cake_radius = cake.radius
+            traj_req.cake_bottom_radius = cake.bottom_radius
             traj_req.cake_height = cake.height
 
             future = self._gen_traj_client.call_async(traj_req)

@@ -5,7 +5,7 @@
 우선 고정된 케이크의 윗면·옆면 드로잉을 만들고, 이후 케이크 운반과 출고를 추가합니다.
 
 현재 브랜치는 드로잉 통합 문제를 함께 확인하기 위한 작업본입니다.
-최신 작업대 모델과 남은 문제, 검증 범위는 [작업 인계](docs/DRAWING_HANDOFF.md)에 정리했습니다.
+원뿔대 케이크의 레터링 좌표와 이동 방식은 [표면 드로잉 안내](docs/SURFACE_DRAWING.md)를 참고하세요.
 
 ## 지금 되는 것
 
@@ -46,7 +46,7 @@ ws_cobot_pjt/
 │   │   └── cake_workcell_bringup/      # 가상 로봇과 작업 환경 통합 launch
 │   └── doc/                   # 가상 환경 실행·설정 문서
 ├── ws_dsr/src/                # 두산·OnRobot RG2 드라이버와 강의 브링업
-├── config/                    # 웹·백엔드 공통 원통형 케이크 치수
+├── config/                    # 웹·백엔드 공통 원뿔대 케이크 치수
 ├── scripts/                   # 실행·실측 형상 생성 스크립트
 ├── docs/                      # 설계·데이터 규격·환경 설명
 ├── docker/                    # Docker 설정을 둘 자리
@@ -144,11 +144,11 @@ ros2 launch cake_workcell_bringup virtual.launch.py
 ### 현재 모델 크기와 위치
 
 - 테이블: 가로 1200 × 세로 650mm, 상판 높이 960mm
-- 확정 3D 프린트 원통형 케이크: 지름100 / 높이80mm
+- 확정 원뿔대 케이크: 윗지름113.5 / 밑지름120 / 높이79mm
 - 케이크판: 179 × 179 × 두께 2mm 사각판
 - 타공판 조립체: 임시 배치. 현재 케이크 중심은 로봇 BASE 기준 X=500, Y=0mm
 
-원통형 치수는 웹과 백엔드가 함께 읽는 `config/test_cake.json`에서 관리합니다.
+원뿔대 치수는 웹과 백엔드가 함께 읽는 `config/test_cake.json`에서 관리합니다.
 RViz 형상 갱신은 `python3 scripts/generate_test_cake_model.py`로 수행합니다.
 고정구 위치는 `ws_cobot1/src/cake_workcell_bringup/config/workcell.yaml`의 임시값입니다.
 실행 원점은 이 배치가 아니라 브릿지 시작 시 접촉 확인한 현재 TCP의 윗면 중심입니다.
@@ -177,7 +177,7 @@ ros2 launch m0609_rg2_bringup bringup.launch.py \
 이 단계는 **실제 로봇 연결**입니다. 이후 다른 터미널에서도 같은 ROS 환경과 도메인 ID를 설정하고,
 실행하려는 로봇 동작 Python 파일이나 ROS 노드를 별도로 켭니다.
 연결 전용 launch를 켠 것만으로 케이크 드로잉이 시작되지는 않습니다.
-주문 전달 브릿지와 TM·DP·RE 코드가 있으며, 현재는 고정 원통의 드로잉을 검증 중입니다. 케이크 운반까지의 전체 자동 제작은 별도 검증이 필요합니다.
+주문 전달 브릿지와 TM·DP·RE 코드가 있으며, 현재는 고정 원뿔대의 드로잉을 검증 중입니다. 케이크 운반까지의 전체 자동 제작은 별도 검증이 필요합니다.
 
 실제 필기 검증 전에는 설치 위치, 활성 TCP·Tool, 펜촉 접촉 높이를 현장에서 확인합니다.
 Real은 기존 강의 브링업을 사용하며, 임시 위치의 테이블·케이크 모델은 추가하지 않았습니다.
@@ -196,11 +196,11 @@ Real은 기존 강의 브링업을 사용하며, 임시 위치의 테이블·케
 - [확정한 인터페이스 결정](docs/architecture/DECISIONS.md)
 - [인터페이스 패키지 빌드](ws_cobot1/src/cake_decorator_interfaces/README.md)
 
-## 원통형 케이크와 주문 브릿지
+## 원뿔대 케이크와 주문 브릿지
 
 [단일 주문·브릿지 실행 방법](docs/BRIDGE_TEST.md)을 참고합니다.
 TM은 `/cake/order` Action을 제공해야 하며 브릿지는 TM이 준비된 뒤에만 주문을 인수합니다.
 
-현재 원통형·원본 픽셀 계약은 [확정 통신 규격](docs/CYLINDER_PIXEL_CONTRACT.md)을 기준으로 합니다.
+현재 원뿔대·원본 픽셀 계약은 [확정 통신 규격](docs/CYLINDER_PIXEL_CONTRACT.md)을 기준으로 합니다.
 
-가상 펜촉의 접촉 잉크 표시와 옆면 파형 검증은 [원통 표면 드로잉 검증](docs/SURFACE_DRAWING.md)에 정리했습니다.
+직사각형 옆면 입력을 원뿔대 표면으로 옮기는 규칙과 회귀 검사는 [표면 드로잉 안내](docs/SURFACE_DRAWING.md)에 정리했습니다.
