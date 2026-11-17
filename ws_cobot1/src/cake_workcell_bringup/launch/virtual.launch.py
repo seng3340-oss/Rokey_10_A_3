@@ -20,8 +20,14 @@ def generate_launch_description():
     models = Path(get_package_share_directory("cake_workcell_description"))
     config = yaml.safe_load((share / "config/workcell.yaml").read_text())["fixture"]
 
-    # 팀원 A안 메시를 변형하지 않고 전체 조립체의 설치 위치만 옮긴다.
+    # 최신 스테이션을 기본으로 표시한다. 기존 고정구 위치 인자는 legacy 배치에서 쓴다.
     arguments = [
+        DeclareLaunchArgument(
+            "layout",
+            default_value="station",
+            choices=["station", "legacy"],
+            description="실측 스테이션 또는 기존 드로잉 데모 배치",
+        ),
         DeclareLaunchArgument("fixture_x", default_value=str(config["x_mm"] / 1000)),
         DeclareLaunchArgument("fixture_y", default_value=str(config["y_mm"] / 1000)),
         DeclareLaunchArgument("fixture_z", default_value=str(config["z_mm"] / 1000)),
@@ -32,6 +38,7 @@ def generate_launch_description():
     # 시각화 중 로봇과의 TF 충돌을 피하기 위해 작업대는 독립 description Topic을 사용한다.
     description = Command([
         FindExecutable(name="xacro"), " ", str(models / "urdf/workcell.urdf.xacro"),
+        " layout:=", LaunchConfiguration("layout"),
         " fixture_x:=", LaunchConfiguration("fixture_x"),
         " fixture_y:=", LaunchConfiguration("fixture_y"),
         " fixture_z:=", LaunchConfiguration("fixture_z"),

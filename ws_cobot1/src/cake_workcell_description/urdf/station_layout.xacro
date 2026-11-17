@@ -1,0 +1,306 @@
+<?xml version="1.0"?>
+<robot>
+  <!--길이 단위 m. 테이블과 로봇의 베이스 원점은 상위 모델에서 정렬한다.-->
+  <material name="bolt_steel">
+    <color rgba="0.40 0.42 0.45 1" />
+  </material>
+  <material name="station_metal">
+    <color rgba="0.57 0.62 0.68 1" />
+  </material>
+  <material name="sandpaper">
+    <color rgba="0.028 0.034 0.04 1" />
+  </material>
+  <material name="tray_white">
+    <color rgba="0.95 0.94 0.90 1" />
+  </material>
+  <material name="tray_line">
+    <color rgba="0.27 0.28 0.29 1" />
+  </material>
+  <!--스테이션: 확인된 체결 위치를 기준으로 측판, 사포 받침과 볼트를 배치한다.-->
+  <link name="station_base">
+    <visual name="bottom_plate">
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/bottom_plate.stl" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="wall_x_minus">
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/wall_x_minus.stl" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="wall_x_plus">
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/wall_x_plus.stl" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="wall_y_minus">
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/wall_y_minus.stl" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="wall_y_plus">
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/wall_y_plus.stl" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="mounting_bolt">
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/mounting_bolt.stl" />
+      </geometry>
+      <material name="bolt_steel" />
+    </visual>
+    <visual name="block_0">
+      <origin xyz="-0.069 -0.01 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.02 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_0">
+      <origin xyz="-0.069 -0.01 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.018 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+    <visual name="block_1">
+      <origin xyz="-0.081 -0.055 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.019 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_1">
+      <origin xyz="-0.081 -0.055 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.028 0.017 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+    <visual name="block_2">
+      <origin xyz="0.069 0.01 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.02 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_2">
+      <origin xyz="0.069 0.01 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.018 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+    <visual name="block_3">
+      <origin xyz="0.081 -0.035 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.019 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_3">
+      <origin xyz="0.081 -0.035 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.028 0.017 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+    <visual name="block_4">
+      <origin xyz="-0.055 0.079 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.019 0.031 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_4">
+      <origin xyz="-0.055 0.079 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.017 0.029 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+    <visual name="block_5">
+      <origin xyz="0.024 0.067 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.054 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_5">
+      <origin xyz="0.024 0.067 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.052 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+    <visual name="block_6">
+      <origin xyz="0.01 -0.079 0.12575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.019 0.031 0.0195" />
+      </geometry>
+      <material name="station_metal" />
+    </visual>
+    <visual name="grit_6">
+      <origin xyz="0.01 -0.079 0.1355" rpy="0 0 0" />
+      <geometry>
+        <box size="0.017 0.029 0.001" />
+      </geometry>
+      <material name="sandpaper" />
+    </visual>
+  </link>
+  <joint name="station_mount" type="fixed">
+    <parent link="workcell_root" />
+    <child link="station_base" />
+    <origin xyz="0.399 -0.049 0" rpy="0 0 0" />
+  </joint>
+  <!--체결 홀 기준 프레임: 테이블 매립 홀 (425, -75) mm와 일치한다.-->
+  <link name="station_mounting_hole" />
+  <joint name="station_mounting_hole_at_table" type="fixed">
+    <parent link="station_base" />
+    <child link="station_mounting_hole" />
+    <origin xyz="0.026 -0.026 0" rpy="0 0 0" />
+  </joint>
+  <!--스테이션 안착 위치: 링크 원점은 틀의 윗면에 놓는다.-->
+  <link name="cake_tray_surface">
+    <visual name="tray_plate">
+      <origin xyz="0 0 -0.0015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.149 0.149 0.003" />
+      </geometry>
+      <material name="tray_white" />
+    </visual>
+    <visual name="center_mark_0">
+      <origin xyz="0 0 5e-05" rpy="0 0 0.785398163" />
+      <geometry>
+        <box size="0.192 0.0005 0.0001" />
+      </geometry>
+      <material name="tray_line" />
+    </visual>
+    <visual name="center_mark_1">
+      <origin xyz="0 0 5e-05" rpy="0 0 -0.785398163" />
+      <geometry>
+        <box size="0.192 0.0005 0.0001" />
+      </geometry>
+      <material name="tray_line" />
+    </visual>
+    <visual name="corner_grip">
+      <origin xyz="0.065 -0.065 0.025" rpy="-0.27 0 0.785398163" />
+      <geometry>
+        <box size="0.032 0.007 0.054" />
+      </geometry>
+      <material name="tray_white" />
+    </visual>
+  </link>
+  <joint name="station_to_tray" type="fixed">
+    <parent link="station_base" />
+    <child link="cake_tray_surface" />
+    <origin xyz="0 0 0.139" rpy="0 0 0" />
+  </joint>
+  <!--작업 도구: 케이크따개 STL만 mm 단위를 m로 변환한다.-->
+  <link name="cake_opener">
+    <visual name="uploaded_cake_opener">
+      <origin xyz="-0.025 -0.025 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/cake_opener.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="cake_opener_teal">
+        <color rgba="0.12 0.57 0.64 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="cake_opener_preview_mount" type="fixed">
+    <parent link="workcell_root" />
+    <child link="cake_opener" />
+    <origin xyz="0.425 0.225 0.0" rpy="0 0 0" />
+  </joint>
+  <!--펜 홀더: 사진 확인 단계의 원통형 임시 형상을 사용한다.-->
+  <link name="cake_pen_holder">
+    <visual>
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/pen_holder_preview.stl" />
+      </geometry>
+      <material name="pen_holder_violet">
+        <color rgba="0.56 0.43 0.70 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="cake_pen_holder_mount" type="fixed">
+    <parent link="workcell_root" />
+    <child link="cake_pen_holder" />
+    <origin xyz="0.275 0.225 0.0" rpy="0 0 0" />
+  </joint>
+  <!--일체형 선반: 바닥면 중심에서 높이 150 mm 위에 판과 가이드를 배치한다.-->
+  <link name="cake_shared_shelf">
+    <visual>
+      <origin xyz="0 0 0.075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.15 0.55 0.15" />
+      </geometry>
+      <material name="shared_shelf_blue_gray">
+        <color rgba="0.37 0.52 0.62 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0.15 0.15" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/cake_right_guide.stl" />
+      </geometry>
+      <material name="right_guide_steel">
+        <color rgba="0.20 0.23 0.27 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.15 0.15" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://cake_workcell_description/meshes/cake_right_guide.stl" />
+      </geometry>
+      <material name="right_guide_steel">
+        <color rgba="0.20 0.23 0.27 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="cake_shared_shelf_mount" type="fixed">
+    <parent link="workcell_root" />
+    <child link="cake_shared_shelf" />
+    <origin xyz="0.755 0.05 0" rpy="0 0 0" />
+  </joint>
+  <!--드로잉 전 틀: 선반 상면의 바닥 중심에서 Z축으로 45도 회전한다.-->
+  <link name="cake_input_tray">
+    <visual>
+      <origin xyz="0 0 0.0015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.15 0.15 0.003" />
+      </geometry>
+      <material name="cake_input_tray_color">
+        <color rgba="0.27 0.60 0.79 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="cake_input_tray_mount" type="fixed">
+    <parent link="cake_shared_shelf" />
+    <child link="cake_input_tray" />
+    <origin xyz="0 0.15 0.15" rpy="0 0 0.785398163397" />
+  </joint>
+  <!--반출구 틀: 기존 픽업·반출 중심의 300 mm 간격을 유지한다.-->
+  <link name="cake_output_tray">
+    <visual>
+      <origin xyz="0 0 0.0015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.15 0.15 0.003" />
+      </geometry>
+      <material name="cake_output_tray_color">
+        <color rgba="0.89 0.59 0.32 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="cake_output_tray_mount" type="fixed">
+    <parent link="cake_shared_shelf" />
+    <child link="cake_output_tray" />
+    <origin xyz="0 -0.15 0.15" rpy="0 0 0.785398163397" />
+  </joint>
+</robot>

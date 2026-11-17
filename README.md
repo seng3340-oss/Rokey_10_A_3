@@ -95,7 +95,9 @@ bash scripts/start_virtual_workcell.sh
 ```
 
 이 스크립트가 ROS·로봇 패키지 환경을 불러오고 `ROS_DOMAIN_ID=30`을 설정한 뒤,
-가상 컨트롤러와 테이블·고정구·케이크가 있는 RViz를 켭니다.
+가상 컨트롤러와 금속 스테이션·일체형 선반·케이크 틀이 배치된 RViz를 켭니다.
+기존 `scripts/virtual_draw_demo.py`에 맞는 이전 배치는 `layout:=legacy`로 엽니다.
+배치와 좌표는 [가상 작업셀 안내](ws_cobot1/doc/VIRTUAL_WORKCELL.md)를 참고하세요.
 실제 로봇에는 연결하지 않으며, 로봇 이동 명령도 보내지 않습니다.
 종료할 때는 실행한 터미널에서 `Ctrl+C`를 누릅니다.
 

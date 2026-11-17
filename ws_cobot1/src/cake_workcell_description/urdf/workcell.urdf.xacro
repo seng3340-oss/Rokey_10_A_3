@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <robot name="cake_workcell" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="layout" default="station" />
   <xacro:arg name="fixture_x" default="0.415" />
   <xacro:arg name="fixture_y" default="-0.085" />
   <xacro:arg name="fixture_z" default="0.0" />
@@ -782,75 +783,82 @@
     <child link="Hole_Interior_3_3" />
     <origin xyz="0.725 0.225 -0.014" rpy="0 0 0" />
   </joint>
-  <!-- A안 STL은 mm 원본이며 mesh scale=0.001을 적용한다. 전체 위치만 mount에서 바꾼다. -->
-  <link name="fixture_a_base_link" />
-  <link name="fixture_a_pegboard_link">
-    <visual>
+  <!-- 기본 장면은 실측 스테이션을 쓰고, 기존 그리기 데모는 legacy 장면에서 실행한다. -->
+  <xacro:property name="workcell_layout" value="$(arg layout)" />
+  <xacro:if value="${workcell_layout == 'station'}">
+    <xacro:include filename="station_layout.xacro" />
+  </xacro:if>
+  <xacro:if value="${workcell_layout == 'legacy'}">
+    <!-- A안 STL은 mm 원본이며 mesh scale=0.001을 적용한다. 전체 위치만 mount에서 바꾼다. -->
+    <link name="fixture_a_base_link" />
+    <link name="fixture_a_pegboard_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://cake_workcell_description/meshes/A_pegboard.stl" scale="0.001 0.001 0.001" />
+        </geometry>
+        <material name="pegboard_mat">
+          <color rgba="0.82 0.84 0.87 1" />
+        </material>
+      </visual>
+    </link>
+    <joint name="fixture_a_base_to_pegboard" type="fixed">
+      <parent link="fixture_a_base_link" />
+      <child link="fixture_a_pegboard_link" />
       <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://cake_workcell_description/meshes/A_pegboard.stl" scale="0.001 0.001 0.001" />
-      </geometry>
-      <material name="pegboard_mat">
-        <color rgba="0.82 0.84 0.87 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="fixture_a_base_to_pegboard" type="fixed">
-    <parent link="fixture_a_base_link" />
-    <child link="fixture_a_pegboard_link" />
-    <origin xyz="0 0 0" rpy="0 0 0" />
-  </joint>
-  <link name="fixture_a_frame_link">
-    <visual>
+    </joint>
+    <link name="fixture_a_frame_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://cake_workcell_description/meshes/A_frame.stl" scale="0.001 0.001 0.001" />
+        </geometry>
+        <material name="frame_mat">
+          <color rgba="0.54 0.67 0.76 1" />
+        </material>
+      </visual>
+    </link>
+    <joint name="fixture_a_base_to_frame" type="fixed">
+      <parent link="fixture_a_base_link" />
+      <child link="fixture_a_frame_link" />
       <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://cake_workcell_description/meshes/A_frame.stl" scale="0.001 0.001 0.001" />
-      </geometry>
-      <material name="frame_mat">
-        <color rgba="0.54 0.67 0.76 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="fixture_a_base_to_frame" type="fixed">
-    <parent link="fixture_a_base_link" />
-    <child link="fixture_a_frame_link" />
-    <origin xyz="0 0 0" rpy="0 0 0" />
-  </joint>
-  <link name="fixture_a_board_link">
-    <visual>
-      <origin xyz="0.085 0.085 0.061000" rpy="0 0 0" />
-      <geometry><box size="0.179000 0.179000 0.002000" /></geometry>
-      <material name="board_mat"><color rgba="0.97 0.96 0.93 1" /></material>
-    </visual>
-    <collision>
-      <origin xyz="0.085 0.085 0.061000" rpy="0 0 0" />
-      <geometry><box size="0.179000 0.179000 0.002000" /></geometry>
-    </collision>
-  </link>
-  <joint name="fixture_a_base_to_board" type="fixed">
-    <parent link="fixture_a_base_link" />
-    <child link="fixture_a_board_link" />
-    <origin xyz="0 0 0" rpy="0 0 0" />
-  </joint>
-  <link name="fixture_a_cake_link">
-    <visual>
-      <origin xyz="0.085 0.085 0.062000" rpy="0 0 0" />
-      <geometry><mesh filename="package://cake_workcell_description/meshes/test_cake.stl" /></geometry>
-      <material name="cake_mat"><color rgba="0.93 0.82 0.63 1" /></material>
-    </visual>
-    <collision>
-      <origin xyz="0.085 0.085 0.062000" rpy="0 0 0" />
-      <geometry><mesh filename="package://cake_workcell_description/meshes/test_cake.stl" /></geometry>
-    </collision>
-  </link>
-  <joint name="fixture_a_base_to_cake" type="fixed">
-    <parent link="fixture_a_base_link" />
-    <child link="fixture_a_cake_link" />
-    <origin xyz="0 0 0" rpy="0 0 0" />
-  </joint>
-  <joint name="fixture_a_mount" type="fixed">
-    <parent link="workcell_root" />
-    <child link="fixture_a_base_link" />
-    <origin xyz="$(arg fixture_x) $(arg fixture_y) $(arg fixture_z)" rpy="0 0 $(arg fixture_yaw)" />
-  </joint>
+    </joint>
+    <link name="fixture_a_board_link">
+      <visual>
+        <origin xyz="0.085 0.085 0.061000" rpy="0 0 0" />
+        <geometry><box size="0.179000 0.179000 0.002000" /></geometry>
+        <material name="board_mat"><color rgba="0.97 0.96 0.93 1" /></material>
+      </visual>
+      <collision>
+        <origin xyz="0.085 0.085 0.061000" rpy="0 0 0" />
+        <geometry><box size="0.179000 0.179000 0.002000" /></geometry>
+      </collision>
+    </link>
+    <joint name="fixture_a_base_to_board" type="fixed">
+      <parent link="fixture_a_base_link" />
+      <child link="fixture_a_board_link" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
+    </joint>
+    <link name="fixture_a_cake_link">
+      <visual>
+        <origin xyz="0.085 0.085 0.062000" rpy="0 0 0" />
+        <geometry><mesh filename="package://cake_workcell_description/meshes/test_cake.stl" /></geometry>
+        <material name="cake_mat"><color rgba="0.93 0.82 0.63 1" /></material>
+      </visual>
+      <collision>
+        <origin xyz="0.085 0.085 0.062000" rpy="0 0 0" />
+        <geometry><mesh filename="package://cake_workcell_description/meshes/test_cake.stl" /></geometry>
+      </collision>
+    </link>
+    <joint name="fixture_a_base_to_cake" type="fixed">
+      <parent link="fixture_a_base_link" />
+      <child link="fixture_a_cake_link" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
+    </joint>
+    <joint name="fixture_a_mount" type="fixed">
+      <parent link="workcell_root" />
+      <child link="fixture_a_base_link" />
+      <origin xyz="$(arg fixture_x) $(arg fixture_y) $(arg fixture_z)" rpy="0 0 $(arg fixture_yaw)" />
+    </joint>
+  </xacro:if>
 </robot>

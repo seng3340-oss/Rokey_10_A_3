@@ -19,7 +19,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Depth: 1
     - Class: rviz_default_plugins/RobotModel
-      Name: Table and A fixture
+      Name: Table and workcell layout
       Enabled: true
       Visual Enabled: true
       Collision Enabled: false
