@@ -1,18 +1,22 @@
-"""GenerateTrajectory 서비스 서버 노드 — 원통형(cylinder) 케이크.
+"""GenerateTrajectory 서비스 서버 — 원본 픽셀 획을 원뿔대 경로로 변환한다.
 
-TM이 프론트엔드에서 받은 캔버스 픽셀 좌표를 그대로 전달하면,
-DP(이 노드) 내부에서 픽셀→mm 변환 후 원통형 좌표 계산을 수행하여
-로봇 절대 좌표 3D 경로로 응답한다.
+TM(task_manager)에서 받은 원본 픽셀 획과 실측 치수로 3D 웨이포인트를
+계산해 응답한다. 실제 로봇 이동은 수행하지 않는다.
 
-전체 흐름:
-  웹(픽셀) → 백엔드 → 브릿지·TM → 이 노드(DP)
-  DP 내부: 픽셀→mm → 원통형 3D 계산 → Waypoint3D[]
-  → robot_executor_node → 로봇 이동
+케이크 형상::
 
-좌표계 약속:
-  - srv 입력: Stroke2D (캔버스 픽셀, 왼쪽 위 = (0,0))
-  - srv cake_pose: TCP로 기록한 윗면 중심 (m)
-  - 내부: 바닥 중심 기준으로 변환 (bottom_z = top_z - height)
+       ╭───────╮  ← r_top (윗면)
+      ╱         ╲
+     ╱           ╲  height
+    ╱             ╲
+   ╰───────────────╯  ← r_bottom (아랫면)
+
+데이터 흐름:
+  프론트엔드 JSON → task_manager_node → (srv Request) → 이 노드
+
+  TOP 면: 캔버스 픽셀 → 케이크 윗면 절대좌표
+  SIDE 면: 캔버스 픽셀 → 원뿔대 표면 3D + 법선 방향 자세
+    높이 y에서의 반지름: r(y) = r_bottom + (r_top - r_bottom) × y / H
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import rclpy
 from rclpy.node import Node
 
 from .drawing_geometry import (
-    CylinderCake,
+    FrustumCake,
     pen_quat_side,
     pen_quat_top,
     pixel_to_mm_side,
@@ -35,27 +39,24 @@ from .drawing_geometry import (
 
 
 class DrawingPathNode(Node):
-    """캔버스 픽셀 좌표 → 로봇 절대 좌표 3D 경로 변환 서비스 노드."""
+    """mm 스트로크 → 로봇 절대 좌표 3D 경로 변환 서비스 노드."""
 
     def __init__(self):
         super().__init__('drawing_path_node')
 
         # ── 변환 설정 파라미터 (yaml에서 로드) ──
         self.declare_parameter('drawing_speed', 20.0)         # mm/s
-        self.declare_parameter('travel_speed', 80.0)          # mm/s (펜 올린 상태)
-        self.declare_parameter('approach_height', 10.0)       # mm (펜 접근 높이)
-        self.declare_parameter('drawing_z_offset', 0.0)       # mm (표면 접촉 보정)
+        self.declare_parameter('travel_speed', 80.0)          # mm/s
+        self.declare_parameter('approach_height', 10.0)       # mm
+        self.declare_parameter('drawing_z_offset', 0.0)       # mm
         self.declare_parameter('default_contact_force', 0.5)  # N
-        self.declare_parameter('pen_tilt_deg', 30.0)          # 펜 기울기 (도)
-        # TOP: 수직에서 기울어지는 각도 (0=수직, 30=30도 기울임)
-        # SIDE: 법선에서 아래로 기울어지는 각도
 
         self.srv = self.create_service(
             GenerateTrajectory,
             'generate_trajectory',
             self._handle_request,
         )
-        self.get_logger().info('drawing_path_node 서비스 서버 시작 (pixel→cylinder)')
+        self.get_logger().info('drawing_path_node 서비스 서버 시작 (frustum 지원)')
 
     def _param(self, name: str):
         return self.get_parameter(name).value
@@ -65,26 +66,18 @@ class DrawingPathNode(Node):
     # ==================================================================
 
     def _handle_request(self, request, response):
+        """GenerateTrajectory 서비스 콜백."""
         self.get_logger().info(
             f'경로 변환 요청: order={request.order_id}, '
             f'surface={request.surface_type}, '
             f'strokes={len(request.strokes_2d)}, '
             f'speed={request.operation_speed_percent}%, '
-            f'canvas=({request.canvas_width}x{request.canvas_height}), '
-            f'radius={request.cake_radius}'
+            f'r_top={request.cake_radius}, '
+            f'r_bottom={request.cake_bottom_radius}'
         )
 
         try:
             waypoints, pen_states = self._convert_strokes(request)
-
-            if not waypoints:
-                # 획이 없거나 점이 하나뿐인 입력은 웨이포인트가 하나도 안 나온다.
-                # 성공으로 넘기면 실행 단계에서 '빈 웨이포인트' 오류로 원인이
-                # 묻히므로 여기서 획 수를 밝혀 실패시킨다.
-                raise ValueError(
-                    f'변환할 웨이포인트가 없습니다. (strokes='
-                    f'{len(request.strokes_2d)})'
-                )
 
             response.success = True
             response.waypoints_3d = waypoints
@@ -109,49 +102,54 @@ class DrawingPathNode(Node):
     # ==================================================================
 
     def _convert_strokes(self, request):
-        """캔버스 픽셀 좌표 → 로봇 절대 좌표 Waypoint3D 변환.
-
-        1. 윗면 중심(TCP) → 바닥 중심으로 변환
-        2. CylinderCake 생성
-        3. 요청에 담긴 모든 획을 순서대로 픽셀 → mm → 3D 절대 좌표로 변환
-
-        입력은 캔버스 픽셀(왼쪽 위 = (0,0)) 원본 그대로 받으며,
-        한 요청의 여러 획은 각각 접근-하강-그리기-이탈 구간을 포함해
-        획 사이 이동이 자동으로 만들어진다. 반환값은 웨이포인트 목록과
-        길이·값이 같은 펜 상태 목록이다.
-        """
-        # ── 윗면 중심 → 바닥 중심 변환 (m → mm) ──
-        top_x = request.cake_pose.position.x * 1000.0
-        top_y = request.cake_pose.position.y * 1000.0
-        top_z = request.cake_pose.position.z * 1000.0
-        cake_height_mm = request.cake_height * 1000.0
-        cake_radius_mm = request.cake_radius * 1000.0
-
-        bottom_z = top_z - cake_height_mm   # 바닥 중심 Z
-
-        # ── CylinderCake 생성 (바닥 중심 기준, mm) ──
-        cake = CylinderCake(
-            radius=cake_radius_mm,
-            height=cake_height_mm,
-            cx=top_x,       # X, Y는 윗면·바닥 동일
-            cy=top_y,
-            cz=bottom_z,    # 바닥 중심 Z
-        )
-
-        # ── 캔버스·속도 파라미터 ──
+        """픽셀 획을 원뿔대 표면 기준 절대 좌표 웨이포인트로 변환한다."""
         canvas_w = request.canvas_width
         canvas_h = request.canvas_height
+        if canvas_w <= 0 or canvas_h <= 0:
+            raise ValueError('캔버스 너비와 높이는 양수여야 합니다.')
 
+        r_top = request.cake_radius * 1000.0
+        r_bottom = request.cake_bottom_radius * 1000.0
+        cake_height = request.cake_height * 1000.0
+        if r_top <= 0 or r_bottom <= 0 or cake_height <= 0:
+            raise ValueError('케이크 윗면·아랫면 반지름과 높이는 양수여야 합니다.')
+
+        orientation = request.cake_pose.orientation
+        quaternion_norm = math.sqrt(
+            orientation.x**2
+            + orientation.y**2
+            + orientation.z**2
+            + orientation.w**2
+        )
+        if quaternion_norm < 1e-10:
+            raise ValueError('cake_pose 방향 쿼터니언이 유효하지 않습니다.')
+        qx = orientation.x / quaternion_norm
+        qy = orientation.y / quaternion_norm
+        qz = orientation.z / quaternion_norm
+        qw = orientation.w / quaternion_norm
+        if abs(qx) > 1e-6 or abs(qy) > 1e-6:
+            raise ValueError('케이크는 수평면의 yaw 회전만 지원합니다.')
+        cake_yaw = math.atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
+
+        # 서비스 기준점은 윗면 중심이므로 지오메트리의 바닥 중심으로 변환한다.
+        cake = FrustumCake(
+            r_top=r_top,
+            r_bottom=r_bottom,
+            height=cake_height,
+            cx=request.cake_pose.position.x * 1000.0,
+            cy=request.cake_pose.position.y * 1000.0,
+            cz=request.cake_pose.position.z * 1000.0 - cake_height,
+            yaw=cake_yaw,
+        )
+
+        # 속도 계산: operation_speed_percent 반영
         speed_ratio = max(1, min(100, request.operation_speed_percent)) / 100.0
         draw_spd = self._param('drawing_speed') * speed_ratio
         travel_spd = self._param('travel_speed') * speed_ratio
         approach_h = self._param('approach_height')
         z_offset = self._param('drawing_z_offset')
         force = self._param('default_contact_force')
-        tilt_deg = self._param('pen_tilt_deg')
 
-        # 면 종류는 TOP/SIDE 두 가지뿐이다. 알 수 없는 값을 받으면 SIDE로
-        # 조용히 처리되면 옆면 경로가 대신 그려지므로 여기서 바로 실패시킨다.
         surface = request.surface_type.upper()
         if surface not in ('TOP', 'SIDE'):
             raise ValueError(
@@ -159,34 +157,36 @@ class DrawingPathNode(Node):
             )
 
         waypoints: list[Waypoint3DMsg] = []
+        pen_states: list[bool] = []
 
-        # 요청에 담긴 모든 획을 순서대로 변환한다. 첫 획에서 멈추지 않도록
-        # 그릴 수 없는 획만 건너뛰고 나머지는 전부 웨이포인트로 추가한다.
         for stroke in request.strokes_2d:
-            pts_px = [(pt.x, pt.y) for pt in stroke.points]
-            # 점 두 개 미만은 이동 경로가 없어 그릴 수 없다. 백엔드·웹도 같은
-            # 규칙(2점 이상)으로 받으므로, 남으면 '찍고 지나가는' 동작이 되어
-            # 로봇만 불필요하게 움직이므로 건너뛴다.
-            if len(pts_px) < 2:
-                continue
+            pts = self._extract_points(
+                stroke,
+                surface,
+                cake,
+                canvas_w,
+                canvas_h,
+            )
+            if len(pts) < 2:
+                raise ValueError(
+                    f'stroke_id={stroke.stroke_id}에는 점이 두 개 이상 필요합니다.'
+                )
 
             if surface == 'TOP':
                 self._convert_stroke_top(
-                    pts_px, cake, canvas_w, canvas_h,
-                    approach_h, z_offset, draw_spd, travel_spd, force,
-                    tilt_deg, waypoints,
+                    pts, cake, approach_h, z_offset,
+                    draw_spd, travel_spd, force,
+                    waypoints, pen_states,
                 )
             else:  # SIDE
                 self._convert_stroke_side(
-                    pts_px, cake, canvas_w, canvas_h,
-                    approach_h, z_offset, draw_spd, travel_spd, force,
-                    tilt_deg, waypoints,
+                    pts, cake, approach_h, z_offset,
+                    draw_spd, travel_spd, force,
+                    waypoints, pen_states,
                 )
 
-        # 응답 계약: pen_states는 waypoints_3d[i].pen_down과 길이·값이 같아야 한다.
-        # 펜 상태는 이미 각 웨이포인트에 기록돼 있으므로 여기서 다시 뽑아
-        # 두 표현이 서로 어긋나는 상황을 만들지 않는다.
-        pen_states = [wp.pen_down for wp in waypoints]
+        if not waypoints:
+            raise ValueError('변환할 웨이포인트가 없습니다.')
 
         return waypoints, pen_states
 
@@ -195,109 +195,144 @@ class DrawingPathNode(Node):
     # ------------------------------------------------------------------
 
     def _convert_stroke_top(
-        self, pts_px, cake: CylinderCake,
-        canvas_w, canvas_h,
+        self, pts, cake: FrustumCake,
         approach_h, z_offset, draw_spd, travel_spd, force,
-        tilt_deg, waypoints,
+        waypoints, pen_states,
     ):
-        """TOP 면 한 획분의 웨이포인트를 추가한다.
+        """TOP 면: (x, y) mm → 윗면 절대좌표. 펜은 아래를 향함.
 
-        접근(펜 들기) → 하강(펜 내림) → 이어 그린 점들 → 이탈(펜 들기) 순서로
-        추가되므로 여러 획이 연결될 때도 획 사이에 펜이 반드시 올라간다.
+        프론트엔드의 (x, y)는 윗면 중심 기준 오프셋.
+        Z 방향으로 접근·접촉·이탈.
         """
-        quat = pen_quat_top(tilt_deg=tilt_deg)
+        quat = pen_quat_top()
 
-        # ── 1. 첫 점 위로 접근 (펜 들기) ──
-        mm_x, mm_y = pixel_to_mm_top(
-            pts_px[0][0], pts_px[0][1],
-            canvas_w, canvas_h, cake.radius,
-        )
-        fx, fy, fz = cake.top_to_abs(mm_x, mm_y)
+        # ── 1. 펜 올린 상태로 첫 점 위 이동 ──
+        fx, fy, fz = cake.top_to_abs(pts[0][0], pts[0][1])
         waypoints.append(
-            self._wp(fx, fy, fz + approach_h, quat, travel_spd, force,
-                     pen_down=False),
+            self._wp(fx, fy, fz + approach_h, quat, travel_spd, force, False),
         )
+        pen_states.append(False)
 
-        # ── 2. 펜 내리기 ──
+        # ── 2. 펜 내리기 (첫 점 접촉) ──
         waypoints.append(
-            self._wp(fx, fy, fz + z_offset, quat, draw_spd * 0.5, force,
-                     pen_down=True),
+            self._wp(fx, fy, fz + z_offset, quat, draw_spd * 0.5, force, True),
         )
+        pen_states.append(True)
 
         # ── 3. 획 그리기 ──
-        for px_x, px_y in pts_px[1:]:
-            mx, my = pixel_to_mm_top(px_x, px_y, canvas_w, canvas_h, cake.radius)
-            ax, ay, az = cake.top_to_abs(mx, my)
+        for pt in pts[1:]:
+            ax, ay, az = cake.top_to_abs(pt[0], pt[1])
             waypoints.append(
-                self._wp(ax, ay, az + z_offset, quat, draw_spd, force,
-                         pen_down=True),
+                self._wp(ax, ay, az + z_offset, quat, draw_spd, force, True),
             )
+            pen_states.append(True)
 
         # ── 4. 펜 올리기 ──
-        lmx, lmy = pixel_to_mm_top(
-            pts_px[-1][0], pts_px[-1][1],
-            canvas_w, canvas_h, cake.radius,
-        )
-        lx, ly, lz = cake.top_to_abs(lmx, lmy)
+        lx, ly, lz = cake.top_to_abs(pts[-1][0], pts[-1][1])
         waypoints.append(
-            self._wp(lx, ly, lz + approach_h, quat, travel_spd, force,
-                     pen_down=False),
+            self._wp(lx, ly, lz + approach_h, quat, travel_spd, force, False),
         )
+        pen_states.append(False)
 
     # ------------------------------------------------------------------
-    # SIDE 면 변환
+    # SIDE 면 변환 (원뿔대 지오메트리)
     # ------------------------------------------------------------------
 
     def _convert_stroke_side(
-        self, pts_px, cake: CylinderCake,
-        canvas_w, canvas_h,
+        self, pts, cake: FrustumCake,
         approach_h, z_offset, draw_spd, travel_spd, force,
-        tilt_deg, waypoints,
+        waypoints, pen_states,
     ):
-        """SIDE 면 한 획분의 웨이포인트를 추가한다.
+        """SIDE 면: (x_arc, y_height) mm → 원뿔대 표면 3D.
 
-        캔버스 픽셀 → mm(호, 높이) → 원통 표면 3D로 변환하며,
-        TOP과 같이 접근-하강-그리기-이탈 순서로 펜 상태를 지정한다.
+        x = 원주 방향 호 길이 (mm), y = 바닥부터 높이 (mm).
+        접근·접촉·이탈 모두 표면 법선 방향으로 수행.
+        펜 자세는 점마다 다름 (원주 위치 + 경사각 반영).
         """
-
-        # ── 1. 첫 점 법선 방향 접근 (펜 들기) ──
-        arc0, h0 = pixel_to_mm_side(
-            pts_px[0][0], pts_px[0][1],
-            canvas_w, canvas_h, cake.radius, cake.height,
-        )
-        quat0 = pen_quat_side(arc0, cake, tilt_deg=tilt_deg)
-        ax0, ay0, az0 = cake.side_abs_with_offset(arc0, h0, approach_h)
+        # ── 1. 펜 올린 상태로 첫 점 법선 방향 접근 ──
+        x0, y0 = pts[0][0], pts[0][1]
+        quat0 = pen_quat_side(x0, y0, cake)
+        ax0, ay0, az0 = cake.side_abs_with_offset(x0, y0, approach_h)
         waypoints.append(
-            self._wp(ax0, ay0, az0, quat0, travel_spd, force, pen_down=False),
+            self._wp(ax0, ay0, az0, quat0, travel_spd, force, False),
         )
+        pen_states.append(False)
 
-        # ── 2. 펜 내리기 ──
-        cx0, cy0, cz0 = cake.side_abs_with_offset(arc0, h0, z_offset)
+        # ── 2. 펜 내리기 (표면 접촉) ──
+        cx0, cy0, cz0 = cake.side_abs_with_offset(x0, y0, z_offset)
         waypoints.append(
-            self._wp(cx0, cy0, cz0, quat0, draw_spd * 0.5, force, pen_down=True),
+            self._wp(cx0, cy0, cz0, quat0, draw_spd * 0.5, force, True),
         )
+        pen_states.append(True)
 
         # ── 3. 획 그리기 ──
-        for px_x, px_y in pts_px[1:]:
-            arc_i, h_i = pixel_to_mm_side(
-                px_x, px_y, canvas_w, canvas_h, cake.radius, cake.height,
-            )
-            qi = pen_quat_side(arc_i, cake, tilt_deg=tilt_deg)
-            cxi, cyi, czi = cake.side_abs_with_offset(arc_i, h_i, z_offset)
+        for pt in pts[1:]:
+            xi, yi = pt[0], pt[1]
+            qi = pen_quat_side(xi, yi, cake)
+            cxi, cyi, czi = cake.side_abs_with_offset(xi, yi, z_offset)
             waypoints.append(
-                self._wp(cxi, cyi, czi, qi, draw_spd, force, pen_down=True),
+                self._wp(cxi, cyi, czi, qi, draw_spd, force, True),
             )
+            pen_states.append(True)
 
         # ── 4. 펜 올리기 ──
-        arcn, hn = pixel_to_mm_side(
-            pts_px[-1][0], pts_px[-1][1],
-            canvas_w, canvas_h, cake.radius, cake.height,
-        )
-        quatn = pen_quat_side(arcn, cake, tilt_deg=tilt_deg)
-        axn, ayn, azn = cake.side_abs_with_offset(arcn, hn, approach_h)
+        xn, yn = pts[-1][0], pts[-1][1]
+        quatn = pen_quat_side(xn, yn, cake)
+        axn, ayn, azn = cake.side_abs_with_offset(xn, yn, approach_h)
         waypoints.append(
-            self._wp(axn, ayn, azn, quatn, travel_spd, force, pen_down=False),
+            self._wp(axn, ayn, azn, quatn, travel_spd, force, False),
         )
+        pen_states.append(False)
+
+    # ------------------------------------------------------------------
+    # 좌표 추출·변환 헬퍼
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_points(
+        stroke,
+        surface: str,
+        cake: FrustumCake,
+        canvas_w: int,
+        canvas_h: int,
+    ) -> list[tuple[float, float]]:
+        """원본 픽셀 획을 면별 mm 좌표로 변환한다."""
+        points = []
+        for point in stroke.points:
+            px_x = float(point.x)
+            px_y = float(point.y)
+            if not (
+                math.isfinite(px_x)
+                and math.isfinite(px_y)
+                and 0.0 <= px_x <= canvas_w
+                and 0.0 <= px_y <= canvas_h
+            ):
+                raise ValueError(
+                    f'stroke_id={stroke.stroke_id}의 픽셀이 캔버스 범위를 벗어났습니다.'
+                )
+
+            if surface == 'TOP':
+                point_mm = pixel_to_mm_top(
+                    px_x,
+                    px_y,
+                    canvas_w,
+                    canvas_h,
+                    cake.r_top,
+                )
+                if math.hypot(*point_mm) > cake.r_top:
+                    raise ValueError(
+                        f'stroke_id={stroke.stroke_id}의 점이 윗면 원형 영역 밖입니다.'
+                    )
+            else:
+                point_mm = pixel_to_mm_side(
+                    px_x,
+                    px_y,
+                    canvas_w,
+                    canvas_h,
+                    cake,
+                )
+            points.append(point_mm)
+        return points
 
     # ------------------------------------------------------------------
     # Waypoint 생성
@@ -311,16 +346,15 @@ class DrawingPathNode(Node):
         force: float,
         pen_down: bool,
     ) -> Waypoint3DMsg:
-        """Waypoint3D 메시지 생성. mm → m 변환 포함.
-
-        pen_down은 이 지점에서 펜이 케이크에 닿아 있는지를 나타낸다.
-        실행 노드(robot_executor)는 이 값만 읽어 그리기/이동을 구분하므로
-        생략할 수 없고, 응답 pen_states와 반드시 같은 값이어야 한다.
-        """
+        """Waypoint3D 생성. 위치 mm를 m로 바꾸고 펜 상태를 기록한다."""
         msg = Waypoint3DMsg()
         msg.pose = Pose(
-            position=Point(x=x_mm / 1000.0, y=y_mm / 1000.0, z=z_mm / 1000.0),
-            orientation=Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3]),
+            position=Point(
+                x=x_mm / 1000.0, y=y_mm / 1000.0, z=z_mm / 1000.0,
+            ),
+            orientation=Quaternion(
+                x=quat[0], y=quat[1], z=quat[2], w=quat[3],
+            ),
         )
         msg.speed = speed
         msg.pen_down = pen_down
@@ -333,8 +367,10 @@ class DrawingPathNode(Node):
 
     @staticmethod
     def _estimate_duration(waypoints: list[Waypoint3DMsg]) -> float:
+        """총 소요 시간 추정 (초). 거리 / 속도 합산."""
         if len(waypoints) < 2:
             return 0.0
+
         total = 0.0
         for i in range(1, len(waypoints)):
             p = waypoints[i - 1].pose.position
@@ -342,10 +378,16 @@ class DrawingPathNode(Node):
             dist = math.sqrt(
                 (c.x - p.x) ** 2 + (c.y - p.y) ** 2 + (c.z - p.z) ** 2,
             )
-            speed_m_s = waypoints[i].speed / 1000.0
+            speed_m_s = waypoints[i].speed / 1000.0  # mm/s → m/s
             if speed_m_s > 0:
                 total += dist / speed_m_s
+
         return total
+
+
+# ------------------------------------------------------------------
+# 엔트리포인트
+# ------------------------------------------------------------------
 
 
 def main(args=None):

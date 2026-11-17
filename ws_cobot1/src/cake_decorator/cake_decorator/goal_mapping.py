@@ -20,27 +20,29 @@ def build_goal(claim, reference):
     cake = claim["cake"]
     if cake["reference"] != "tcp_at_top_center":
         raise ValueError("지원하지 않는 케이크 원점입니다.")
-    if "diameter_mm" not in cake:
-        raise ValueError(
-            "이전 경사 케이크 주문입니다. 새 원통형 설정으로 다시 접수해야 합니다."
-        )
+    top_diameter = cake.get("top_diameter_mm", cake.get("diameter_mm"))
+    if top_diameter is None:
+        raise ValueError("케이크 윗면 지름이 없습니다.")
     dimensions = [
-        cake[key]
-        for key in (
-            "diameter_mm",
-            "height_mm",
-            "board_width_mm",
-            "board_depth_mm",
-            "board_thickness_mm",
-        )
+        top_diameter,
+        cake["height_mm"],
+        cake["board_width_mm"],
+        cake["board_depth_mm"],
+        cake["board_thickness_mm"],
     ]
     if not all(math.isfinite(value) and value > 0 for value in dimensions):
         raise ValueError("실측 치수가 유효하지 않습니다.")
     diameter, height, width, depth, thickness = dimensions
+    bottom_diameter = cake.get("bottom_diameter_mm", diameter)
+    if not math.isfinite(bottom_diameter) or bottom_diameter <= 0:
+        raise ValueError("케이크 아랫면 지름이 유효하지 않습니다.")
     if diameter > min(width, depth):
         raise ValueError("케이크와 판의 크기가 맞지 않습니다.")
+    if bottom_diameter > min(width, depth):
+        raise ValueError("케이크 아랫면과 판의 크기가 맞지 않습니다.")
     params = CakeParams(
         radius=diameter / 2000,
+        bottom_radius=bottom_diameter / 2000,
         height=height / 1000,
         board_width=width / 1000,
         board_depth=depth / 1000,

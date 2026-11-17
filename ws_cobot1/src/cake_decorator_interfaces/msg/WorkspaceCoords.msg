@@ -5,7 +5,9 @@ geometry_msgs/Pose workstation_pose
 geometry_msgs/Pose tool_holder_pose
 geometry_msgs/Pose delivery_pose
 geometry_msgs/Point cake_center
+# 원뿔대 형상 치수는 m이며, 위·아랫면 반지름이 같으면 원통이다.
 float64 cake_radius
+float64 cake_bottom_radius
 float64 cake_height
 # 평면 방향은 rad, 접근·접촉 오프셋은 m다.
 float64 cake_orientation

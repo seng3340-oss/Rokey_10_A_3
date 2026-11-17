@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 import traceback
 from enum import Enum
@@ -161,7 +162,13 @@ class TaskManagerNode(Node):
         cake_pose.position = Point(
             x=cake.center.x, y=cake.center.y, z=cake.center.z,
         )
-        cake_pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
+        half_yaw = cake.orientation / 2.0
+        cake_pose.orientation = Quaternion(
+            x=0.0,
+            y=0.0,
+            z=math.sin(half_yaw),
+            w=math.cos(half_yaw),
+        )
 
         total_paths = len(request.drawing_paths)
         drawing_speed = self.get_parameter('drawing_speed').value
@@ -193,16 +200,14 @@ class TaskManagerNode(Node):
             traj_req.operation_speed_percent = int(
                 self.get_parameter('operation_speed_percent').value
             )
-            # canvas_*는 uint32, DP 요청의 canvas_*는 float64다. 정수를 그대로
-            # 대입하면 런타임에 값이 int로 남았다가 서비스 직렬화 중 프로세스가
-            # abort되므로 float로 바꿔 넘긴다.
-            traj_req.canvas_width = float(dp.canvas_width)
-            traj_req.canvas_height = float(dp.canvas_height)
+            traj_req.canvas_width = dp.canvas_width
+            traj_req.canvas_height = dp.canvas_height
             # 원본 픽셀 획을 순서·점 개수 그대로 넘긴다. DP에서 변환을 수행한다.
             traj_req.strokes_2d = dp.strokes
             traj_req.surface_type = dp.surface
             traj_req.cake_pose = cake_pose
             traj_req.cake_radius = cake.radius
+            traj_req.cake_bottom_radius = cake.bottom_radius
             traj_req.cake_height = cake.height
 
             future = self._gen_traj_client.call_async(traj_req)
