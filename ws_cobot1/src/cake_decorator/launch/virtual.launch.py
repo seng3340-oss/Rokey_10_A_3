@@ -4,10 +4,10 @@
 실제 로봇 없이 Doosan 에뮬레이터로 전체 파이프라인을 테스트.
 
 실행:
-  ros2 launch cake_decorator virtual_integration.launch.py
+  ros2 launch cake_decorator virtual.launch.py
 
 또는 직접:
-  python3 virtual_integration.launch.py  (LaunchService 사용)
+  python3 virtual.launch.py  (LaunchService 사용)
 """
 
 import os
@@ -31,8 +31,11 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument(
             'config_file',
+            # launch는 share/cake_decorator/launch에, 설정은 share/cake_decorator/config에
+            # 설치되므로 상위 디렉터리의 config를 가리킨다. 소스 실행 때도 같은 경로가 된다.
             default_value=str(
-                Path(__file__).parent / 'virtual_workspace_config.yaml'
+                Path(__file__).resolve().parent.parent
+                / 'config' / 'workspace_config.yaml'
             ),
             description='작업 공간 설정 파일 경로',
         ),
@@ -55,8 +58,10 @@ def generate_launch_description():
     frontend_port = LaunchConfiguration('frontend_port')
 
     # ── 1. drawing_path_node (2D→3D 경로 변환) ──
+    # 이 노드도 cake_decorator 패키지의 실행 파일이다(오타로 옛 패키지명을 쓰면
+    # launch가 시작부터 패키지를 찾지 못해 노드가 하나도 뜨지 않는다).
     drawing_path = Node(
-        package='cake_drawing_path',
+        package='cake_decorator',
         executable='drawing_path_node',
         name='drawing_path_node',
         parameters=[config_file],

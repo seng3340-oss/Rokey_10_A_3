@@ -59,8 +59,9 @@ class InterfaceTests(unittest.TestCase):
     def test_trajectory_receives_canvas_size_and_multiple_stroke_ids(self):
         """두 개의 획 끝을 자동 연결하지 않고 번호·해상도를 함께 전달한다."""
         request = GenerateTrajectory.Request(
-            canvas_width=1024,
-            canvas_height=768,
+            # canvas_*는 float64 필드라 정수를 넣으면 직렬화 단계에서 abort 난다.
+            canvas_width=1024.0,
+            canvas_height=768.0,
             surface_type="TOP",
             strokes_2d=[
                 Stroke2D(stroke_id=0, points=[Point32(x=50.0, y=80.0)]),

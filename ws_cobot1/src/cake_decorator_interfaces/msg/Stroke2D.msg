@@ -1,6 +1,7 @@
 # 프론트엔드에서 전달하는 획 데이터 (캔버스 픽셀 좌표)
 # 웹 → 백엔드 → 브릿지 → TM → DP 노드 순으로 원본 그대로 전달됨
-string stroke_id                                    # 획 식별자
-string color                                        # 획 색상 (예: "black")
-cake_decorator_interfaces/Point2D[] points          # 캔버스 픽셀 좌표 리스트
-
+# stroke_id는 한 그림 안에서 0부터 순서대로 이어지는 정수다(백엔드 검증 규칙).
+uint32 stroke_id
+# x/y는 캔버스 픽셀이며 왼쪽 위가 (0,0)이다. z는 항상 0이며 사용하지 않는다.
+# 한 획 안의 점 순서가 곧 그리는 순서다. 폐곡선 여부 필드는 없다.
+geometry_msgs/Point32[] points
