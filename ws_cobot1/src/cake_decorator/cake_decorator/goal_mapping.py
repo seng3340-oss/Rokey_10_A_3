@@ -71,21 +71,6 @@ def build_goal(claim, reference):
         canvas_height=drawing["canvas_height"],
         surface=drawing["drawing_surface"].upper(),
     )
-    # 임시 검증 버튼의 주문만 별도 접근 경유점을 사용한다. 일반 SIDE 경로의
-    # 치수와 접근 방식을 바꾸지 않고 기존 문자열 필드로 테스트 종류를 전달한다.
-    recipe = cake.get("test_recipe")
-    if recipe is not None:
-        if (
-            recipe.get("kind") != "side_midline_frustum"
-            or drawing["drawing_surface"] != "side"
-            or not math.isclose(
-                diameter,
-                (recipe["top_diameter_mm"] + recipe["bottom_diameter_mm"]) / 2,
-            )
-            or not math.isclose(height, recipe["height_mm"])
-        ):
-            raise ValueError("중간 높이 테스트 치수·종류가 일치하지 않습니다.")
-        path.surface = "SIDE_MIDLINE_TEST"
     if not 1 <= len(drawing["strokes"]) <= 100:
         raise ValueError("획 개수가 유효하지 않습니다.")
     total = 0

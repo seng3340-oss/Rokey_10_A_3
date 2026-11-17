@@ -18,5 +18,5 @@ frontend/dist/
 /backend/data/
 .pytest_cache/
 
-# 실제 펜 장착 상태별 실측 교정값은 각 로봇에서 따로 보관한다.
+# 로봇별 로컬 실측값은 형상 관리에서 제외한다.
 /config/local/

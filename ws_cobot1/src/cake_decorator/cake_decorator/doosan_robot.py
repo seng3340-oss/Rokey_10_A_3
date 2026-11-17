@@ -308,7 +308,7 @@ class DoosanRobotClient:
             time.sleep(0.05)
 
     def move_task_joint(self, target: DsrPos) -> bool:
-        """테스트의 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
+        """옆면 케이크 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
         joints = self._call("current_joints", GetCurrentPosj.Request())
         if joints is None or not joints.success:
             return False

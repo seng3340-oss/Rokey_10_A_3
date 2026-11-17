@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { KioskHeader } from "./KioskHeader";
 import { DrawingWorkspace } from "./DrawingWorkspace";
 import { ReviewDialog } from "./ReviewDialog";
-import { SideMidlineTest } from "./SideMidlineTest";
 import { mountDrawing } from "../drawing/controller.js";
 /** 고객 화면의 세 영역을 조립하고 DOM 준비 후 필기 컨트롤러를 연결한다. */
 export function Kiosk() {
@@ -12,8 +11,6 @@ export function Kiosk() {
     <>
       <KioskHeader />
       <DrawingWorkspace />
-      {/* 별도 테스트 폼은 일반 그림 컨트롤러의 상태와 주문 흐름에 관여하지 않는다. */}
-      <SideMidlineTest />
       <ReviewDialog />
     </>
   );

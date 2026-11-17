@@ -1,7 +1,6 @@
 """가상/실제 실행기의 공통 처리. 로봇 동작 로직은 기존 ROS 코드를 재사용한다."""
 
 import argparse
-from contextlib import contextmanager
 import fcntl
 from datetime import datetime
 import importlib.util
@@ -46,19 +45,6 @@ def validate_identity(description, mode, host):
     }
     if params.get("mode") != mode or params.get("host") != host:
         raise RuntimeError(f"로봇 대상 불일치: 요청={mode}/{host}, 조회={params}")
-
-
-def describe_tcp(name, tcp_pose, flange_pose):
-    """실제 펜촉 교정을 가정하지 않고 활성 TCP와 플랜지 간 거리를 기록한다."""
-    distance = math.dist(tcp_pose[:3], flange_pose[:3])
-    return {
-        "tcp_name": name,
-        "flange_pose": list(flange_pose),
-        "flange_to_tcp_distance_mm": distance,
-        # RG2에 물린 펜촉은 플랜지 중심일 수 없다. 단, 거리가 있다고 해서
-        # 올바르게 교정되었다고 판정하지는 않는다. 그리퍼 끝 TCP일 수도 있다.
-        "tcp_at_flange": distance < 0.001,
-    }
 
 
 def pen_length(value):
@@ -117,12 +103,9 @@ class RobotSession:
     def __init__(self):
         import rclpy
         from rclpy.executors import MultiThreadedExecutor
-        from rclpy.signals import SignalHandlerOptions
 
         self.ros = rclpy
-        # Ctrl+C 시 ROS 컨텍스트가 먼저 꺼지면 수동 교시 모드를 복원할 수 없다.
-        # 메인 Python의 KeyboardInterrupt로 정리한 뒤 close에서 컨텍스트를 닫는다.
-        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+        rclpy.init()
         self.node = rclpy.create_node("cake_system_launcher")
         self.executor = MultiThreadedExecutor(num_threads=2)
         self.executor.add_node(self.node)
@@ -157,7 +140,6 @@ class RobotSession:
             GetParameters.Request(names=["robot_description"]),
         )
         validate_identity(result.values[0].string_value, mode, host)
-        self._identity = (mode, host)
 
     def pose(self):
         """현재 활성 펜촉 TCP를 BASE mm·ZYZ degree로 읽는다."""
@@ -168,86 +150,6 @@ class RobotSession:
         if not result.task_pos_info:
             raise RuntimeError("현재 TCP 위치가 없습니다.")
         return validate_reference(list(result.task_pos_info[0].data[:6]))
-
-    def tcp_details(self, pose):
-        """현재 TCP 이름과 플랜지 자세를 조회할 뿐 도구 설정을 바꾸지 않는다."""
-        from dsr_msgs2.srv import GetCurrentTcp, GetCurrentToolFlangePosx
-
-        tcp = self.call(
-            GetCurrentTcp,
-            "/dsr01/dsr_controller2/tcp/get_current_tcp",
-            GetCurrentTcp.Request(),
-        )
-        flange = self.call(
-            GetCurrentToolFlangePosx,
-            "/dsr01/dsr_controller2/aux_control/get_current_tool_flange_posx",
-            GetCurrentToolFlangePosx.Request(ref=0),
-        )
-        return describe_tcp(tcp.info, pose, flange.pos)
-
-    def flange_pose(self):
-        """활성 TCP에 영향을 받지 않는 BASE 플랜지 자세를 측정한다."""
-        from dsr_msgs2.srv import GetCurrentToolFlangePosx
-        from cake_decorator.goal_mapping import validate_reference
-
-        result = self.call(
-            GetCurrentToolFlangePosx,
-            "/dsr01/dsr_controller2/aux_control/get_current_tool_flange_posx",
-            GetCurrentToolFlangePosx.Request(ref=0),
-        )
-        return validate_reference(list(result.pos))
-
-    @contextmanager
-    def manual_tcp_mode(self):
-        """수동 교시·TCP 설정 기간만 수동 모드를 사용하고 원래 모드로 복원한다."""
-        identity = getattr(self, "_identity", None)
-        if identity is None or identity[0] != "real":
-            raise RuntimeError("실제 드라이버를 확인한 경우에만 펜 TCP를 적용합니다.")
-        self.identity(*identity)
-        from dsr_msgs2.srv import GetRobotMode, SetRobotMode
-
-        system = "/dsr01/dsr_controller2/system/"
-        mode = self.call(
-            GetRobotMode, system + "get_robot_mode", GetRobotMode.Request()
-        ).robot_mode
-        try:
-            # 강의 드라이버는 자동 모드로 연결하므로 운영자 수동 교시와 TCP
-            # 등록을 위해 잠시 전환한다. 이동·그리퍼 명령은 호출하지 않는다.
-            if mode != 0:
-                self.call(
-                    SetRobotMode,
-                    system + "set_robot_mode",
-                    SetRobotMode.Request(robot_mode=0),
-                )
-            yield
-        finally:
-            if mode != 0:
-                self.call(
-                    SetRobotMode,
-                    system + "set_robot_mode",
-                    SetRobotMode.Request(robot_mode=mode),
-                )
-
-    def apply_pen_tcp(self, profile, create=True):
-        """측정값을 새 TCP로 등록·선택한다. 이동·그리퍼 명령은 보내지 않는다."""
-        from dsr_msgs2.srv import ConfigCreateTcp, SetCurrentTcp
-
-        tcp = "/dsr01/dsr_controller2/tcp/"
-        with self.manual_tcp_mode():
-            if create:
-                self.call(
-                    ConfigCreateTcp,
-                    tcp + "config_create_tcp",
-                    ConfigCreateTcp.Request(
-                        name=profile["tcp_name"],
-                        pos=profile["tcp_pose_mm_deg"],
-                    ),
-                )
-            self.call(
-                SetCurrentTcp,
-                tcp + "set_current_tcp",
-                SetCurrentTcp.Request(name=profile["tcp_name"]),
-            )
 
     def prepare_virtual(self):
         """가상 펜 초기화가 끝난 뒤에만 홈→상면 위→상면 중심으로 이동한다."""
@@ -431,21 +333,6 @@ class Processes:
         self.children = []
         self._readers = []
         self._output_lock = threading.Lock()
-        self._console_paused = False
-
-    @contextmanager
-    def pause_console(self):
-        """입력 안내가 마지막 줄에 남도록 터미널 출력만 잠시 멈춘다."""
-        # 드라이버 파이프 읽기와 파일 기록은 계속한다. 로그가 쌓여 자식이
-        # 멈추지 않으며, 입력 취소나 예외에서도 표시 상태를 되돌린다.
-        with self._output_lock:
-            previous = self._console_paused
-            self._console_paused = True
-        try:
-            yield
-        finally:
-            with self._output_lock:
-                self._console_paused = previous
 
     def _tee(self, name, process, log):
         """자식의 합쳐진 출력을 원문 파일과 접두어를 붙인 터미널로 전달한다."""
@@ -455,8 +342,6 @@ class Processes:
                 log.write(line)
                 log.flush()
                 with self._output_lock:
-                    if self._console_paused:
-                        continue
                     try:
                         sys.stdout.write(
                             f"[{name}] " + line.decode("utf-8", errors="replace")
@@ -594,16 +479,6 @@ def main():
         type=pen_length,
         help="가상 펜 돌출 길이(cm), 생략하면 입력, 기본 4",
     )
-    parser.add_argument(
-        "--calibrate-pen-tcp",
-        action="store_true",
-        help="실제 펜촉 TCP를 네 자세로 새로 측정·등록",
-    )
-    parser.add_argument(
-        "--pen-tcp-trial-profile",
-        type=Path,
-        help="기존 수작업 측정 파일의 시험용 TCP를 확인 후 적용",
-    )
     parser.add_argument("--host", help="실제 로봇 IP, 기본 192.168.1.100")
     parser.add_argument("--frontend-port", type=int, default=8080)
     parser.add_argument("--backend-port", type=int, default=5000)
@@ -628,10 +503,6 @@ def main():
         )
     if args.mode == "virtual" and args.host not in (None, "127.0.0.1"):
         parser.error("가상 모드 주소는 127.0.0.1로 고정합니다.")
-    if args.mode == "virtual" and (
-        args.calibrate_pen_tcp or args.pen_tcp_trial_profile
-    ):
-        parser.error("실물 펜 TCP 교정은 실제 모드에서만 사용합니다.")
     args.host = args.host or (
         "127.0.0.1" if args.mode == "virtual" else "192.168.1.100"
     )
@@ -739,7 +610,6 @@ def main():
         """터미널 종료 신호도 Ctrl+C와 같은 정리 경로로 보낸다."""
         raise KeyboardInterrupt
 
-    signal.signal(signal.SIGINT, request_shutdown)
     signal.signal(signal.SIGTERM, request_shutdown)
     print(f"실행 로그: {folder}", flush=True)
     try:
@@ -772,49 +642,10 @@ def main():
             processes.start("driver", command)
         session.identity(args.mode, args.host)
         session.wait_controller()
-        if args.mode == "real":
-            with processes.pause_console():
-                print(
-                    "\n로봇 연결 준비 완료. 펜 TCP 준비 후 영점을 확인합니다.",
-                    flush=True,
-                )
-                print(
-                    f"입력 중 드라이버 로그는 {folder / 'driver.log'}에 저장합니다.",
-                    flush=True,
-                )
-                if __package__:
-                    from .pen_tcp_setup import ensure_pen_tcp
-                else:
-                    from pen_tcp_setup import ensure_pen_tcp
-
-                ensure_pen_tcp(
-                    session,
-                    ROOT / "config/local/pen_tcp.json",
-                    force=args.calibrate_pen_tcp,
-                    trial_profile=args.pen_tcp_trial_profile,
-                )
-                reference = prepare_reference(session, args.mode)
-        else:
-            reference = prepare_reference(session, args.mode)
+        reference = prepare_reference(session, args.mode)
         print(f"상면 중심 TCP [mm, deg]: {reference}", flush=True)
-        reference_data = {"mode": args.mode, "pose": reference}
-        if args.mode == "real":
-            details = session.tcp_details(reference)
-            reference_data["tcp_details"] = details
-            print(
-                f"활성 TCP: {details['tcp_name'] or '(이름 없음)'} / "
-                f"플랜지→TCP 거리: {details['flange_to_tcp_distance_mm']:.3f}mm",
-                flush=True,
-            )
         reference_file = folder / "reference.json"
-        reference_file.write_text(json.dumps(reference_data))
-        # 잘못된 설정으로 중단되어도 원인 조회값은 영점 파일에 남긴다.
-        # 거리가 0이면 RG2의 펜촉이 아닌 플랜지를 기준으로 계산한 것이다.
-        if reference_data.get("tcp_details", {}).get("tcp_at_flange"):
-            raise RuntimeError(
-                "현재 TCP 위치가 플랜지 중심입니다. RG2에 잡은 실제 펜촉으로 "
-                "TCP를 교정·적용한 뒤 다시 실행하세요. TCP 설정은 자동 변경하지 않습니다."
-            )
+        reference_file.write_text(json.dumps({"mode": args.mode, "pose": reference}))
         processes.start(
             "backend",
             [
