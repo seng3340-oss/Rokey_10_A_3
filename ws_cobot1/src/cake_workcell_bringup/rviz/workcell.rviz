@@ -29,6 +29,22 @@ Visualization Manager:
         Durability Policy: Transient Local
         Reliability Policy: Reliable
         Depth: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Observed pen contact ink
+      Enabled: true
+      Topic:
+        Value: /cake/ink
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Depth: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Planned waveform grey
+      Enabled: true
+      Topic:
+        Value: /cake/wave_plan
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Depth: 10
     - Class: rviz_default_plugins/Axes
       Name: Robot BASE XYZ
       Enabled: true

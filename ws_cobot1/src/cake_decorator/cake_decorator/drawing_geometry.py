@@ -24,18 +24,11 @@
   반지름은 높이에 관계없이 일정.
 
 픽셀→mm 매핑:
-  TOP 캔버스:
-    캔버스 = 윗면 원의 바운딩 박스 (2·radius × 2·radius)
-    scale = 2·radius / min(canvas_w, canvas_h)
-    mm_x = (px_x − canvas_w/2) × scale
-    mm_y = (canvas_h/2 − px_y) × scale   ← Y축 반전
-
-  SIDE 캔버스:
-    캔버스 = 둘레 × 높이 직사각형 펼침
-    scale_x = 2π·radius / canvas_w
-    scale_y = height / canvas_h
-    arc_mm = px_x × scale_x
-    height_mm = (canvas_h − px_y) × scale_y   ← Y축 반전
+  전체 캔버스는 1024×768이며 여백을 포함한다.
+  TOP: 중심 (512,384), 반지름 320px인 원을 실제 반지름으로 환산한다.
+  SIDE: 폭896px인 중앙 띠가 전체 둘레에 대응한다.
+        띠 높이는 폭×실제 높이/실제 둘레이며 상하 여백을 제외한다.
+  캔버스 해상도가 비례 변경되면 같은 비율로 편집 영역을 계산한다.
 """
 
 from __future__ import annotations
@@ -58,7 +51,9 @@ def pixel_to_mm_top(
 
     Returns: (mm_x, mm_y) — 윗면 중심에서의 오프셋
     """
-    scale = (2.0 * radius) / min(canvas_w, canvas_h)
+    # 고객 화면의 원 지름은 전체 캔버스 높이의 640/768이다.
+    # 전체 캔버스를 원으로 간주하면 같은 그림이 약 17% 작아진다.
+    scale = (2.0 * radius) / (canvas_h * 640.0 / 768.0)
     mm_x = (px_x - canvas_w / 2.0) * scale
     mm_y = (canvas_h / 2.0 - px_y) * scale   # Y축 반전
     return (mm_x, mm_y)
@@ -75,10 +70,16 @@ def pixel_to_mm_side(
       arc_mm: 원주 방향 호 길이 (mm), 0부터 시작
       height_mm: 바닥부터 높이 (mm), 0=바닥 ~ height=윗면
     """
-    scale_x = (2.0 * math.pi * radius) / canvas_w
-    scale_y = height / canvas_h
-    arc_mm = px_x * scale_x
-    height_mm = (canvas_h - px_y) * scale_y   # Y축 반전
+    # 웹은 좌우 여백이 있는 둘레×높이 띠를 중앙에 배치한다.
+    # 여백을 빼고 편집 영역만 물리 치수로 환산한다.
+    drawing_width = canvas_w * 896.0 / 1024.0
+    drawing_height = drawing_width * height / (2.0 * math.pi * radius)
+    left = (canvas_w - drawing_width) / 2.0
+    top = (canvas_h - drawing_height) / 2.0
+    scale_x = (2.0 * math.pi * radius) / drawing_width
+    scale_y = height / drawing_height
+    arc_mm = (px_x - left) * scale_x
+    height_mm = (top + drawing_height - px_y) * scale_y   # Y축 반전
     return (arc_mm, height_mm)
 
 

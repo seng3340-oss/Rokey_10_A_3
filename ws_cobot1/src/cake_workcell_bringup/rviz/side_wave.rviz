@@ -1,0 +1,71 @@
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+Visualization Manager:
+  Class: ''
+  Global Options:
+    Fixed Frame: base_link
+    Background Color: 53; 57; 63
+  Displays:
+  - Class: rviz_default_plugins/RobotModel
+    Name: M0609 and RG2
+    Enabled: true
+    Visual Enabled: true
+    Collision Enabled: false
+    Description Source: Topic
+    Description Topic:
+      Value: /dsr01/robot_description
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/RobotModel
+    Name: Table and A fixture
+    Enabled: true
+    Visual Enabled: true
+    Collision Enabled: false
+    Description Source: Topic
+    Description Topic:
+      Value: /workcell_description
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Observed pen contact ink
+    Enabled: true
+    Topic:
+      Value: /cake/ink
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Planned waveform grey
+    Enabled: true
+    Topic:
+      Value: /cake/wave_plan
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 10
+  - Class: rviz_default_plugins/Axes
+    Name: Robot BASE XYZ
+    Enabled: true
+    Reference Frame: base_link
+    Length: 0.2
+    Radius: 0.006
+  Tools:
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/Select
+  - Class: rviz_default_plugins/FocusCamera
+  - Class: rviz_default_plugins/Interact
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 0.48
+      Pitch: 0.25
+      Yaw: 3.14159
+      Focal Point:
+        X: 0.5
+        Y: 0
+        Z: 0.105
+Window Geometry:
+  Width: 1350
+  Height: 950

@@ -224,7 +224,13 @@ class TestMultipleStrokes:
     def test_side_surface_keeps_all_strokes(self, dp_node):
         """옆면도 여러 획을 전부 변환한다."""
         response = _convert(
-            dp_node, [STROKE_A, STROKE_B, STROKE_C], surface="SIDE",
+            dp_node,
+            [
+                [(420.0, 340.0), (460.0, 350.0), (500.0, 340.0)],
+                [(520.0, 370.0), (550.0, 380.0)],
+                [(600.0, 400.0), (640.0, 420.0), (660.0, 400.0)],
+            ],
+            surface="SIDE",
         )
         assert response.success, response.error_msg
         assert _pen_segments(response.pen_states) == 3

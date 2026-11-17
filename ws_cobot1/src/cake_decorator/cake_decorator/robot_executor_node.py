@@ -42,6 +42,7 @@ class RobotExecutorNode(Node):
         'pen_grip_force': 20.0,    # N
         'gripper_open_width': 100.0,  # mm
         'approach_height': 0.05,   # m
+        'virtual_initial_approach': False,  # 실행기가 가상 모드에서만 활성화
     }
 
     def __init__(self):
@@ -357,12 +358,8 @@ class RobotExecutorNode(Node):
                 f'{cmd.phase.value} pos={cmd.pos.to_list()}'
             )
 
-            if not self._robot.move_line(
-                pos=cmd.pos,
-                speed_mm_s=cmd.vel,
-                acc_mm_s2=cmd.acc,
-            ):
-                self._fail(f'MoveLine 실패 (#{i})')
+            if not self._execute_motion_command(cmd, i):
+                self._fail(f'{cmd.motion_type.value} 실패 (#{i})')
                 return False
 
         self.get_logger().info('드로잉 완료')
@@ -463,6 +460,29 @@ class RobotExecutorNode(Node):
                 'speed': wp.speed if wp.speed > 0 else default_speed,
                 'pen_down': wp.pen_down,
                 'contact_force': wp.contact_force,
+                # DP 원호 정보를 전달한다. 획의 완료·중단 판단은 변경하지 않는다.
+                'motion_type': wp.motion_type,
+                'spline': [
+                    {
+                        'x': p.position.x,
+                        'y': p.position.y,
+                        'z': p.position.z,
+                        'qx': p.orientation.x,
+                        'qy': p.orientation.y,
+                        'qz': p.orientation.z,
+                        'qw': p.orientation.w,
+                    }
+                    for p in wp.spline_poses
+                ],
+                'via': {
+                    'x': wp.via_pose.position.x,
+                    'y': wp.via_pose.position.y,
+                    'z': wp.via_pose.position.z,
+                    'qx': wp.via_pose.orientation.x,
+                    'qy': wp.via_pose.orientation.y,
+                    'qz': wp.via_pose.orientation.z,
+                    'qw': wp.via_pose.orientation.w,
+                },
             })
             pen_states.append(wp.pen_down)
         return dicts, pen_states
@@ -470,6 +490,17 @@ class RobotExecutorNode(Node):
     # ==================================================================
     # 공통 액션 콜백
     # ==================================================================
+
+    def _execute_motion_command(self, command, index):
+        """가상 첫 접근의 특이점 보완만 분리하며 획 완료·취소 판단은 유지한다."""
+        if (
+            index == 0
+            and not command.pen_down
+            and self._param('virtual_initial_approach')
+        ):
+            self.get_logger().info('가상 첫 접근: 현재 자세로 이탈 후 movejx로 접근합니다.')
+            return self._robot.prepare_virtual_approach(command.pos)
+        return self._robot.execute_drawing_command(command)
 
     def _goal_callback(self, goal_request):
         self.get_logger().info('액션 Goal 수신')
@@ -533,12 +564,16 @@ class RobotExecutorNode(Node):
             feedback.phase = cmd.phase.value
             goal_handle.publish_feedback(feedback)
 
-            # MoveLine 실행
-            if not self._robot.move_line(
-                pos=cmd.pos, speed_mm_s=cmd.vel, acc_mm_s2=cmd.acc,
-            ):
+            # 획·펜 상태가 바뀔 때만 주요 진행 상황을 터미널에 남긴다.
+            if i == 0 or cmd.phase != plan.commands[i - 1].phase or cmd.stroke_idx != plan.commands[i - 1].stroke_idx:
+                self.get_logger().info(
+                    f'동작 {i+1}/{total}, 획 {cmd.stroke_idx+1}: '
+                    f'{cmd.phase.value}, {cmd.motion_type.value}'
+                )
+            # DP가 지정한 직선·원호·스플라인 명령을 실행한다.
+            if not self._execute_motion_command(cmd, i):
                 self.get_logger().error(
-                    f'MoveLine 실패 (#{i}): {cmd.pos.to_list()}'
+                    f'{cmd.motion_type.value} 실패 (#{i}): {cmd.pos.to_list()}'
                 )
                 result.success = False
                 result.error_code = f'MOVE_FAILED_AT_{i}'
@@ -550,9 +585,9 @@ class RobotExecutorNode(Node):
                 completed_strokes += 1
                 prev_stroke_idx = cmd.stroke_idx
 
-        self.get_logger().info(f'드로잉 완료: {completed_strokes + 1} 획')
+        self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
         result.success = True
-        result.completed_strokes = completed_strokes + 1
+        result.completed_strokes = plan.total_strokes
         result.error_code = ''
         goal_handle.succeed()
         return result
@@ -727,7 +762,7 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

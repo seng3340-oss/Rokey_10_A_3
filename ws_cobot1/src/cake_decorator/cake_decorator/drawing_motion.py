@@ -22,7 +22,6 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 
-
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
@@ -37,9 +36,9 @@ WORKSPACE_Z_MAX = 900.0
 WORKSPACE_RADIUS_MAX = 900.0  # BASE에서 최대 도달 거리 (mm)
 
 # 기본 가감속 값
-DEFAULT_ACC_LINEAR = 100.0    # mm/s²
-DEFAULT_ACC_ANGULAR = 30.0    # °/s²
-DEFAULT_VEL_ANGULAR = 30.0    # °/s
+DEFAULT_ACC_LINEAR = 100.0  # mm/s²
+DEFAULT_ACC_ANGULAR = 30.0  # °/s²
+DEFAULT_VEL_ANGULAR = 30.0  # °/s
 
 
 # ---------------------------------------------------------------------------
@@ -49,17 +48,21 @@ DEFAULT_VEL_ANGULAR = 30.0    # °/s
 
 class MotionType(Enum):
     """동작 유형."""
-    MOVE_LINE = 'movel'
-    MOVE_JOINT = 'movej'
+
+    MOVE_LINE = "movel"
+    MOVE_CIRCLE = "movec"
+    MOVE_SPLINE = "movesx"
+    MOVE_JOINT = "movej"
 
 
 class Phase(Enum):
     """드로잉 동작 단계."""
-    APPROACH = 'APPROACH'
-    PEN_DOWN = 'PEN_DOWN'
-    DRAWING = 'DRAWING'
-    PEN_UP = 'PEN_UP'
-    REPOSITIONING = 'REPOSITIONING'
+
+    APPROACH = "APPROACH"
+    PEN_DOWN = "PEN_DOWN"
+    DRAWING = "DRAWING"
+    PEN_UP = "PEN_UP"
+    REPOSITIONING = "REPOSITIONING"
 
 
 # ---------------------------------------------------------------------------
@@ -75,18 +78,19 @@ class Phase(Enum):
 
 class TaskState(Enum):
     """케이크 레터링 전체 작업 상태."""
-    IDLE = 'IDLE'
-    RECEIVED = 'RECEIVED'
-    VALIDATING = 'VALIDATING'
-    PICKING_CAKE = 'PICKING_CAKE'
-    PLACING_CAKE = 'PLACING_CAKE'
-    GRASPING_TOOL = 'GRASPING_TOOL'
-    DRAWING = 'DRAWING'
-    RETURNING_TOOL = 'RETURNING_TOOL'
-    DELIVERING = 'DELIVERING'
-    COMPLETED = 'COMPLETED'
-    FAILED = 'FAILED'
-    CANCELED = 'CANCELED'
+
+    IDLE = "IDLE"
+    RECEIVED = "RECEIVED"
+    VALIDATING = "VALIDATING"
+    PICKING_CAKE = "PICKING_CAKE"
+    PLACING_CAKE = "PLACING_CAKE"
+    GRASPING_TOOL = "GRASPING_TOOL"
+    DRAWING = "DRAWING"
+    RETURNING_TOOL = "RETURNING_TOOL"
+    DELIVERING = "DELIVERING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
 
 
 # 정상 흐름 순서 (FAILED/CANCELED 제외)
@@ -121,52 +125,52 @@ VALID_TRANSITIONS[TaskState.CANCELED] = {TaskState.IDLE}
 # 각 상태별 내부 세부 단계 (흐름도 참조)
 TASK_STATE_SUBSTEPS: dict[TaskState, list[str]] = {
     TaskState.VALIDATING: [
-        '경로데이터 검증',
-        '로봇상태 확인',
-        '교정치 확인',
-        '재료/도구 확인',
+        "경로데이터 검증",
+        "로봇상태 확인",
+        "교정치 확인",
+        "재료/도구 확인",
     ],
     TaskState.PICKING_CAKE: [
-        '작업위치이동',
-        '로봇상태 확인',
-        '그리퍼열기/닫기',
-        '로봇이동 확인',
-        '들어올리기',
+        "작업위치이동",
+        "로봇상태 확인",
+        "그리퍼열기/닫기",
+        "로봇이동 확인",
+        "들어올리기",
     ],
     TaskState.PLACING_CAKE: [
-        '작업대이동',
-        '로봇상태 확인',
-        '케이크배치',
-        '배치 완료 확인',
-        '그리퍼해제',
+        "작업대이동",
+        "로봇상태 확인",
+        "케이크배치",
+        "배치 완료 확인",
+        "그리퍼해제",
     ],
     TaskState.GRASPING_TOOL: [
-        'TCP전환',
-        'TCP전환 완료 확인',
-        '거치대이동',
-        '로봇동작 확인',
-        '원위치',
+        "TCP전환",
+        "TCP전환 완료 확인",
+        "거치대이동",
+        "로봇동작 확인",
+        "원위치",
     ],
     TaskState.DRAWING: [
-        '레이어변환',
-        '웨이포인트로변환',
-        '명령도로잉',
-        '웨이포인트로변환',
-        '명령도로잉',
+        "레이어변환",
+        "웨이포인트로변환",
+        "명령도로잉",
+        "웨이포인트로변환",
+        "명령도로잉",
     ],
     TaskState.RETURNING_TOOL: [
-        '거치대복귀',
-        '로봇동작 확인',
-        '펜반납',
-        '반납 완료 확인',
-        'TCP복원',
+        "거치대복귀",
+        "로봇동작 확인",
+        "펜반납",
+        "반납 완료 확인",
+        "TCP복원",
     ],
     TaskState.DELIVERING: [
-        '케이크집기',
-        '로봇이동 확인',
-        '출고위치이동',
-        '로봇동작 확인',
-        '케이크내려놓기',
+        "케이크집기",
+        "로봇이동 확인",
+        "출고위치이동",
+        "로봇동작 확인",
+        "케이크내려놓기",
     ],
 }
 
@@ -203,11 +207,12 @@ def get_substeps(state: TaskState) -> list[str]:
 @dataclass
 class DsrPos:
     """Doosan 직교 좌표 (mm, ZYZ °)."""
-    x: float   # mm
-    y: float   # mm
-    z: float   # mm
+
+    x: float  # mm
+    y: float  # mm
+    z: float  # mm
     rz1: float  # ° (Z축 1차 회전)
-    ry: float   # ° (Y축 회전)
+    ry: float  # ° (Y축 회전)
     rz2: float  # ° (Z축 2차 회전)
 
     def to_list(self) -> list[float]:
@@ -216,29 +221,32 @@ class DsrPos:
 
     def with_z_offset(self, offset_mm: float) -> DsrPos:
         """Z축 오프셋을 적용한 새 좌표를 반환한다."""
-        return DsrPos(self.x, self.y, self.z + offset_mm,
-                       self.rz1, self.ry, self.rz2)
+        return DsrPos(self.x, self.y, self.z + offset_mm, self.rz1, self.ry, self.rz2)
 
 
 @dataclass
 class MotionCommand:
     """로봇에 보낼 단일 동작 명령."""
+
     motion_type: MotionType
     pos: DsrPos
-    vel: float          # mm/s (선형 속도)
-    acc: float          # mm/s² (선형 가속도)
+    vel: float  # mm/s (선형 속도)
+    acc: float  # mm/s² (선형 가속도)
     phase: Phase
     pen_down: bool
     stroke_idx: int = 0
-    sync: bool = True   # True=동기, False=비동기
+    sync: bool = True  # True=동기, False=비동기
+    spline: list[DsrPos] | None = None
+    via: DsrPos | None = None  # 원호 경유점. 직선에서는 사용하지 않는다.
 
 
 @dataclass
 class MotionPlan:
     """전체 동작 계획."""
+
     commands: list[MotionCommand] = field(default_factory=list)
     total_strokes: int = 0
-    error_msg: str = ''
+    error_msg: str = ""
 
     @property
     def success(self) -> bool:
@@ -252,7 +260,10 @@ class MotionPlan:
 
 
 def quaternion_to_zyz(
-    qx: float, qy: float, qz: float, qw: float,
+    qx: float,
+    qy: float,
+    qz: float,
+    qw: float,
 ) -> tuple[float, float, float]:
     """쿼터니언 → ZYZ 오일러각 (°).
 
@@ -298,14 +309,23 @@ def m_to_mm(val: float) -> float:
 
 
 def waypoint_to_dsr_pos(
-    x: float, y: float, z: float,
-    qx: float, qy: float, qz: float, qw: float,
+    x: float,
+    y: float,
+    z: float,
+    qx: float,
+    qy: float,
+    qz: float,
+    qw: float,
 ) -> DsrPos:
     """Waypoint3D 좌표(m, 쿼터니언) → Doosan 좌표(mm, ZYZ°)."""
     rz1, ry, rz2 = quaternion_to_zyz(qx, qy, qz, qw)
     return DsrPos(
-        x=m_to_mm(x), y=m_to_mm(y), z=m_to_mm(z),
-        rz1=rz1, ry=ry, rz2=rz2,
+        x=m_to_mm(x),
+        y=m_to_mm(y),
+        z=m_to_mm(z),
+        rz1=rz1,
+        ry=ry,
+        rz2=rz2,
     )
 
 
@@ -340,14 +360,14 @@ def validate_workspace(pos: DsrPos) -> str:
     -------
     빈 문자열이면 유효, 아니면 에러 메시지.
     """
-    dist_xy = math.sqrt(pos.x ** 2 + pos.y ** 2)
+    dist_xy = math.sqrt(pos.x**2 + pos.y**2)
     if dist_xy > WORKSPACE_RADIUS_MAX:
-        return f'XY 도달 범위 초과: {dist_xy:.1f}mm > {WORKSPACE_RADIUS_MAX}mm'
+        return f"XY 도달 범위 초과: {dist_xy:.1f}mm > {WORKSPACE_RADIUS_MAX}mm"
     if pos.z < WORKSPACE_Z_MIN:
-        return f'Z 하한 초과: {pos.z:.1f}mm < {WORKSPACE_Z_MIN}mm'
+        return f"Z 하한 초과: {pos.z:.1f}mm < {WORKSPACE_Z_MIN}mm"
     if pos.z > WORKSPACE_Z_MAX:
-        return f'Z 상한 초과: {pos.z:.1f}mm > {WORKSPACE_Z_MAX}mm'
-    return ''
+        return f"Z 상한 초과: {pos.z:.1f}mm > {WORKSPACE_Z_MAX}mm"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +396,7 @@ def calculate_vel_acc(
 def plan_drawing_motion(
     waypoints: list[dict],
     pen_states: list[bool],
-    drawing_surface: str = 'TOP',
+    drawing_surface: str = "TOP",
 ) -> MotionPlan:
     """웨이포인트 목록을 MotionCommand 시퀀스로 변환한다.
 
@@ -392,9 +412,9 @@ def plan_drawing_motion(
     MotionPlan
     """
     if not waypoints:
-        return MotionPlan(error_msg='빈 웨이포인트 목록입니다.')
+        return MotionPlan(error_msg="빈 웨이포인트 목록입니다.")
     if len(waypoints) != len(pen_states):
-        return MotionPlan(error_msg='웨이포인트와 펜 상태 목록의 길이가 다릅니다.')
+        return MotionPlan(error_msg="웨이포인트와 펜 상태 목록의 길이가 다릅니다.")
 
     commands: list[MotionCommand] = []
     stroke_idx = 0
@@ -403,14 +423,66 @@ def plan_drawing_motion(
     for i, (wp, pen) in enumerate(zip(waypoints, pen_states)):
         # 좌표 변환
         dsr_pos = waypoint_to_dsr_pos(
-            wp['x'], wp['y'], wp['z'],
-            wp['qx'], wp['qy'], wp['qz'], wp['qw'],
+            wp["x"],
+            wp["y"],
+            wp["z"],
+            wp["qx"],
+            wp["qy"],
+            wp["qz"],
+            wp["qw"],
         )
 
         # 작업 영역 검증
         err = validate_workspace(dsr_pos)
         if err:
-            return MotionPlan(error_msg=f'웨이포인트 {i}: {err}')
+            return MotionPlan(error_msg=f"웨이포인트 {i}: {err}")
+
+        # 원호 경유점 전달은 획의 완료·중단 판단과 독립적으로 처리한다.
+        kind = wp.get("motion_type", 0)
+        if kind not in (0, 1, 2):
+            return MotionPlan(error_msg=f"웨이포인트 {i}: 알 수 없는 이동 종류")
+        via = None
+        spline = None
+        if kind == 2:
+            if i == 0 or not 2 <= len(wp.get("spline", [])) <= 100:
+                return MotionPlan(
+                    error_msg="스플라인은 시작점과 2~100개 목표점이 필요합니다."
+                )
+            spline = []
+            for sample in wp["spline"]:
+                point = waypoint_to_dsr_pos(
+                    sample["x"],
+                    sample["y"],
+                    sample["z"],
+                    sample["qx"],
+                    sample["qy"],
+                    sample["qz"],
+                    sample["qw"],
+                )
+                err = validate_workspace(point)
+                if err:
+                    return MotionPlan(error_msg=f"스플라인 표본: {err}")
+                spline.append(point)
+            if math.dist(spline[-1].to_list()[:3], dsr_pos.to_list()[:3]) > 1e-6:
+                return MotionPlan(error_msg="스플라인 마지막 점이 목표점과 다릅니다.")
+        if kind == 1:
+            if i == 0 or "via" not in wp:
+                return MotionPlan(error_msg="원호는 시작점과 경유점이 필요합니다.")
+            v = wp["via"]
+            via = waypoint_to_dsr_pos(
+                v["x"], v["y"], v["z"], v["qx"], v["qy"], v["qz"], v["qw"]
+            )
+            err = validate_workspace(via)
+            if err:
+                return MotionPlan(error_msg=f"원호 경유점 {i}: {err}")
+            previous = commands[-1].pos
+            if max(abs(previous.z - via.z), abs(previous.z - dsr_pos.z)) > 1e-5:
+                return MotionPlan(error_msg="옆면 원호의 시작·경유·끝 높이가 다릅니다.")
+            determinant = (via.x - previous.x) * (dsr_pos.y - previous.y) - (
+                via.y - previous.y
+            ) * (dsr_pos.x - previous.x)
+            if abs(determinant) < 1e-10:
+                return MotionPlan(error_msg="원호의 세 점이 중복되거나 일직선입니다.")
 
         # 단계 결정
         phase = _determine_phase(prev_pen, pen, i, len(waypoints))
@@ -419,15 +491,23 @@ def plan_drawing_motion(
         if prev_pen and not pen:
             stroke_idx += 1
 
-        commands.append(MotionCommand(
-            motion_type=MotionType.MOVE_LINE,
-            pos=dsr_pos,
-            vel=wp['speed'],
-            acc=DEFAULT_ACC_LINEAR,
-            phase=phase,
-            pen_down=pen,
-            stroke_idx=stroke_idx,
-        ))
+        commands.append(
+            MotionCommand(
+                motion_type={
+                    0: MotionType.MOVE_LINE,
+                    1: MotionType.MOVE_CIRCLE,
+                    2: MotionType.MOVE_SPLINE,
+                }[kind],
+                spline=spline,
+                via=via,
+                pos=dsr_pos,
+                vel=wp["speed"],
+                acc=DEFAULT_ACC_LINEAR,
+                phase=phase,
+                pen_down=pen,
+                stroke_idx=stroke_idx,
+            )
+        )
         prev_pen = pen
 
     return MotionPlan(
@@ -437,8 +517,10 @@ def plan_drawing_motion(
 
 
 def _determine_phase(
-    prev_pen: bool, cur_pen: bool,
-    idx: int, total: int,
+    prev_pen: bool,
+    cur_pen: bool,
+    idx: int,
+    total: int,
 ) -> Phase:
     """이전/현재 펜 상태로 동작 단계를 결정한다."""
     if not cur_pen and not prev_pen:
