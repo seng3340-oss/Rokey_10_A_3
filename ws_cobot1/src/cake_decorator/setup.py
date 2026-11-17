@@ -45,6 +45,14 @@ setup(
             "drawing_path_node = cake_decorator.drawing_path_node:main",
             # DrawOnCake·GraspTool·PickAndPlace 액션 서버. 가상 로봇에 MoveLine을 보낸다.
             "robot_executor_node = cake_decorator.robot_executor_node:main",
+            "drawing_geometry = cake_decorator.drawing_geometry:main",
+            "drawing_motion = cake_decorator.drawing_motion:main",
+            "doosan_robot = cake_decorator.doosan_robot:main",
+            "backend_client = cake_decorator.backend_client:main",
+            "goal_mapping = cake_decorator.goal_mapping:main",
+            "task_manager = cake_decorator.task_manager:main",
+
+
         ],
     },
 )
