@@ -38,13 +38,18 @@ class DoosanRobotClient:
     모든 이동/그리퍼 명령을 동기 호출로 래핑한다.
     """
 
-    # 서비스 이름 상수
+    # 서비스 이름 상수.
+    # 도선 모션 서비스는 /dsr01 네임스페이스의 dsr_controller2 컨트롤러 노드
+    # 아래에 등록되므로 실제 경로는 '/dsr01/dsr_controller2/motion/...'이다
+    # (가상 에뮬레이터에서 ros2 service list로 확인). '/dsr01/motion/...'으로
+    # 두면 클라이언트가 서비스를 찾지 못해 모션이 한 번도 실행되지 않는다.
+    # 그리퍼는 가상 GripperVirtualNode가 '/onrobot/sendCommand'로 제공한다.
     _SERVICES = {
-        'move_line':   ('/dsr01/motion/move_line', MoveLine),
-        'move_joint':  ('/dsr01/motion/move_joint', MoveJoint),
-        'move_home':   ('/dsr01/motion/move_home', MoveHome),
-        'move_spline': ('/dsr01/motion/move_spline_task', MoveSplineTask),
-        'gripper':     ('/onrobot_rg/set_command', SetCommand),
+        'move_line':   ('/dsr01/dsr_controller2/motion/move_line', MoveLine),
+        'move_joint':  ('/dsr01/dsr_controller2/motion/move_joint', MoveJoint),
+        'move_home':   ('/dsr01/dsr_controller2/motion/move_home', MoveHome),
+        'move_spline': ('/dsr01/dsr_controller2/motion/move_spline_task', MoveSplineTask),
+        'gripper':     ('/onrobot/sendCommand', SetCommand),
     }
 
     def __init__(self, node: Node, service_timeout: float = 5.0):

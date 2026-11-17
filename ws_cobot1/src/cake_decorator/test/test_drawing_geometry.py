@@ -7,7 +7,7 @@
 import math
 import pytest
 
-from drawing_geometry import (
+from cake_decorator.drawing_geometry import (
     CylinderCake,
     direction_to_quaternion,
     pen_quat_side,

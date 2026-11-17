@@ -40,6 +40,9 @@ class TaskManagerNode(Node):
         # ── 파라미터 ──
         self.declare_parameter('drawing_speed', 20.0)     # mm/s
         self.declare_parameter('contact_force', 1.0)      # N
+        # DP로 넘길 작업 속도 퍼센트. 0을 그대로 보내면 DP가 1%로
+        # 계산해 드로잉 속도가 1/100로 떨어지므로 기본 100을 쓴다.
+        self.declare_parameter('operation_speed_percent', 100)
         self.declare_parameter('action_timeout', 120.0)   # 초
         self.declare_parameter('service_timeout', 30.0)   # 초
 
@@ -184,8 +187,18 @@ class TaskManagerNode(Node):
                 return False
 
             traj_req = GenerateTrajectory.Request()
-            traj_req.canvas_width = dp.canvas_width
-            traj_req.canvas_height = dp.canvas_height
+            # 주문번호는 DP 로그에서 획과 함께 주문을 추적하기 위한 식별자다.
+            traj_req.order_id = request.order_id
+            # 속도 퍼센트는 기본 100을 쓴다. 비워두면 DP가 0%로 계산한다.
+            traj_req.operation_speed_percent = int(
+                self.get_parameter('operation_speed_percent').value
+            )
+            # canvas_*는 uint32, DP 요청의 canvas_*는 float64다. 정수를 그대로
+            # 대입하면 런타임에 값이 int로 남았다가 서비스 직렬화 중 프로세스가
+            # abort되므로 float로 바꿔 넘긴다.
+            traj_req.canvas_width = float(dp.canvas_width)
+            traj_req.canvas_height = float(dp.canvas_height)
+            # 원본 픽셀 획을 순서·점 개수 그대로 넘긴다. DP에서 변환을 수행한다.
             traj_req.strokes_2d = dp.strokes
             traj_req.surface_type = dp.surface
             traj_req.cake_pose = cake_pose
@@ -204,7 +217,17 @@ class TaskManagerNode(Node):
                 self.get_logger().error(f'궤적 생성 실패: {resp.error_msg}')
                 return False
 
-            self.get_logger().info(f'궤적 생성 완료: waypoints={len(resp.waypoints_3d)}')
+            # 펜이 처음 내려간 지점 수 = 실제로 그려질 획 수.
+            # 첫 획만 만들어지는 문제를 로그에서 바로 알 수 있게 센다.
+            stroke_count = sum(
+                1
+                for i, wp in enumerate(resp.waypoints_3d)
+                if wp.pen_down and (i == 0 or not resp.waypoints_3d[i - 1].pen_down)
+            )
+            self.get_logger().info(
+                f'궤적 생성 완료: waypoints={len(resp.waypoints_3d)}, '
+                f'strokes={stroke_count}'
+            )
 
             # 2) DrawOnCake 액션 호출
             draw_goal = DrawOnCake.Goal()

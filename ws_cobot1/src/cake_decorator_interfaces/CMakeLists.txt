@@ -9,17 +9,14 @@ find_package(builtin_interfaces REQUIRED)
 
 # 원본 픽셀용 Stroke2D를 등록한다. mm 전용 입력 타입은 등록하지 않는다.
 # 별칭 타입을 추가하지 않는다. 표/다이어그램과의 이름 차이는 README에 기록한다.
+# StrokeMM/PointMM/PointMM3D는 원통형 계약에서 파일이 이미 삭제됐으므로
+# 빌드 목록에서도 제거한다. 목록의 파일이 없으면 rosidl이 즉시 빌드를 실패시킨다.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TaskStatus.msg"
   "msg/CakeParams.msg"
   "msg/WorkspaceCoords.msg"
   "msg/DrawingPath.msg"
-  # 임시 우회: StrokeMM 계열 메시지도 등록해 GenerateTrajectory.srv 빌드를 통과시킨다.
-  # 빌드 후 원본 CMakeLists로 되돌릴 예정이다.
   "msg/Stroke2D.msg"
-  "msg/StrokeMM.msg"
-  "msg/PointMM.msg"
-  "msg/PointMM3D.msg"
   "msg/Waypoint3D.msg"
   "srv/GenerateTrajectory.srv"
   "srv/SwitchTCP.srv"
