@@ -1,8 +1,6 @@
-# 테이블2 + A안 고정구 가상 배치
+# 케이크 드로잉 가상 작업셀
 
-강승묵님이 Slack에 공유한 A안의 타공판·프레임·케이크판·케이크를
-기존 test_custom_mini_cake2의 테이블 위에 올린 RViz 장면입니다.
-위치는 임시값이며 로봇 이동이나 그리기 동작은 실행하지 않습니다.
+기존 테이블에 금속 스테이션, 일체형 선반, 대각선 틀, 오른쪽 가이드, 펜 홀더와 케이크따개를 배치한 RViz 장면입니다.
 
 ## 실행
 
@@ -13,7 +11,7 @@ cd ~/ws_cobot_pjt
 bash scripts/start_virtual_workcell.sh
 ```
 
-가상 DRCF Docker, M0609+RG2 드라이버, 테이블/A안 시각화, RViz가 실행됩니다.
+가상 DRCF Docker, M0609+RG2 드라이버, 테이블/작업셀 시각화, RViz가 실행됩니다.
 이미 sodvir 또는 같은 dsr01 가상 launch가 켜져 있다면 먼저 종료하세요.
 실행기는 기존 sod/sodvir/sodreal 별칭을 바꾸지 않으며 ROS_DOMAIN_ID=30을 사용합니다.
 종료는 실행한 터미널에서 Ctrl+C입니다. RViz만 닫으면 컨트롤러가 남을 수 있습니다.
@@ -28,31 +26,47 @@ bash scripts/start_virtual_workcell.sh
 ```text
 ws_cobot1/src/
 ├── cake_workcell_description/
-│   ├── meshes/                 # 기존 상판·매립 링, 팀원 A안 STL 4개
-│   ├── urdf/workcell.urdf.xacro # 독립 작업 환경 모델, A안 mount 위치 인자
+│   ├── meshes/                 # 상판·매립 링과 배치별 STL
+│   ├── urdf/workcell.urdf.xacro # 테이블과 배치 선택
+│   ├── urdf/station_layout.xacro # 승인한 배치의 프레임과 메시
 │   ├── SOURCES.md              # Slack 원문·원본 치수·단위·제한
 │   └── tests/test_workcell.py   # 프레임/단위/체크섬 검사
 └── cake_workcell_bringup/
     ├── launch/virtual.launch.py       # 작업대+가상 로봇+RViz
     ├── launch/course_virtual.launch.py# 강의 launch 재사용, virtual/localhost 고정
-    ├── config/workcell.yaml           # 임시 설치 위치 (mm/degree)
+    ├── config/workcell.yaml           # 이전 고정구 위치 (mm/degree)
     └── rviz/workcell.rviz             # 로봇과 환경을 각각 표시
 ```
 
-## 위치 조정
+## 기본 배치
 
-cake_workcell_bringup/config/workcell.yaml의 fixture 값을 바꿉니다.
-현재 원점은 BASE (415,-85,0)mm이고 A안 케이크 중심은 (500,0)mm입니다.
-타공판은 X=375..625, Y=-125..125mm 범위에 있으며 밑면이 상판 Z=0에 닿습니다.
-A안 메시에는 자체 위치가 포함돼 있으므로 원점을 케이크 중심과 혼동하지 마세요.
-A안 원본 케이크는 약 지름100mm·높이80mm이며 이전 테스트의 지름150mm를 강제로 적용하지 않았습니다.
-케이크 상면은 현재 BASE Z=150mm입니다. 모델 높이를 실제 TCP 영점으로 사용하지 않습니다.
+좌표는 로봇 BASE 기준입니다. 테이블 상면은 Z=0 mm입니다.
 
-빠르게 시험할 때는 launch 인자로 덮어쓸 수 있습니다. 이 인자는 **m/rad** 단위입니다.
+| 부품 또는 프레임 | 기준과 치수 |
+|---|---|
+| 스테이션 `station_base` | (399, −49, 0) mm. 오른쪽 위 개구부 40 × 40 mm |
+| 스테이션 틀 `cake_tray_surface` | 틀 윗면 (399, −49, 139) mm |
+| 일체형 선반 `cake_shared_shelf` | 바닥 중심 (755, 50, 0) mm. X 150 × Y 550 × Z 150 mm |
+| 드로잉 전 틀 `cake_input_tray` | 바닥 중심 (755, 200, 150) mm. yaw +45° |
+| 반출구 틀 `cake_output_tray` | 바닥 중심 (755, −100, 150) mm. yaw +45° |
+| 펜 홀더 `cake_pen_holder` | (275, 225, 0) mm. 위치 확인용 임시 형상 |
+| 케이크따개 `cake_opener` | (425, 225, 0) mm. 제공한 STL 사용 |
+
+150 mm 정사각형 틀을 45° 회전하면 선반 양쪽으로 약 31.1 mm 돌출됩니다.
+두 틀 사이 여유는 약 87.9 mm이고 각각 오른쪽에 `>`형 가이드가 있습니다.
+가이드의 체결 구조, 로봇 도달 범위 및 충돌 검증은 별도 작업입니다.
+
+## 기존 드로잉 데모 배치
+
+`scripts/virtual_draw_demo.py`는 이전 장면의 케이크 윗면 중심 (500, 0, 142) mm를 사용합니다.
+해당 데모를 실행하려면 작업셀을 아래처럼 띄웁니다.
 
 ```bash
-bash scripts/start_virtual_workcell.sh fixture_x:=0.45 fixture_y:=-0.085 fixture_yaw:=0.0
+bash scripts/start_virtual_workcell.sh layout:=legacy
 ```
+
+`fixture_x`, `fixture_y`, `fixture_z`, `fixture_yaw`는 이 이전 장면에서 사용합니다.
+런치 인자의 단위는 m/rad입니다.
 
 ## 최초 빌드 또는 재빌드
 
@@ -68,11 +82,8 @@ colcon build --symlink-install --packages-select cake_workcell_description cake_
 로봇은 /dsr01/robot_description, 환경은 /workcell_description으로 표시하며
 base_link → workcell_root 정적 TF로 연결해 프레임 이름 충돌을 피합니다.
 
-## 검증 및 한계
+## 검증 범위
 
-- 두 패키지 빌드, 단위·위치 인자·16개 매립 구멍·메시 체크섬 테스트 4개 통과
-- 실제 가상 launch에서 joint_state_broadcaster/dsr_controller2 active 확인
-- RViz에서 기존 캐비닛 테이블·바퀴·로봇·A안 조립체 표시 확인
-- 타공판 최종 배치, 로봇 도달 가능성, TCP·힘/접촉, 고정구 삽입 동작은 미검증
-- RViz 표시만 추가하며 A안의 collision 형상·MoveIt 충돌 장면·물리 접촉 시뮬레이션은 추가하지 않음
-- 가상 컨트롤러와 그리퍼는 강의 브링업의 기존 동작을 사용하며 실물 로봇은 연결하지 않음
+- 모델 테스트는 Xacro 결과, 16개 매립 홀, 메시 경로와 단위, 두 배치의 기준 프레임을 확인합니다.
+- 새 배치는 RViz 시각 형상입니다. 드로잉 좌표, MoveIt 충돌 장면과 물리 접촉은 별도로 설정합니다.
+- 가상 컨트롤러와 그리퍼는 강의 브링업의 가상 모드로 실행됩니다.
