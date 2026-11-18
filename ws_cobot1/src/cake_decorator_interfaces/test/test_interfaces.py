@@ -34,7 +34,11 @@ class InterfaceTests(unittest.TestCase):
         goal = CakeOrder.Goal()
         goal.order_id = "ORD-TEST-001"
         goal.tool_type = "marker"
-        goal.cake_params = CakeParams(radius=0.05, height=0.08)
+        goal.cake_params = CakeParams(
+            radius=0.05675,
+            bottom_radius=0.06,
+            height=0.079,
+        )
         for surface in ("TOP", "SIDE"):
             stroke = Stroke2D(stroke_id=0)
             stroke.points = [Point32(x=500.5, y=350.25, z=0.0)]
@@ -50,7 +54,8 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(restored.order_id, goal.order_id)
         self.assertEqual([p.surface for p in restored.drawing_paths], ["TOP", "SIDE"])
         self.assertEqual(restored.drawing_paths[0].strokes[0].points[0].x, 500.5)
-        self.assertAlmostEqual(restored.cake_params.radius, 0.05)
+        self.assertAlmostEqual(restored.cake_params.radius, 0.05675)
+        self.assertAlmostEqual(restored.cake_params.bottom_radius, 0.06)
         for path in restored.drawing_paths:
             self.assertEqual((path.canvas_width, path.canvas_height), (1024, 768))
             self.assertEqual(path.strokes[0].stroke_id, 0)
@@ -59,10 +64,15 @@ class InterfaceTests(unittest.TestCase):
     def test_trajectory_receives_canvas_size_and_multiple_stroke_ids(self):
         """두 개의 획 끝을 자동 연결하지 않고 번호·해상도를 함께 전달한다."""
         request = GenerateTrajectory.Request(
-            # canvas_*는 float64 필드라 정수를 넣으면 직렬화 단계에서 abort 난다.
+            order_id="ORD-TEST-001",
+            operation_speed_percent=100,
+            # 서비스 해상도는 float64다. int를 넣으면 C 직렬화에서 abort된다.
             canvas_width=1024.0,
             canvas_height=768.0,
             surface_type="TOP",
+            cake_radius=0.05675,
+            cake_bottom_radius=0.06,
+            cake_height=0.079,
             strokes_2d=[
                 Stroke2D(stroke_id=0, points=[Point32(x=50.0, y=80.0)]),
                 Stroke2D(stroke_id=1, points=[Point32(x=60.0, y=90.0)]),
@@ -70,6 +80,8 @@ class InterfaceTests(unittest.TestCase):
         )
         restored = self.roundtrip(request)
         self.assertEqual((restored.canvas_width, restored.canvas_height), (1024, 768))
+        self.assertAlmostEqual(restored.cake_radius, 0.05675)
+        self.assertAlmostEqual(restored.cake_bottom_radius, 0.06)
         self.assertEqual([stroke.stroke_id for stroke in restored.strokes_2d], [0, 1])
         self.assertTrue(
             all(
@@ -104,7 +116,13 @@ class InterfaceTests(unittest.TestCase):
             self.roundtrip(service.Request())
             self.roundtrip(service.Response())
         self.roundtrip(TaskStatus(order_id="ORD-TEST-001", progress_pct=25.0))
-        self.roundtrip(WorkspaceCoords(cake_radius=0.05, cake_height=0.08))
+        self.roundtrip(
+            WorkspaceCoords(
+                cake_radius=0.05675,
+                cake_bottom_radius=0.06,
+                cake_height=0.079,
+            )
+        )
 
     def test_compliance_axes_are_six_values_without_enabling_control(self):
         """미사용 서비스의 고정 배열 형식만 검사하며 실제 순응제어는 하지 않는다."""

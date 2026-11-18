@@ -1,6 +1,7 @@
 {
-  "diameter_mm": 100.0,
-  "height_mm": 80.0,
+  "top_diameter_mm": 113.5,
+  "bottom_diameter_mm": 120.0,
+  "height_mm": 79.0,
   "board_width_mm": 179.0,
   "board_depth_mm": 179.0,
   "board_thickness_mm": 2.0,

@@ -1,4 +1,4 @@
-"""경로 변환(2D → 3D) 테스트 — 원통형 케이크, 여러 획 처리.
+"""경로 변환(2D → 3D) 테스트 — 픽셀 입력, 원뿔대·다중 획 처리.
 
 과거 모듈 단위 `generate_trajectory()` 함수는 현재 `DrawingPathNode`의
 서비스 콜백으로 대체됐으므로, 이 테스트도 노드 객체로 실제 요청을 만들어
@@ -10,6 +10,8 @@
   cd ws_cobot1/src/cake_decorator
   python -m pytest test/ -v
 """
+
+import math
 
 import pytest
 import rclpy
@@ -26,12 +28,12 @@ from geometry_msgs.msg import Point32
 # ---------------------------------------------------------------------------
 
 # 캔버스는 프론트엔드 원본 해상도(왼쪽 위 = (0,0))를 그대로 쓴다.
-CANVAS_W = 1024.0
-CANVAS_H = 768.0
+CANVAS_W = 1024
+CANVAS_H = 768
 CANVAS_CX = CANVAS_W / 2.0
 CANVAS_CY = CANVAS_H / 2.0
 
-# 케이크는 확정된 3D 프린트 원통(지름 100mm · 높이 80mm), 윗면 중심 기준(m).
+# 기본 케이크는 원통이며 윗면·아랫면 반지름이 같다.
 CAKE_TOP = (0.4, 0.0, 0.15)   # x, y, z (m)
 RADIUS_M = 0.05
 HEIGHT_M = 0.08
@@ -74,9 +76,10 @@ def _request(strokes_px, surface="TOP"):
     request.cake_pose.position.z = CAKE_TOP[2]
     request.cake_pose.orientation.w = 1.0
     request.cake_radius = RADIUS_M
+    request.cake_bottom_radius = RADIUS_M
     request.cake_height = HEIGHT_M
-    request.canvas_width = CANVAS_W
-    request.canvas_height = CANVAS_H
+    request.canvas_width = int(CANVAS_W)
+    request.canvas_height = int(CANVAS_H)
     for stroke_id, points in enumerate(strokes_px):
         request.strokes_2d.append(
             Stroke2D(
@@ -223,11 +226,74 @@ class TestMultipleStrokes:
 
     def test_side_surface_keeps_all_strokes(self, dp_node):
         """옆면도 여러 획을 전부 변환한다."""
+        side_strokes = [
+            [(x, min(y, 490.0)) for x, y in stroke]
+            for stroke in (STROKE_A, STROKE_B, STROKE_C)
+        ]
         response = _convert(
-            dp_node, [STROKE_A, STROKE_B, STROKE_C], surface="SIDE",
+            dp_node, side_strokes, surface="SIDE",
         )
         assert response.success, response.error_msg
         assert _pen_segments(response.pen_states) == 3
+
+    def test_frustum_side_path_uses_radius_at_each_height(self, dp_node):
+        """옆면의 같은 각도에서 위·아랫면 반지름과 높이가 다르게 반영된다."""
+        radius_top = 56.75
+        radius_bottom = 60.0
+        cake_height = 79.0
+        strip_width = CANVAS_W * (896.0 / 1024.0)
+        slant_height = math.hypot(
+            cake_height,
+            radius_bottom - radius_top,
+        )
+        strip_height = (
+            strip_width
+            * slant_height
+            / (math.pi * (radius_top + radius_bottom))
+        )
+        strip_top = (CANVAS_H - strip_height) / 2.0
+        request = _request(
+            [[
+                (288.0, strip_top),
+                (288.0, strip_top + strip_height),
+            ]],
+            surface="SIDE",
+        )
+        request.cake_radius = 0.05675
+        request.cake_bottom_radius = 0.06
+        request.cake_height = cake_height / 1000.0
+        response = dp_node._handle_request(
+            request,
+            GenerateTrajectory.Response(),
+        )
+
+        assert response.success, response.error_msg
+        contact_points = [wp for wp in response.waypoints_3d if wp.pen_down]
+        assert len(contact_points) == 2
+        assert contact_points[0].pose.position.x == pytest.approx(
+            CAKE_TOP[0] + 0.05775 * math.cos(math.pi / 2.0),
+            abs=3e-5,
+        )
+        assert contact_points[0].pose.position.y == pytest.approx(
+            CAKE_TOP[1] + 0.05775,
+            abs=3e-5,
+        )
+        assert contact_points[0].pose.position.z == pytest.approx(
+            CAKE_TOP[2],
+            abs=3e-5,
+        )
+        assert contact_points[1].pose.position.x == pytest.approx(
+            CAKE_TOP[0] + 0.061 * math.cos(math.pi / 2.0),
+            abs=3e-5,
+        )
+        assert contact_points[1].pose.position.y == pytest.approx(
+            CAKE_TOP[1] + 0.061,
+            abs=3e-5,
+        )
+        assert contact_points[1].pose.position.z == pytest.approx(
+            CAKE_TOP[2] - cake_height / 1000.0,
+            abs=3e-5,
+        )
 
 
 # ---------------------------------------------------------------------------

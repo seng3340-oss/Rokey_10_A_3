@@ -5,13 +5,35 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+import runpy
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 import yaml
+
+
+def _read_pen_length(context):
+    """가상 실행 터미널에서 돌출 길이를 확인한다. 명시한 launch 인자가 있으면 재질문하지 않는다."""
+    share = Path(get_package_share_directory("cake_workcell_bringup"))
+    parse = runpy.run_path(str(share / "scripts/virtual_pen.py"))["parse_extension_cm"]
+    value = LaunchConfiguration("pen_extension_cm").perform(context).strip()
+    while True:
+        try:
+            if not value:
+                value = input("가상 펜: 그리퍼 끝에서 펜촉까지 돌출 길이(cm) [기본 4]: ").strip() or "4"
+            extension_m = parse(value)
+            break
+        except ValueError as exc:
+            print(exc)
+            value = ""
+        except EOFError as exc:
+            raise RuntimeError("터미널에서 실행하거나 pen_extension_cm:=4를 지정하세요.") from exc
+    context.launch_configurations["virtual_pen_extension_m"] = str(extension_m)
+    print(f"가상 펜 돌출 길이: {extension_m * 100:g}cm. 모델과 컨트롤러 TCP에 함께 적용합니다.")
+    return []
 
 
 def generate_launch_description():
@@ -33,6 +55,7 @@ def generate_launch_description():
         DeclareLaunchArgument("fixture_z", default_value=str(config["z_mm"] / 1000)),
         DeclareLaunchArgument("fixture_yaw", default_value=str(math.radians(config["yaw_deg"]))),
         DeclareLaunchArgument("show_rviz", default_value="true"),
+        DeclareLaunchArgument("pen_extension_cm", default_value=""),
     ]
 
     # 시각화 중 로봇과의 TF 충돌을 피하기 위해 작업대는 독립 description Topic을 사용한다.
@@ -48,6 +71,7 @@ def generate_launch_description():
     # 강의 launch는 어댑터에서 가상 모드로 고정하고 중복 RViz만 제외한다.
     return LaunchDescription([
         *arguments,
+        OpaqueFunction(function=_read_pen_length),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(str(share / "launch/course_virtual.launch.py")),
             launch_arguments={"mode": "virtual", "host": "127.0.0.1", "port": "12345"}.items(),

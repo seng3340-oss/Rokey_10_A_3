@@ -1,6 +1,10 @@
 # 케이크 드로잉 가상 작업셀
 
 기존 테이블에 금속 스테이션, 일체형 선반, 대각선 틀, 오른쪽 가이드, 펜 홀더와 케이크따개를 배치한 RViz 장면입니다.
+기본 `station` 배치는 팀원이 병합한 최신 모델이며, 기존 A안 드로잉 데모는 `layout:=legacy`로 표시할 수 있습니다.
+가상 launch는 입력한 길이의 펜 모델·TCP와 펜 폭에 맞춘 가상 그리퍼 자세도 준비합니다.
+현재 전체 실행기의 자동 영점과 잉크 표시는 legacy 배치를 기준으로 하므로, station 모델의 실제 작업점으로 연결하는 작업은 남아 있습니다.
+
 
 ## 실행
 
@@ -14,6 +18,13 @@ bash scripts/start_virtual_workcell.sh
 가상 DRCF Docker, M0609+RG2 드라이버, 테이블/작업셀 시각화, RViz가 실행됩니다.
 이미 sodvir 또는 같은 dsr01 가상 launch가 켜져 있다면 먼저 종료하세요.
 실행기는 기존 sod/sodvir/sodreal 별칭을 바꾸지 않으며 ROS_DOMAIN_ID=30을 사용합니다.
+실행 시 펜의 **그리퍼 끝부터 펜촉까지 돌출 길이(cm)**를 입력합니다. 기본값은 4cm입니다.
+입력한 길이로 모델과 에뮬레이터의 `Virtual_Pen_TCP`를 함께 설정합니다.
+`ros2 launch cake_workcell_bringup virtual.launch.py pen_extension_cm:=4`처럼
+인자를 주면 입력 대기를 생략할 수 있습니다. 초기화 실패 시 launch는 종료합니다.
+펜 지름 8mm와 손가락 안쪽 삽입 길이 24mm는 시각화를 위한 가정입니다.
+손가락 끝은 배포 RG2 모델의 관절·STL 치수와 펜 파지 각도로 계산합니다.
+실물에서는 이 길이 계산을 쓰지 않고 실제 교정된 펜촉 TCP를 사용합니다.
 종료는 실행한 터미널에서 Ctrl+C입니다. RViz만 닫으면 컨트롤러가 남을 수 있습니다.
 
 새 ws_dsr는 아직 빌드되지 않아 현재 실행기는 보존된
@@ -58,8 +69,8 @@ ws_cobot1/src/
 
 ## 기존 드로잉 데모 배치
 
-`scripts/virtual_draw_demo.py`는 이전 장면의 케이크 윗면 중심 (500, 0, 142) mm를 사용합니다.
-해당 데모를 실행하려면 작업셀을 아래처럼 띄웁니다.
+이전 고정구 배치는 legacy 옵션으로 확인할 수 있습니다.
+작업셀만 표시하려면 아래처럼 띄웁니다.
 
 ```bash
 bash scripts/start_virtual_workcell.sh layout:=legacy

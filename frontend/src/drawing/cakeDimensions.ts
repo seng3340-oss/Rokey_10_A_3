@@ -1,8 +1,9 @@
 import measuredCake from "../../../config/test_cake.json" with { type: "json" };
 
-/** 확정 원통형 케이크와 판 치수. 실행 위치·TCP 영점을 지정하는 값은 아니다. */
+/** 확정 원뿔대 케이크와 판 치수. 실행 위치·TCP 영점을 지정하는 값은 아니다. */
 export const CAKE_DIMENSIONS = Object.freeze({
-  diameterMm: measuredCake.diameter_mm,
+  topDiameterMm: measuredCake.top_diameter_mm,
+  bottomDiameterMm: measuredCake.bottom_diameter_mm,
   heightMm: measuredCake.height_mm,
   boardWidthMm: measuredCake.board_width_mm,
   boardDepthMm: measuredCake.board_depth_mm,
@@ -13,11 +14,18 @@ export const CAKE_DIMENSIONS = Object.freeze({
 const canvasWidth = 1024;
 const canvasHeight = 768;
 const sideWidth = 896;
-// 원통의 전체 둘레와 높이를 그대로 펼친 띠 비율이다.
-const circumferenceMm = Math.PI * CAKE_DIMENSIONS.diameterMm;
-const sideHeight = (sideWidth * CAKE_DIMENSIONS.heightMm) / circumferenceMm;
+// DP와 같은 평균 둘레·사면 길이를 사용해 같은 픽셀이 같은 높이·각도로 변환된다.
+const circumferenceMm =
+  (Math.PI *
+    (CAKE_DIMENSIONS.topDiameterMm + CAKE_DIMENSIONS.bottomDiameterMm)) /
+  2;
+const slantHeightMm = Math.hypot(
+  CAKE_DIMENSIONS.heightMm,
+  (CAKE_DIMENSIONS.bottomDiameterMm - CAKE_DIMENSIONS.topDiameterMm) / 2,
+);
+const sideHeight = (sideWidth * slantHeightMm) / circumferenceMm;
 
-/** 옆면은 원통의 전체 둘레를 펼친 편집 띠다. 로봇이 전 둘레에 접근 가능하다는 뜻은 아니다. */
+/** 옆면은 원뿔대의 각도·높이를 대응시킨 편집 띠다. 로봇이 전 둘레에 접근 가능하다는 뜻은 아니다. */
 export const DRAWING_LAYOUT = Object.freeze({
   width: canvasWidth,
   height: canvasHeight,
@@ -39,11 +47,12 @@ export const DRAWING_LAYOUT = Object.freeze({
 });
 
 // Three.js에서는 케이크 반지름을 1로 두되 모든 높이와 받침 크기에 같은 축척을 적용한다.
-const mmPerUnit = CAKE_DIMENSIONS.diameterMm / 2;
+const mmPerUnit = CAKE_DIMENSIONS.topDiameterMm / 2;
 const boardThickness = CAKE_DIMENSIONS.boardThicknessMm / mmPerUnit;
 const cakeHeight = CAKE_DIMENSIONS.heightMm / mmPerUnit;
 export const MODEL_SIZE = Object.freeze({
   cakeRadius: 1,
+  cakeBottomRadius: CAKE_DIMENSIONS.bottomDiameterMm / (2 * mmPerUnit),
   cakeHeight,
   boardWidth: CAKE_DIMENSIONS.boardWidthMm / mmPerUnit,
   boardDepth: CAKE_DIMENSIONS.boardDepthMm / mmPerUnit,

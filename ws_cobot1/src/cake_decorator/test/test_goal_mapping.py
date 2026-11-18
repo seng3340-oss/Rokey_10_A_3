@@ -40,6 +40,7 @@ class GoalTests(unittest.TestCase):
         goal = build_goal(self.claim(), [363.9, 5.4, 75.25, 0.0, 180.0, 0.0])
         self.assertAlmostEqual(goal.cake_params.center.z, 0.07525)
         self.assertAlmostEqual(goal.cake_params.radius, 0.05)
+        self.assertAlmostEqual(goal.cake_params.bottom_radius, 0.05)
         self.assertAlmostEqual(goal.cake_params.board_thickness, 0.002)
         self.assertEqual(goal.cake_params.reference_frame, "base")
         self.assertAlmostEqual(goal.cake_params.tool_orientation.y, 1.0)
@@ -48,6 +49,16 @@ class GoalTests(unittest.TestCase):
         self.assertNotIn(
             "is_closed", goal.drawing_paths[0].strokes[0].get_fields_and_field_types()
         )
+
+    def test_mapping_preserves_frustum_top_and_bottom_radii(self):
+        """원뿔대의 서로 다른 윗면·아랫면 지름을 ROS 반지름(m)으로 보낸다."""
+        claim = self.claim()
+        claim["cake"]["top_diameter_mm"] = claim["cake"].pop("diameter_mm")
+        claim["cake"]["bottom_diameter_mm"] = 120.0
+        goal = build_goal(claim, [363.9, 5.4, 75.25, 0.0, 180.0, 0.0])
+
+        self.assertAlmostEqual(goal.cake_params.radius, 0.05)
+        self.assertAlmostEqual(goal.cake_params.bottom_radius, 0.06)
 
     def test_invalid_or_missing_reference_never_becomes_zero_pose(self):
         """영점 누락·NaN을 BASE 원점으로 대체하지 않는다."""

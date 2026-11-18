@@ -4,15 +4,31 @@
 # 아직 측정하지 않은 픽업·거치대·출고 좌표는 임의의 0으로 채우지 않는다.
 drawing_path_node:
   ros__parameters:
-    # 확정된 3D 프린트 원통: 지름100mm, 높이80mm.
-    cake_radius: 0.05
-    cake_height: 0.08
+    # 확정 원뿔대: 윗지름113.5mm, 밑지름120mm, 높이79mm.
+    # 실제 경로 치수는 주문 요청이 전달하며 이 값은 문서용 기본 치수다.
+    cake_radius: 0.05675
+    cake_bottom_radius: 0.06
+    cake_height: 0.079
     cake_orientation: 0.0
-    # 변환 설정은 원래 원통형 노드 기준 단위로 복원한다.
-    drawing_speed: 20.0
-    travel_speed: 50.0
-    approach_height: 0.01
+    # 아래 접근·속도 설정은 PR #16의 실행 계약을 유지한다.
+    # 테스트2 종이 검증의 30mm/s를 기준으로 한다. 웹 비율은 이 값에 곱한다.
+    drawing_speed: 30.0
+    # 옆면 접촉 후의 원호·스플라인만 60mm/s로 높인다. 기울기는 아래 17도를 유지한다.
+    side_drawing_speed: 60.0
+    travel_speed: 80.0
+    # DP 내부 접근 거리 단위는 mm다. RE의 m 파라미터와 구분한다.
+    approach_height: 10.0
+    simplify_tolerance_mm: 0.15
+    duplicate_tolerance_mm: 0.01
+    side_path_error_mm: 0.1
+    side_diagonal_mode: spline
+    side_pen_vertical_deg: 17.0
+    # 실제 치수는 유지하고 옆면 펜촉 목표만 반지름 방향으로 1mm 바깥에 둔다.
+    side_diameter_allowance_mm: 2.0
     drawing_z_offset: 0.0
+    # TOP은 YES 시점의 펜 자세를 우선 유지하고, 영점 자세가 없을 때만 수직을 쓴다.
+    # SIDE의 수직 기준 17도 설정과 별개다.
+    pen_tilt_deg: 0.0
     side_margin_ratio: 0.05
     # cake_center_x/y와 cake_top_z는 티칭 전이므로 기본 실행 좌표로 넣지 않는다.
     # TM이 기록한 윗면 중심을 GenerateTrajectory.cake_pose로 전달한다.
