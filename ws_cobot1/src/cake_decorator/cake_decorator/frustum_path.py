@@ -38,6 +38,47 @@ class DrawingFrustum(FrustumCake):
         normal = self.side_outward_normal(arc_mm)
         return tuple(p + n * offset for p, n in zip(point, normal))
 
+    # 펜 방향 계산: SIDE 면에서 내향 법선과 위쪽 방향을 합성해 30도 아래로 기울어지도록 한다.
+    def side_pen_direction(
+        self, x_arc: float, y_height: float,
+    ) -> tuple[float, float, float]:
+
+        # 1. 외향 법선
+        n_out = self.side_outward_normal(x_arc, y_height)
+
+        # 2. 내향 법선
+        n_in = tuple(-v for v in n_out)
+
+        # 3. Base 좌표계의 위쪽 방향
+        z = (0.0, 0.0, 1.0)
+
+        # 4. 위쪽 방향을 표면에 투영
+        dot = sum(z[i] * n_in[i] for i in range(3))
+
+        t = tuple(
+            z[i] - dot * n_in[i]
+            for i in range(3)
+        )
+
+        # 5. 단위 벡터 정규화
+        norm = math.sqrt(sum(v * v for v in t))
+
+        if norm < 1e-6:
+            raise ValueError("위쪽 방향을 표면에 투영할 수 없습니다.")
+
+        t = tuple(v / norm for v in t)
+
+        # 6. 표면 기준 30도
+        angle = math.radians(60.0)
+
+        direction = tuple(
+            math.cos(angle) * n_in[i]
+            + math.sin(angle) * t[i]
+            for i in range(3)
+        )
+
+        return direction
+
 
 def pixel_to_path_mm(px_x, px_y, canvas_w, canvas_h, cake):
     """팀원 편집 영역 검증 후 호 길이만 경로의 고정 기준으로 바꾼다."""
