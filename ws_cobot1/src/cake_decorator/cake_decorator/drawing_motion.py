@@ -42,6 +42,11 @@ DEFAULT_ACC_LINEAR = 100.0  # mm/s²
 TOP_DRAW_ACC_LINEAR = 300.0  # mm/s²
 DEFAULT_ACC_ANGULAR = 30.0  # °/s²
 DEFAULT_VEL_ANGULAR = 30.0  # °/s
+# 원주를 돌면서 펜 방향도 회전하므로 선속도와 각속도 제한을 함께 조정한다.
+# 접촉 진입·공중 이동에는 적용하지 않는다.
+SIDE_DRAW_ACC_LINEAR = 300.0  # mm/s²
+SIDE_DRAW_VEL_ANGULAR = 60.0  # °/s
+SIDE_DRAW_ACC_ANGULAR = 120.0  # °/s²
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +246,8 @@ class MotionCommand:
     sync: bool = True  # True=동기, False=비동기
     spline: list[DsrPos] | None = None
     via: DsrPos | None = None  # 원호 경유점. 직선에서는 사용하지 않는다.
+    angular_vel: float = DEFAULT_VEL_ANGULAR  # °/s, 도구 자세 회전 제한
+    angular_acc: float = DEFAULT_ACC_ANGULAR  # °/s²
 
 
 @dataclass
@@ -496,6 +503,14 @@ def plan_drawing_motion(
         if drawing_surface == "TOP" and prev_pen and pen and kind == 0:
             acceleration = TOP_DRAW_ACC_LINEAR
 
+        # 옆면은 원주 방향으로 펜 자세가 바뀌어 각속도 제한도 실행기에 전달한다.
+        angular_vel = DEFAULT_VEL_ANGULAR
+        angular_acc = DEFAULT_ACC_ANGULAR
+        if drawing_surface == "SIDE" and prev_pen and pen:
+            acceleration = SIDE_DRAW_ACC_LINEAR
+            angular_vel = SIDE_DRAW_VEL_ANGULAR
+            angular_acc = SIDE_DRAW_ACC_ANGULAR
+
         # 획 완료 카운트: pen_down → pen_up 전환 시
         if prev_pen and not pen:
             stroke_idx += 1
@@ -512,6 +527,8 @@ def plan_drawing_motion(
                 pos=dsr_pos,
                 vel=wp["speed"],
                 acc=acceleration,
+                angular_vel=angular_vel,
+                angular_acc=angular_acc,
                 phase=phase,
                 pen_down=pen,
                 stroke_idx=stroke_idx,

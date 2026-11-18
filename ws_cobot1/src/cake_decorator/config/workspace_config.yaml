@@ -13,6 +13,8 @@ drawing_path_node:
     # 아래 접근·속도 설정은 PR #16의 실행 계약을 유지한다.
     # 테스트2 종이 검증의 30mm/s를 기준으로 한다. 웹 비율은 이 값에 곱한다.
     drawing_speed: 30.0
+    # 옆면 접촉 후의 원호·스플라인만 60mm/s로 높인다. 기울기는 아래 15도를 유지한다.
+    side_drawing_speed: 60.0
     travel_speed: 80.0
     # DP 내부 접근 거리 단위는 mm다. RE의 m 파라미터와 구분한다.
     approach_height: 10.0

@@ -49,6 +49,7 @@ class DrawingPathNode(Node):
 
         # ── 변환 설정 파라미터 (yaml에서 로드) ──
         self.declare_parameter("drawing_speed", 30.0)  # mm/s, 테스트2 종이 검증 기준
+        self.declare_parameter("side_drawing_speed", 60.0)  # 옆면 접촉 후 그리기 mm/s
         self.declare_parameter("travel_speed", 80.0)  # mm/s (펜 올린 상태)
         self.declare_parameter("approach_height", 10.0)  # mm (펜 접근 높이)
         self.declare_parameter("drawing_z_offset", 0.0)  # mm (표면 접촉 보정)
@@ -149,6 +150,9 @@ class DrawingPathNode(Node):
         canvas_h = request.canvas_height
 
         speed_ratio = max(1, min(100, request.operation_speed_percent)) / 100.0
+        side_speed = self._param("side_drawing_speed")
+        if not math.isfinite(side_speed) or side_speed <= 0:
+            raise ValueError("옆면 그리기 속도는 양수여야 합니다.")
         draw_spd = self._param("drawing_speed") * speed_ratio
         travel_spd = self._param("travel_speed") * speed_ratio
         approach_h = self._param("approach_height")
@@ -235,7 +239,7 @@ class DrawingPathNode(Node):
                     cake,
                     approach_h,
                     z_offset,
-                    draw_spd,
+                    side_speed * speed_ratio,
                     travel_spd,
                     force,
                     tilt_deg,
@@ -285,7 +289,8 @@ class DrawingPathNode(Node):
         states.append(False)
 
     def _side_leg(
-        self, start, end, cake, offset, speed, force, tilt, pen_down, waypoints, states
+        self, start, end, cake, offset, speed, force, tilt, pen_down, waypoints, states,
+        reference_quat=None,
     ):
         """원호의 경유점까지 명시해 RE가 옆면 구간을 movel로 단축하지 않게 한다."""
         mode = self._param("side_diagonal_mode")
@@ -301,19 +306,19 @@ class DrawingPathNode(Node):
         )
         # 높이와 케이크 객체를 각각 전달해 새 펜 방향 계산을 사용한다.
         for move in moves:
-            quat = pen_quat_side(move.arc_mm, move.end[2] - cake.cz, cake, tilt_deg=tilt)
+            quat = pen_quat_side(move.arc_mm, move.end[2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat)
             target = self._wp(*move.end, quat, speed, force, pen_down=pen_down)
             if isinstance(move, SplineSurfaceMove):
                 target.motion_type = Waypoint3DMsg.SPLINE
                 target.spline_poses = [
                     self._wp(
-                        *sample, pen_quat_side(arc, sample[2] - cake.cz, cake, tilt_deg=tilt), speed, force
+                        *sample, pen_quat_side(arc, sample[2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat), speed, force
                     ).pose
                     for sample, arc in zip(move.samples, move.sample_arcs)
                 ]
             elif move.via is not None:
                 target.motion_type = Waypoint3DMsg.CIRCLE
-                via_quat = pen_quat_side(move.via_arc_mm, move.via[2] - cake.cz, cake, tilt_deg=tilt)
+                via_quat = pen_quat_side(move.via_arc_mm, move.via[2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat)
                 target.via_pose = self._wp(*move.via, via_quat, speed, force).pose
             waypoints.append(target)
             states.append(pen_down)
@@ -346,7 +351,7 @@ class DrawingPathNode(Node):
         tilt = 90.0 - vertical_angle - math.degrees(cake.slant_angle)
         if not all(0 <= h <= cake.height for _, h in points):
             raise ValueError("옆면 입력이 편집 띠 높이 밖입니다.")
-        quat = pen_quat_side(first[0], first[1], cake, tilt_deg=tilt)
+        quat = pen_quat_side(first[0], first[1], cake, tilt_deg=tilt, reference_quat=reference_quat)
         if previous is None:
             # 시작 TCP가 상면 중심인 계약을 따른다. 먼저 위로 빠져나와 원통 밖으로 간다.
             # 옆면 자세를 상면 위부터 유지해 수직 자세의 손목 특이점을 반복 통과하지 않는다.
@@ -384,9 +389,13 @@ class DrawingPathNode(Node):
                 False,
                 waypoints,
                 states,
+                reference_quat=reference_quat,
             )
         x, y, z = cake.side_abs_with_offset(*first, offset)
-        waypoints.append(self._wp(x, y, z, quat, draw_speed * 0.5, force, pen_down=True))
+        # 접촉 진입은 기존 속도를 넘기지 않는다. 빨라지는 구간은 접촉 후의 그림이다.
+        speed_ratio = draw_speed / self._param("side_drawing_speed")
+        contact_speed = self._param("drawing_speed") * speed_ratio * 0.5
+        waypoints.append(self._wp(x, y, z, quat, contact_speed, force, pen_down=True))
         states.append(True)
         is_horizontal = all(abs(point[1] - first[1]) < 1e-8 for point in points)
         is_vertical = all(abs(point[0] - first[0]) < 1e-8 for point in points)
@@ -408,7 +417,7 @@ class DrawingPathNode(Node):
                 poses = [
                     self._wp(
                         *sample,
-                        pen_quat_side(arc, sample[2] - cake.cz, cake, tilt_deg=tilt),
+                        pen_quat_side(arc, sample[2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat),
                         draw_speed,
                         force,
                     ).pose
@@ -416,7 +425,7 @@ class DrawingPathNode(Node):
                 ]
                 target = self._wp(
                     *chunk[-1][0],
-                    pen_quat_side(chunk[-1][1], chunk[-1][0][2] - cake.cz, cake, tilt_deg=tilt),
+                    pen_quat_side(chunk[-1][1], chunk[-1][0][2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat),
                     draw_speed,
                     force,
                     pen_down=True,
@@ -438,9 +447,10 @@ class DrawingPathNode(Node):
                     True,
                     waypoints,
                     states,
+                    reference_quat=reference_quat,
                 )
         x, y, z = cake.side_abs_with_offset(*last, clearance)
-        quat = pen_quat_side(last[0], last[1], cake, tilt_deg=tilt)
+        quat = pen_quat_side(last[0], last[1], cake, tilt_deg=tilt, reference_quat=reference_quat)
         waypoints.append(self._wp(x, y, z, quat, travel_speed, force))
         states.append(False)
         return last

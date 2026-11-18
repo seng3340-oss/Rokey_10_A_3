@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 import threading
+import json
 import math
 import time
 import xml.etree.ElementTree as ET
@@ -168,6 +169,9 @@ class DoosanRobotClient:
         ref: int = DR_BASE,
         mode: int = DR_MV_MOD_ABS,
         sync: bool = True,
+        *,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """직선 이동 (MoveLine).
 
@@ -182,8 +186,8 @@ class DoosanRobotClient:
         """
         req = MoveLine.Request()
         req.pos = pos.to_list()
-        req.vel = [speed_mm_s, DEFAULT_VEL_ANGULAR]
-        req.acc = [acc_mm_s2, DEFAULT_ACC_ANGULAR]
+        req.vel = [speed_mm_s, angular_speed_deg_s]
+        req.acc = [acc_mm_s2, angular_acc_deg_s2]
         req.time = 0.0
         req.radius = 0.0
         req.ref = ref
@@ -198,6 +202,9 @@ class DoosanRobotClient:
         target: DsrPos,
         speed_mm_s: float,
         acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        *,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """현재점→경유점→목표점의 원호를 요청한다. 표면을 깎는 블렌딩은 사용하지 않는다."""
         request = MoveCircle.Request()
@@ -205,8 +212,8 @@ class DoosanRobotClient:
             message = Float64MultiArray()
             message.data = point.to_list()
             request.pos.append(message)
-        request.vel = [speed_mm_s, DEFAULT_VEL_ANGULAR]
-        request.acc = [acc_mm_s2, DEFAULT_ACC_ANGULAR]
+        request.vel = [speed_mm_s, angular_speed_deg_s]
+        request.acc = [acc_mm_s2, angular_acc_deg_s2]
         request.time = 0.0
         request.radius = 0.0
         request.ref = DR_BASE
@@ -317,6 +324,20 @@ class DoosanRobotClient:
         )
         if solution is None or not solution.success:
             return False
+        # 실물 연결 중 인터넷을 쓸 수 없는 환경에서도 원인을 분석할 수 있게
+        # 현재 관절값·TCP·목표를 기존 실행기 로그에 함께 남긴다.
+        pose = self._call("current_pose", GetCurrentPosx.Request(ref=DR_BASE))
+        current = (
+            list(pose.task_pos_info[0].data[:6])
+            if pose and pose.success and pose.task_pos_info else None
+        )
+        diagnostic = dict(
+            current_joints_deg=list(joints.pos),
+            current_tcp=current,
+            target_tcp=target.to_list(),
+            solution_space=int(solution.sol_space),
+        )
+        self._logger.info("SIDE_APPROACH_DIAGNOSTIC " + json.dumps(diagnostic))
         self._logger.info(
             f"옆면 자세 전환: 현재 팔꿈치 해 {solution.sol_space} 유지, "
             f"목표 TCP={target.to_list()}"
@@ -330,29 +351,42 @@ class DoosanRobotClient:
             mode=DR_MV_MOD_ABS,
             sync_type=SYNC,
         )
-        return self._call_checked("move_jointx", request) and self.verify_pose(
+        moved = self._call_checked("move_jointx", request) and self.verify_pose(
             target.to_list()
         )
+        if not moved:
+            # 자동으로 다른 해를 선택하거나 관절 회전을 재시도하지 않는다.
+            after = self._call("current_joints", GetCurrentPosj.Request())
+            if after and after.success:
+                diagnostic["after_joints_deg"] = list(after.pos)
+            self._logger.error("SIDE_APPROACH_FAILED " + json.dumps(diagnostic))
+        return moved
 
     def execute_drawing_command(self, command) -> bool:
         """이동 종류만 분기한다. 액션 반복·획 완료 판단은 RE에 그대로 둔다."""
+        # 계획에서 접촉 후 옆면에만 높인 각속도·각가속도를 API 요청까지 전달한다.
+        angular = dict(
+            angular_speed_deg_s=command.angular_vel,
+            angular_acc_deg_s2=command.angular_acc,
+        )
         if command.motion_type == MotionType.MOVE_SPLINE:
             if not command.spline or not 2 <= len(command.spline) <= 100:
                 self._logger.error("스플라인 목표점 수가 유효하지 않습니다.")
                 return False
-            return self.move_spline(command.spline, command.vel, command.acc)
+            return self.move_spline(command.spline, command.vel, command.acc, **angular)
         if command.motion_type == MotionType.MOVE_CIRCLE:
             if command.via is None:
                 self._logger.error(
                     "원호 경유점이 없습니다. 직선으로 대체하지 않습니다."
                 )
                 return False
-            return self.move_circle(command.via, command.pos, command.vel, command.acc)
+            return self.move_circle(command.via, command.pos, command.vel, command.acc, **angular)
         if command.motion_type != MotionType.MOVE_LINE:
             self._logger.error("지원하지 않는 드로잉 이동 종류입니다.")
             return False
         return self.move_line(
-            pos=command.pos, speed_mm_s=command.vel, acc_mm_s2=command.acc
+            pos=command.pos, speed_mm_s=command.vel, acc_mm_s2=command.acc,
+            **angular,
         )
 
     def move_joint(
@@ -390,6 +424,9 @@ class DoosanRobotClient:
         positions: list[DsrPos],
         speed_mm_s: float = 20.0,
         acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        *,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """스플라인 경로 이동 (MoveSplineTask).
 
@@ -401,8 +438,8 @@ class DoosanRobotClient:
 
         req = MoveSplineTask.Request()
         req.pos_cnt = len(positions)
-        req.vel = [speed_mm_s, DEFAULT_VEL_ANGULAR]
-        req.acc = [acc_mm_s2, DEFAULT_ACC_ANGULAR]
+        req.vel = [speed_mm_s, angular_speed_deg_s]
+        req.acc = [acc_mm_s2, angular_acc_deg_s2]
         req.time = 0.0
         req.ref = DR_BASE
         req.mode = DR_MV_MOD_ABS

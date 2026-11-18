@@ -342,3 +342,43 @@ def test_virtual_discovery_stays_local_even_when_real_server_option_is_set():
     launcher.configure_discovery("virtual", env)
     assert "ROS_DISCOVERY_SERVER" not in env
     assert env["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "LOCALHOST"
+
+
+def test_pending_order_decline_preserves_record_and_sends_no_request(tmp_path, monkeypatch):
+    """중단 확인을 하지 않으면 기존 주문을 보존하고 새 실행을 거부한다."""
+    import sqlite3
+    import pytest
+
+    database = tmp_path / "orders.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE order_execution(order_id TEXT,state TEXT)")
+        connection.execute("INSERT INTO order_execution VALUES ('ORD-TEST','uncertain')")
+    def forbidden(*args, **kwargs):
+        raise AssertionError("확인 없이 주문 해제 요청")
+    monkeypatch.setattr(launcher, "urlopen", forbidden)
+    with pytest.raises(RuntimeError, match="보존"):
+        launcher.resolve_pending_orders(database, 5000, "test-token", lambda _: "NO")
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT state FROM order_execution").fetchone()[0] == "uncertain"
+
+
+def test_pending_order_reset_uses_authenticated_resolution_api(tmp_path, monkeypatch):
+    """RESET은 주문 삭제·재전송 대신 기존 인증된 해제 API만 호출한다."""
+    import io
+    import json
+    import sqlite3
+
+    database = tmp_path / "orders.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE order_execution(order_id TEXT,state TEXT)")
+        connection.execute("INSERT INTO order_execution VALUES ('ORD-TEST','uncertain')")
+    requests = []
+    def resolve(request, timeout):
+        requests.append(request)
+        return io.BytesIO(b'{"order_id":"ORD-TEST","status":"resolved"}')
+    monkeypatch.setattr(launcher, "urlopen", resolve)
+    launcher.resolve_pending_orders(database, 5000, "test-token", lambda _: "RESET")
+    assert len(requests) == 1
+    assert requests[0].full_url.endswith("/orders/ORD-TEST/resolve")
+    assert requests[0].get_header("Authorization") == "Bearer test-token"
+    assert json.loads(requests[0].data)["confirmed_not_running"] is True

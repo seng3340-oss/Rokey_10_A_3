@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,18 +82,66 @@ def validate_existing_nodes(nodes, reuse_driver):
         )
 
 
-def prepare_reference(session, mode, answer=input):
+def resolve_pending_orders(database, backend_port, bridge_token, answer=input):
+    """중단된 주문을 운영자가 확인한 경우에만 기존 내부 API로 해제한다.
+
+    주문 기록과 결과는 보존한다. 자동 재실행·DB 삭제·로봇 정지 명령은 없다.
+    브릿지를 시작하기 전이므로 이전 주문을 새 영점에서 실행하지 않는다.
+    """
+    with sqlite3.connect(f"file:{Path(database).resolve()}?mode=ro", uri=True) as connection:
+        pending = connection.execute(
+            "SELECT order_id,state FROM order_execution "
+            "WHERE state NOT IN ('completed','failed','rejected','resolved')"
+        ).fetchall()
+    if not pending:
+        return
+    print(f"이전 미완료 주문: {pending}", flush=True)
+    if any(state not in {"uncertain", "claimed", "dispatching", "running"} for _, state in pending):
+        raise RuntimeError("미접수·미실행 주문이 남아 있습니다. docs/BRIDGE_TEST.md를 확인하세요.")
+    print("로봇 작업이 멈췄고 이전 주문을 다시 실행하지 않을 때만 RESET을 입력하세요.", flush=True)
+    if answer("이전 작업 중단 확인 후 RESET (그 외 종료): ").strip() != "RESET":
+        raise RuntimeError("이전 주문을 보존하고 실행을 취소했습니다.")
+    for order_id, _ in pending:
+        payload = json.dumps(dict(
+            confirmed_not_running=True,
+            reason="전체 실행기에서 운영자가 작업 중단을 확인하고 RESET 입력",
+        )).encode()
+        request = Request(
+            f"http://127.0.0.1:{backend_port}/internal/bridge/orders/{order_id}/resolve",
+            data=payload, method="POST",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {bridge_token}"},
+        )
+        with urlopen(request, timeout=10) as response:
+            result = json.load(response)
+        if result.get("status") != "resolved":
+            raise RuntimeError(f"이전 주문 해제를 확인할 수 없습니다: {order_id}")
+    print("이전 주문을 해제했습니다. 기록은 보존되며 자동 재실행하지 않습니다.", flush=True)
+
+
+def prepare_reference(
+    session, mode, answer=input, *, calibrate_pen_tcp=False,
+    cake_top_z_mm=None, calibration_log=None,
+):
     """가상은 자동 배치, 실제는 YES 직후 조회한 현재 TCP를 영점으로 기록한다."""
     if mode == "virtual":
         return session.prepare_virtual()
-    print("펜촉 TCP를 교정하고 케이크 상면 중앙에 가볍게 닿게 두세요.")
+    if calibrate_pen_tcp:
+        print(f"펜을 수직으로 세워 상면 중앙에 닿게 두세요. 상면 BASE Z={cake_top_z_mm}mm")
+        print("YES 후 현재 TCP의 XY가 펜촉과 같다고 가정해 별도 테스트 TCP를 등록·적용합니다.")
+        print("설정 적용으로 좌표 표시가 바뀝니다. 실제 펜촉 고정 품질은 별도 확인이 필요합니다.")
+    else:
+        print("펜촉 TCP를 교정하고 케이크 상면 중앙에 가볍게 닿게 두세요.")
     print("YES 후 기록한 위치를 기준으로 웹 제작 요청이 실제 로봇을 움직입니다.")
     if (
         answer("케이크 상면 중앙·TCP 확인 후 YES (그 외 종료): ").strip().upper()
         != "YES"
     ):
         raise RuntimeError("영점 확인을 취소했습니다.")
-    # 실제 모드에서는 movej/movel, TCP 변경, 그리퍼 명령을 호출하지 않는다.
+    # TCP 추정은 명시적으로 선택한 real 테스트에서만 사용한다. 이동 명령은 없다.
+    if calibrate_pen_tcp:
+        from contact_tcp import apply_contact_tcp
+
+        return apply_contact_tcp(session, cake_top_z_mm, calibration_log)
     return session.pose()
 
 
@@ -486,12 +534,27 @@ def main():
     )
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
+        "--calibrate-pen-tcp", action="store_true",
+        help="real에서 YES 때 수직 접촉 펜촉을 추정해 테스트 TCP 등록·적용",
+    )
+    parser.add_argument(
+        "--cake-top-z-mm", type=float,
+        help="실제 케이크 상면의 BASE 기준 Z(mm). 케이크 자체 높이가 아님",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="준비 상태만 검사하고 아무것도 실행하지 않음",
     )
     parser.add_argument("--bridge-reference", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.calibrate_pen_tcp:
+        if args.mode != "real" or args.cake_top_z_mm is None:
+            parser.error("펜촉 TCP 추정은 real 모드에서 --cake-top-z-mm와 함께 사용하세요.")
+        if not math.isfinite(args.cake_top_z_mm) or not 0 <= args.cake_top_z_mm <= 900:
+            parser.error("상면 BASE Z는 0~900mm의 유한한 값이어야 합니다.")
+    elif args.cake_top_z_mm is not None:
+        parser.error("--cake-top-z-mm는 --calibrate-pen-tcp와 함께 사용하세요.")
     entry_mode = os.environ.get("CAKE_SYSTEM_MODE")
     if entry_mode and args.mode != entry_mode:
         parser.error(
@@ -638,10 +701,6 @@ def main():
             processes.start("driver", command)
         session.identity(args.mode, args.host)
         session.wait_controller()
-        reference = prepare_reference(session, args.mode)
-        print(f"상면 중심 TCP [mm, deg]: {reference}", flush=True)
-        reference_file = folder / "reference.json"
-        reference_file.write_text(json.dumps({"mode": args.mode, "pose": reference}))
         processes.start(
             "backend",
             [
@@ -657,17 +716,16 @@ def main():
             ROOT / "backend",
         )
         processes.wait(lambda: healthy(args.backend_port), 20)
-        # 이전 세션의 미완료 주문을 새 영점에서 자동 재생하지 않는다. DB는 보존한다.
-        with sqlite3.connect(
-            f"file:{Path(database).resolve()}?mode=ro", uri=True
-        ) as connection:
-            pending = connection.execute(
-                "SELECT order_id,state FROM order_execution WHERE state NOT IN ('completed','failed','rejected','resolved')"
-            ).fetchall()
-        if pending:
-            raise RuntimeError(
-                f"미완료 주문이 남아 있습니다: {pending}. docs/BRIDGE_TEST.md의 확인 절차를 따르세요."
-            )
+        resolve_pending_orders(database, args.backend_port, env["CAKE_BRIDGE_TOKEN"])
+        reference = prepare_reference(
+            session, args.mode,
+            calibrate_pen_tcp=args.calibrate_pen_tcp,
+            cake_top_z_mm=args.cake_top_z_mm,
+            calibration_log=folder / "contact_tcp.json",
+        )
+        print(f"상면 중심 TCP [mm, deg]: {reference}", flush=True)
+        reference_file = folder / "reference.json"
+        reference_file.write_text(json.dumps({"mode": args.mode, "pose": reference}))
         config = str(ROOT / "ws_cobot1/src/cake_decorator/config/workspace_config.yaml")
         for name in ("drawing_path_node", "robot_executor_node", "task_manager_node"):
             command = ["ros2", "run", "cake_decorator", name, "--ros-args"]

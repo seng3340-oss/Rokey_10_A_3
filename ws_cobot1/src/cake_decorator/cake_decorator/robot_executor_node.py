@@ -571,14 +571,16 @@ class RobotExecutorNode(Node):
                     f'{cmd.phase.value}, {cmd.motion_type.value}'
                 )
             # DP가 지정한 직선·원호·스플라인 명령을 실행한다.
-            if request.drawing_surface == 'SIDE' and i == 2 and not cmd.pen_down:
+            side_rotation = request.drawing_surface == 'SIDE' and i == 2 and not cmd.pen_down
+            if side_rotation:
                 # 표면 바깥에서만 펜 자세를 바꾸고 현재 관절 해를 사용한다.
                 moved = self._robot.move_task_joint(cmd.pos)
             else:
                 moved = self._execute_motion_command(cmd, i)
             if not moved:
                 self.get_logger().error(
-                    f'{cmd.motion_type.value} 실패 (#{i}): {cmd.pos.to_list()}'
+                    f'{"movejx(옆면 자세 전환)" if side_rotation else cmd.motion_type.value} '
+                    f'실패 (#{i}): {cmd.pos.to_list()}'
                 )
                 result.success = False
                 result.error_code = f'MOVE_FAILED_AT_{i}'

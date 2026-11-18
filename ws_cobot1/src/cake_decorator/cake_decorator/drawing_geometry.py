@@ -472,7 +472,9 @@ def pixel_to_mm_side(px_x, px_y, canvas_w, canvas_h, radius, height=None):
     return _pixel_to_mm_cylinder_side(px_x, px_y, canvas_w, canvas_h, radius, height)
 
 
-def pen_quat_side(arc_mm, height_or_cake, cake=None, tilt_deg=0.0):
+def pen_quat_side(
+    arc_mm, height_or_cake, cake=None, tilt_deg=0.0, *, reference_quat=None,
+):
     """두 형상 API의 펜 자세를 지원한다. 경로 어댑터는 기존 기울기 계약을 유지한다.
 
     (arc, height, FrustumCake)는 팀원 API의 내향 법선 자세다.
@@ -482,4 +484,42 @@ def pen_quat_side(arc_mm, height_or_cake, cake=None, tilt_deg=0.0):
         return _pen_quat_cylinder_side(arc_mm, height_or_cake, tilt_deg=tilt_deg)
     # 새 함수는 이미 펜촉으로 향하는 +Z축을 반환한다. 여기서 다시 뒤집지 않는다.
     direction = cake.side_pen_direction(arc_mm, height_or_cake, tilt_deg=tilt_deg)
-    return direction_to_quaternion(*direction)
+    return align_pen_axis_from_reference(direction, reference_quat)
+
+
+def align_pen_axis_from_reference(direction, reference_quat=None):
+    """영점 자세의 펜축을 목표 방향으로 최소 회전시킨다.
+
+    기본 +Z에서 아래쪽 방향으로 매번 회전하면 원주를 따라 불필요한
+    펜축 회전이 커진다. 대신 YES 때의 축에서 약15도만 기울인다.
+    이는 도구 자세의 불필요한 회전을 줄이며 J6의 고정이나 IK를 보장하지 않는다.
+    """
+    reference = tuple(reference_quat) if reference_quat is not None else pen_quat_top()
+    norm = math.sqrt(sum(value * value for value in reference))
+    if not math.isfinite(norm) or norm < 1e-10:
+        raise ValueError("펜 영점 자세가 유효하지 않습니다.")
+    x, y, z, w = (value / norm for value in reference)
+    # 영점 자세의 도구 +Z축을 BASE 좌표로 표현한다.
+    source = (2 * (x*z + w*y), 2 * (y*z - w*x), 1 - 2 * (x*x + y*y))
+    length = math.sqrt(sum(value * value for value in direction))
+    if not math.isfinite(length) or length < 1e-10:
+        raise ValueError("목표 펜축 방향이 유효하지 않습니다.")
+    target = tuple(value / length for value in direction)
+    dot = max(-1.0, min(1.0, sum(a*b for a, b in zip(source, target))))
+    if dot < -0.999999:
+        raise ValueError("펜 영점축과 목표축이 정반대입니다. 영점 자세를 확인하세요.")
+    swing = (
+        source[1]*target[2] - source[2]*target[1],
+        source[2]*target[0] - source[0]*target[2],
+        source[0]*target[1] - source[1]*target[0],
+        1.0 + dot,
+    )
+    swing_norm = math.sqrt(sum(value * value for value in swing))
+    a, b, c, d = (value / swing_norm for value in swing)
+    # BASE에서의 작은 회전 swing을 영점 quaternion 왼쪽에 곱한다.
+    return (
+        d*x + a*w + b*z - c*y,
+        d*y - a*z + b*w + c*x,
+        d*z + a*y - b*x + c*w,
+        d*w - a*x - b*y - c*z,
+    )

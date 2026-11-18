@@ -51,7 +51,10 @@ CAKE_USE_DISCOVERY_SERVER=1 bash scripts/start_real.sh --reuse-driver
 
 실제 RG2 드라이버에는 `pymodbus`가 필요하다. 해당 ROS Python 환경에 없으면 실행 전에 중단하고 누락을 안내한다.
 실제 주문 DB는 기존 `backend/data/orders.sqlite3`를 사용한다. 미완료 주문은 자동 삭제·해제·재전송하지 않는다.
-남아 있는 주문 때문에 중단되면 [브릿지 안내](BRIDGE_TEST.md)의 확인 절차를 따른다.
+이전 미완료 주문이 있으면 터미널에 목록과 RESET 입력란을 표시한다.
+로봇 작업이 실제로 중단된 것을 확인한 경우에만 RESET을 입력한다.
+기존 주문은 기록을 보존한 채 resolved로 해제하며 자동 재실행하지 않는다.
+다른 입력을 하면 기존 주문을 유지하고 종료한다. 이 확인은 영점 YES보다 먼저 진행한다.
 
 ## 주소와 종료
 
@@ -90,7 +93,10 @@ bash scripts/start_virtual.sh --no-browser
 ```
 
 ROS 설치 경로를 직접 고르려면 `CAKE_ROBOT_SETUP=/경로/install/setup.bash`를 지정한다.
-기본은 새 `ws_dsr/install/setup.bash`, 없으면 보존한 `~/ws_cobot_pjt_jihwan/ws_dsr/install/setup.bash`를 사용한다.
+현재 저장소와 보존한 `~/ws_cobot_pjt_jihwan/ws_dsr`의 local_setup.bash 중
+필수 드라이버 패키지와 실행 권한이 준비된 설치본을 자동으로 선택한다.
+setup 파일만 있는 미완성 빌드는 건너뛴다. 선택한 경로는 실행 터미널에 표시한다.
+따라서 현재 PC에서는 CAKE_ROBOT_SETUP을 따로 입력하지 않아도 된다.
 `CAKE_DATABASE_PATH`를 지정하면 선택한 DB를 사용한다. 모드별 DB를 섞지 않는 것이 좋다.
 
 실행한 터미널에 `[driver]`, `[task_manager_node]`, `[robot_executor_node]`처럼 출처를 붙여 로그를 실시간으로 표시한다.
