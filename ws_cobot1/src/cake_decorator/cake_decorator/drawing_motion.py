@@ -37,6 +37,9 @@ WORKSPACE_RADIUS_MAX = 900.0  # BASE에서 최대 도달 거리 (mm)
 
 # 기본 가감속 값
 DEFAULT_ACC_LINEAR = 100.0  # mm/s²
+# 윗면의 짧은 직선에서 감속·재가속에 걸리는 시간을 줄인다.
+# 접촉·이탈·공중 이동과 옆면에는 기본 가속도를 유지한다.
+TOP_DRAW_ACC_LINEAR = 300.0  # mm/s²
 DEFAULT_ACC_ANGULAR = 30.0  # °/s²
 DEFAULT_VEL_ANGULAR = 30.0  # °/s
 
@@ -487,6 +490,12 @@ def plan_drawing_motion(
         # 단계 결정
         phase = _determine_phase(prev_pen, pen, i, len(waypoints))
 
+        # 이미 펜이 닿은 윗면의 직선에만 빠른 가감속을 적용한다.
+        # 목표 좌표와 선속도, 각 목표점의 도달 확인 방식은 유지한다.
+        acceleration = DEFAULT_ACC_LINEAR
+        if drawing_surface == "TOP" and prev_pen and pen and kind == 0:
+            acceleration = TOP_DRAW_ACC_LINEAR
+
         # 획 완료 카운트: pen_down → pen_up 전환 시
         if prev_pen and not pen:
             stroke_idx += 1
@@ -502,7 +511,7 @@ def plan_drawing_motion(
                 via=via,
                 pos=dsr_pos,
                 vel=wp["speed"],
-                acc=DEFAULT_ACC_LINEAR,
+                acc=acceleration,
                 phase=phase,
                 pen_down=pen,
                 stroke_idx=stroke_idx,
