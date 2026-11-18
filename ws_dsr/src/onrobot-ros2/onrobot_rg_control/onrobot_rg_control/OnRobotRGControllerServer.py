@@ -3,6 +3,8 @@
 # ======================================================== #
 # ==================== Python Imports ==================== #
 # ======================================================== #
+import math
+
 import numpy as np
 
 
@@ -24,7 +26,7 @@ from rclpy.action import GoalResponse, CancelResponse
 from std_srvs.srv import Trigger
 from control_msgs.action import GripperCommand
 from sensor_msgs.msg import JointState
-from onrobot_rg_msgs.srv import GripperPose
+from onrobot_rg_msgs.srv import GetGripWidth, GripperPose
 
 from onrobot_rg_msgs.msg import OnRobotRGOutput
 from onrobot_rg_msgs.srv import SetCommand
@@ -87,6 +89,15 @@ class OnRobotRGNode(Node):
                 
         self.command.rgwd = (int)(min(self.max_width, self.gripper.getStatus()['width']))
         
+
+        # 실제 RG2 Modbus 드라이버에서만 측정 서비스가 보인다.
+        if self.gtype == "rg2" and self.control == "modbus":
+            self.grip_width_srv = self.create_service(
+                GetGripWidth,
+                "/onrobot/get_grip_width",
+                self.getGripWidthCallback,
+                callback_group=self.reentrant,
+            )
 
     def __del__(self):
         match self.control:
@@ -282,6 +293,34 @@ class OnRobotRGNode(Node):
                 self.command.rctr = 16
             except ValueError:
                 pass
+
+    def getGripWidthCallback(self, _request, response):
+        """기존 Modbus 상태 조회로 새 실측 간격을 읽어 mm 단위로 반환한다."""
+        try:
+            # getStatus()는 드라이버의 잠금 안에서 읽기만 수행한다.
+            # width는 손끝 오프셋이 적용된 실측값이고, busy에는 상태 워드가 담긴다.
+            status = self.gripper.getStatus()
+            status_word = status["busy"]
+            width_mm = status["width"]
+            if status_word & 0x68:  # 안전회로 1·2 작동 또는 장비 안전 오류
+                response.message = f"RG2 안전 신호 작동: status=0x{status_word:04x}"
+                return response
+            response.busy = bool(status_word & 0x01)
+            response.grip_detected = bool(status_word & 0x02)
+            if response.busy:
+                response.message = "RG2가 아직 이동 중입니다."
+                return response
+            if not math.isfinite(width_mm) or width_mm < 0:
+                response.message = "RG2 턱 간격 응답이 유효하지 않습니다."
+                return response
+        except Exception as exc:
+            response.message = f"RG2 상태 조회 실패: {exc}"
+            self.get_logger().error(response.message)
+            return response
+
+        response.width_mm = float(width_mm)
+        response.success = True
+        return response
 
     def sendCommandCallback(self, req, res):
         """ Handles sending commands via socket connection. """

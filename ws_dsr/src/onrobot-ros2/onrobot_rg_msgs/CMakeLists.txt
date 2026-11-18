@@ -34,6 +34,7 @@ set(msg_files
 set(srv_files
   "srv/SetCommand.srv"
   "srv/GripperPose.srv"
+  "srv/GetGripWidth.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

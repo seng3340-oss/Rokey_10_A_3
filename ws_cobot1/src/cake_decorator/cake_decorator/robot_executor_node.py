@@ -115,10 +115,20 @@ class RobotExecutorNode(Node):
         return True
 
     def _fail(self, reason: str) -> None:
-        """FAILED 상태로 전이 + 안전 홈 복귀."""
+        """실패 상태를 기록하고 이송·파지 중에는 추가 동작을 보내지 않는다."""
+        handling_object = self._state in (
+            TaskState.PICKING_CAKE,
+            TaskState.PLACING_CAKE,
+            TaskState.GRASPING_TOOL,
+            TaskState.RETURNING_TOOL,
+            TaskState.DELIVERING,
+        )
         self.get_logger().error(f'작업 실패: {reason}')
         if can_transition(self._state, TaskState.FAILED):
             self._state = TaskState.FAILED
+        # 실패 직후에는 물체의 파지·안착 상태를 알 수 없어 자동 홈 이동을 생략한다.
+        if handling_object:
+            return
         try:
             self._robot.move_home()
         except Exception:
@@ -321,6 +331,7 @@ class RobotExecutorNode(Node):
             grip_force=self._param('pen_grip_force'),
             open_width=self._param('gripper_open_width'),
             speed_approach=50.0,
+            verify_grip_for=getattr(task_goal, 'tool_id', 'pen') or 'pen',
         ):
             self._fail('도구 집기 실패')
             return False
@@ -621,7 +632,7 @@ class RobotExecutorNode(Node):
     # ==================================================================
 
     def _execute_grasp(self, goal_handle):
-        """GraspTool 액션 — 펜 집기/놓기."""
+        """펜·오프너를 집거나 놓는다. 파지는 실측 통과 후에만 후퇴한다."""
         request = goal_handle.request
         result = GraspTool.Result()
 
@@ -654,15 +665,29 @@ class RobotExecutorNode(Node):
 
         if action == 'GRASP':
             _fb('GRASPING', 30.0)
-            self._robot.gripper_open(open_w)
+            if not self._robot.gripper_open(open_w):
+                result.error_code = 'TOOL_OPEN_FAILED'
+                goal_handle.abort()
+                return result
             if not self._robot.move_line(target, speed_mm_s=30.0):
                 result.success, result.error_code = False, 'MOVE_TO_TOOL_FAILED'
                 goal_handle.abort()
                 return result
-            self._robot.gripper_close(
+            if not self._robot.gripper_close(
                 self._param('pen_grip_width'),
                 self._param('pen_grip_force'),
-            )
+            ):
+                result.error_code = 'TOOL_GRIP_FAILED'
+                goal_handle.abort()
+                return result
+
+            # 닫기 서비스 성공은 전송 성공이다. 실제 간격과 파지 감지를
+            # 확인하기 전에는 후퇴나 자동 복귀를 전송하지 않는다.
+            grip_error = self._robot.verify_grip(request.tool_id or 'pen')
+            if grip_error:
+                result.error_code = grip_error
+                goal_handle.abort()
+                return result
 
         elif action == 'RELEASE':
             _fb('RELEASING', 30.0)
@@ -670,7 +695,10 @@ class RobotExecutorNode(Node):
                 result.success, result.error_code = False, 'MOVE_TO_TOOL_FAILED'
                 goal_handle.abort()
                 return result
-            self._robot.gripper_open(open_w)
+            if not self._robot.gripper_open(open_w):
+                result.error_code = 'TOOL_RELEASE_FAILED'
+                goal_handle.abort()
+                return result
 
         else:
             result.success = False
@@ -723,7 +751,10 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
-        self._robot.gripper_open(grip_w + 20.0)
+        if not self._robot.gripper_open(grip_w + 20.0):
+            result.error_code = 'PICK_OPEN_FAILED'
+            goal_handle.abort()
+            return result
 
         _fb('GRIPPING', 20.0)
         if not self._robot.move_line(pick_target, speed_mm_s=30.0):
@@ -731,7 +762,17 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
-        self._robot.gripper_close(grip_w)
+        if not self._robot.gripper_close(grip_w):
+            result.error_code = 'PICK_GRIP_FAILED'
+            goal_handle.abort()
+            return result
+
+        # 이송 액션도 닫기 확인 뒤 실제 RG2 결과를 검사한 후에만 들어 올린다.
+        grip_error = self._robot.verify_grip('pick_and_place')
+        if grip_error:
+            result.error_code = grip_error
+            goal_handle.abort()
+            return result
 
         _fb('LIFTING', 40.0)
         if not self._robot.move_line(pick_above, speed_mm_s=30.0):
@@ -756,7 +797,10 @@ class RobotExecutorNode(Node):
             return result
 
         _fb('RELEASING', 90.0)
-        self._robot.gripper_open(grip_w + 20.0)
+        if not self._robot.gripper_open(grip_w + 20.0):
+            result.error_code = 'PLACE_RELEASE_FAILED'
+            goal_handle.abort()
+            return result
 
         if not self._robot.move_line(place_above, speed_mm_s=50.0):
             result.success, result.error_code = False, 'PLACE_RETRACT_FAILED'
@@ -778,7 +822,8 @@ class RobotExecutorNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = RobotExecutorNode()
-    executor = MultiThreadedExecutor()
+    # 액션이 서비스 응답을 기다리는 동안에도 응답 콜백을 처리할 스레드가 필요하다.
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:
         executor.spin()

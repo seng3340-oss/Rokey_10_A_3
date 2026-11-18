@@ -1,0 +1,10 @@
+# RG2의 현재 턱 간격을 읽는다. 명령이나 목표 간격은 입력하지 않는다.
+---
+bool success
+# 그리퍼에 설정된 손끝 오프셋이 반영된 실측 간격(mm).
+float64 width_mm
+# Modbus 상태 워드의 이동 중 및 물체 파지 감지 표시.
+bool busy
+bool grip_detected
+# 조회 실패, 이동 중 또는 그리퍼 안전 신호가 활성인 경우 그 이유를 담는다.
+string message

@@ -7,12 +7,11 @@ MoveLine, MoveJoint, 그리퍼 제어 등을 단순한 메서드로 제공한다
 
 from __future__ import annotations
 
-from typing import Optional
-
-import threading
 import math
+import threading
 import time
 import xml.etree.ElementTree as ET
+from typing import Optional
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -36,6 +35,12 @@ from dsr_msgs2.srv import (
 from rcl_interfaces.srv import GetParameters
 from onrobot_rg_msgs.srv import SetCommand
 
+try:
+    from onrobot_rg_msgs.srv import GetGripWidth
+except ImportError:
+    # 기존 인터페이스로도 드로잉은 실행할 수 있다. 파지 검사는 측정 불가로 끝낸다.
+    GetGripWidth = None
+
 from .drawing_motion import (
     DEFAULT_ACC_ANGULAR,
     DEFAULT_ACC_LINEAR,
@@ -43,6 +48,8 @@ from .drawing_motion import (
     DsrPos,
     MotionType,
 )
+
+from .grip_policy import grip_width_error
 
 # Doosan 상수
 DR_BASE = 0
@@ -107,6 +114,12 @@ class DoosanRobotClient:
             self._clients[key] = node.create_client(
                 srv_type, topic, callback_group=self._service_group
             )
+        if GetGripWidth is not None:
+            self._clients["grip_width"] = node.create_client(
+                GetGripWidth,
+                "/onrobot/get_grip_width",
+                callback_group=self._service_group,
+            )
 
     # ------------------------------------------------------------------
     # 서비스 호출 헬퍼
@@ -125,18 +138,33 @@ class DoosanRobotClient:
             self._logger.error(f"{key} 서비스 연결 대기 시간 초과")
             return None
 
+        response = self._wait_for_response(client, request, timeout)
+        if response is None:
+            self._logger.error(f'{key} 서비스 응답을 확인하지 못했습니다.')
+        return response
+
+    def _wait_for_response(self, client, request, timeout):
+        """등록된 실행기가 응답을 처리하도록 하고 현재 콜백은 완료 신호만 기다린다."""
         future = client.call_async(request)
-        # 이미 실행 중인 executor를 중첩 spin하면 응답 처리 노드가 빠질 수 있다.
-        ready = threading.Event()
-        future.add_done_callback(lambda _: ready.set())
-        if not ready.wait(timeout):
-            self._logger.error(f"{key} 응답 시간 초과: 완료 여부 확인 필요")
+        if self._node.executor is None:
+            rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout)
+        else:
+            # 실행 중인 노드를 다른 실행기에 넣으면 기존 액션 콜백을 방해한다.
+            # 액션 실행기는 다중 스레드이므로 다른 스레드가 서비스 응답을 처리한다.
+            finished = threading.Event()
+            future.add_done_callback(lambda _: finished.set())
+            if not future.done():
+                finished.wait(timeout)
+
+        if not future.done() or future.cancelled():
+            if not future.done():
+                client.remove_pending_request(future)
             return None
 
-        if future.result() is None:
-            self._logger.error(f"{key} 서비스 호출 실패")
+        error = future.exception()
+        if error is not None:
+            self._logger.error(f'서비스 호출 실패: {error}')
             return None
-
         return future.result()
 
     def _call_checked(self, key: str, request, timeout: float = 180.0) -> bool:
@@ -521,6 +549,54 @@ class DoosanRobotClient:
         """그리퍼 닫기. RG2 범위: 3~40N."""
         return self._gripper_command(f"close({width_mm},{force_n})")
 
+    def verify_grip(self, tool, timeout_sec=2.0):
+        """닫기 명령 수락 뒤 새 실측과 RG2 상태를 확인한다. 빈 코드는 상승 허용이다."""
+        client = self._clients.get('grip_width')
+        deadline = time.monotonic() + timeout_sec
+        error = 'GRIP_CHECK_UNAVAILABLE'
+        reason = 'RG2 실측 간격 서비스가 없습니다.'
+        measured_mm = None
+        try:
+            if client is not None and client.wait_for_service(timeout_sec=timeout_sec):
+                reason = 'RG2 닫힘·파지 감지를 제한 시간 안에 확인하지 못했습니다.'
+                while (remaining := deadline - time.monotonic()) > 0:
+                    response = self._wait_for_response(
+                        client, GetGripWidth.Request(), remaining,
+                    )
+                    if response is None:
+                        reason = 'RG2 실측 간격 응답 시간 초과 또는 응답 오류'
+                        break
+                    if response.busy:
+                        # 닫히는 중인 넓은 간격을 결과로 쓰지 않는다. 조회만 반복한다.
+                        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                        continue
+                    if not response.success:
+                        reason = response.message or 'RG2 실측 간격 조회 실패'
+                        break
+
+                    measured_mm = response.width_mm
+                    width_error = grip_width_error(measured_mm)
+                    if width_error:
+                        error = width_error
+                        reason = '닫힘 후 턱 간격이 그립 판정 기준을 충족하지 않습니다.'
+                        break
+                    # 닫기 응답이 빨라 아직 열린 상태일 수 있다. 10mm 이상이어도
+                    # 실제 물체 감지 상태가 함께 관측되기 전에는 상승하지 않는다.
+                    if response.grip_detected:
+                        self._logger.info(
+                            f'RG2 그립 확인: 대상={tool}, 실측={measured_mm:.1f} mm'
+                        )
+                        return ''
+                    time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        except Exception as exc:
+            reason = f'RG2 실측 간격 서비스 오류: {exc}'
+
+        self._logger.error(
+            f'RG2 그립 진행 차단: 대상={tool}, 코드={error}, '
+            f'실측={measured_mm!r} mm, 원인={reason}'
+        )
+        return error
+
     def _gripper_command(self, command: str) -> bool:
         """OnRobot RG2 SetCommand 서비스 호출."""
         req = SetCommand.Request()
@@ -564,8 +640,9 @@ class DoosanRobotClient:
         open_width: float = 100.0,
         speed_approach: float = 80.0,
         speed_slow: float = 30.0,
+        verify_grip_for: str | None = None,
     ) -> bool:
-        """접근 → 그리퍼 열기 → 하강 → 그리퍼 닫기 → 들어올리기.
+        """접근 → 열기 → 하강 → 닫기 → 선택적 실측 검증 → 들어올리기.
 
         Parameters
         ----------
@@ -574,13 +651,18 @@ class DoosanRobotClient:
         grip_width : 파지 폭 (mm)
         grip_force : 파지 힘 (N)
         open_width : 그리퍼 열림 폭 (mm)
+        verify_grip_for : 실측 검증이 필요한 대상 이름. 실패 시 상승하지 않는다.
         """
         if not self.move_line(approach, speed_mm_s=speed_approach):
             return False
-        self.gripper_open(open_width)
+        if not self.gripper_open(open_width):
+            return False
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
-        self.gripper_close(grip_width, grip_force)
+        if not self.gripper_close(grip_width, grip_force):
+            return False
+        if verify_grip_for is not None and self.verify_grip(verify_grip_for):
+            return False
         if not self.move_line(approach, speed_mm_s=speed_slow):
             return False
         return True
@@ -605,7 +687,8 @@ class DoosanRobotClient:
             return False
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
-        self.gripper_open(open_width)
+        if not self.gripper_open(open_width):
+            return False
         if not self.move_line(approach, speed_mm_s=speed_retract):
             return False
         return True
