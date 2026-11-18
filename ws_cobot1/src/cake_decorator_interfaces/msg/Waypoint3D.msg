@@ -6,3 +6,12 @@ float64 speed
 bool pen_down
 # 목표 접촉력 N. 현재 높이 고정 드로잉에서는 사용하지 않는다.
 float64 contact_force
+
+# 기본값 LINE=0은 기존 직선 명령과 호환된다. CIRCLE은 현재점→via_pose→pose 원호다.
+uint8 LINE=0
+uint8 CIRCLE=1
+uint8 motion_type
+geometry_msgs/Pose via_pose
+# 높이가 함께 변하는 옆면 곡선의 연속 스플라인 목표점(명령당 2~100개).
+uint8 SPLINE=2
+geometry_msgs/Pose[] spline_poses

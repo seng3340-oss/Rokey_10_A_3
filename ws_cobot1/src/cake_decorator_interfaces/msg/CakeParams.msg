@@ -1,5 +1,6 @@
-# 치수는 m다. 원통형 케이크의 반지름 하나를 전달한다.
+# 치수는 m다. radius는 윗면, bottom_radius는 아랫면 반지름이다.
 float64 radius
+float64 bottom_radius
 float64 height
 float64 board_width
 float64 board_depth

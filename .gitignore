@@ -17,3 +17,6 @@ frontend/dist/
 # 서버가 생성하는 주문 DB와 테스트 캐시
 /backend/data/
 .pytest_cache/
+
+# 로봇별 로컬 실측값은 형상 관리에서 제외한다.
+/config/local/

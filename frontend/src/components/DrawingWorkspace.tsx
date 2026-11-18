@@ -88,7 +88,8 @@ export function DrawingWorkspace() {
           <div className="cake-spec">
             <span>화이트 케이크</span>
             <span>
-              지름 {CAKE_DIMENSIONS.diameterMm / 10}cm · 높이{" "}
+              윗지름 {CAKE_DIMENSIONS.topDiameterMm / 10}cm · 밑지름{" "}
+              {CAKE_DIMENSIONS.bottomDiameterMm / 10}cm · 높이{" "}
               {CAKE_DIMENSIONS.heightMm / 10}cm
             </span>
           </div>

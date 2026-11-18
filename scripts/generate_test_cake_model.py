@@ -1,4 +1,4 @@
-"""레거시 테스트 케이크 또는 스테이션의 시각화용 케이크를 생성한다."""
+"""공통 원뿔대 설정으로 케이크 STL과 케이크판의 시각·충돌 형상을 갱신한다."""
 
 import argparse
 import json
@@ -32,6 +32,16 @@ def triangle(a, b, c):
 
 def write_cake_mesh(name, *, top, bottom, height):
     """반지름과 높이(m)로 닫힌 STL을 생성한다. 바닥 중심은 원점에 둔다."""
+    
+def generate():
+    """원본 A안 자산은 보존하고 새 실측 모델만 생성한다. 위치는 임시 시각화 배치다."""
+    cake = json.loads((ROOT / "config/test_cake.json").read_text())
+    top = cake["top_diameter_mm"] / 2000
+    bottom = cake["bottom_diameter_mm"] / 2000
+    height = cake["height_mm"] / 1000
+    width = cake["board_width_mm"] / 1000
+    depth = cake["board_depth_mm"] / 1000
+    thickness = cake["board_thickness_mm"] / 1000
     faces = []
     # 마지막 면을 첫 번째 꼭짓점에 연결해 상·하단 둘레의 이음새를 닫는다.
     for i in range(96):

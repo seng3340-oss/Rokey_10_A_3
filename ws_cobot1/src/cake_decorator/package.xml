@@ -2,16 +2,20 @@
 <package format="3">
   <name>cake_decorator</name>
   <version>0.1.0</version>
-  <description>케이크 주문 브릿지와 업무 노드 개발 틀. 로봇 실행 기능은 미구현.</description>
+  <description>케이크 주문 브릿지와 작업 관리·경로 계산·두산 로봇 실행 노드.</description>
   <maintainer email="applewlghks321@gmail.com">Cake project team</maintainer>
   <license>MIT</license>
 
   <!-- Python 패키지를 설치하며 기존 인터페이스 패키지를 참조한다. -->
   <buildtool_depend>ament_python</buildtool_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
   <exec_depend>action_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>dsr_msgs2</exec_depend>
+  <exec_depend>onrobot_rg_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>cake_decorator_interfaces</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

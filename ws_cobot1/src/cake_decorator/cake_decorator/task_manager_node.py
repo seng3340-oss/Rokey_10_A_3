@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 import traceback
 from enum import Enum
 from typing import Optional
@@ -38,7 +39,7 @@ class TaskManagerNode(Node):
         super().__init__('task_manager_node')
 
         # ── 파라미터 ──
-        self.declare_parameter('drawing_speed', 20.0)     # mm/s
+        self.declare_parameter('drawing_speed', 30.0)     # mm/s, DP 기본값과 통일
         self.declare_parameter('contact_force', 1.0)      # N
         # DP로 넘길 작업 속도 퍼센트. 0을 그대로 보내면 DP가 1%로
         # 계산해 드로잉 속도가 1/100로 떨어지므로 기본 100을 쓴다.
@@ -53,7 +54,7 @@ class TaskManagerNode(Node):
         self._order_server = ActionServer(
             self,
             CakeOrder,
-            'cake_order',
+            '/cake/order',
             execute_callback=self._execute_order,
             goal_callback=self._handle_goal,
             cancel_callback=self._handle_cancel,
@@ -154,14 +155,14 @@ class TaskManagerNode(Node):
 
     # ── 드로잉 실행 (GenerateTrajectory → DrawOnCake) ──
 
+    @staticmethod
+    def _reference_pose(cake):
+        """브릿지가 YES 시점에 기록한 펜촉 위치·자세를 DP까지 보존한다."""
+        return Pose(position=cake.center, orientation=cake.tool_orientation)
+
     def _execute_drawing(self, request: CakeOrder.Goal, goal_handle) -> bool:
         cake = request.cake_params
-
-        cake_pose = Pose()
-        cake_pose.position = Point(
-            x=cake.center.x, y=cake.center.y, z=cake.center.z,
-        )
-        cake_pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
+        cake_pose = self._reference_pose(cake)
 
         total_paths = len(request.drawing_paths)
         drawing_speed = self.get_parameter('drawing_speed').value
@@ -202,11 +203,14 @@ class TaskManagerNode(Node):
             traj_req.strokes_2d = dp.strokes
             traj_req.surface_type = dp.surface
             traj_req.cake_pose = cake_pose
+            # 펜 자세는 cake_pose에 보존하고 케이크 평면 회전은 별도로 보낸다.
+            traj_req.cake_yaw = cake.orientation
             traj_req.cake_radius = cake.radius
+            traj_req.cake_bottom_radius = cake.bottom_radius
             traj_req.cake_height = cake.height
 
             future = self._gen_traj_client.call_async(traj_req)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=srv_timeout)
+            self._wait_future(future, srv_timeout)
 
             if future.result() is None:
                 self.get_logger().error(f'GenerateTrajectory 호출 실패 (path={idx})')
@@ -249,6 +253,16 @@ class TaskManagerNode(Node):
 
     # ── DrawOnCake 액션 전송 ──
 
+    @staticmethod
+    def _wait_future(future, timeout):
+        """다른 executor 스레드가 응답을 처리하게 하고 현재 콜백만 대기한다."""
+        ready = threading.Event()
+        future.add_done_callback(lambda _: ready.set())
+        if not ready.wait(timeout):
+            raise TimeoutError("ROS 응답 대기 시간 초과: 작업 상태를 확인하세요.")
+        if future.exception():
+            raise future.exception()
+
     def _send_draw(self, goal, goal_handle) -> bool:
         timeout = self.get_parameter('action_timeout').value
 
@@ -262,7 +276,7 @@ class TaskManagerNode(Node):
             goal,
             feedback_callback=lambda fb: self._on_draw_feedback(fb, goal_handle),
         )
-        rclpy.spin_until_future_complete(self, send_future, timeout_sec=10.0)
+        self._wait_future(send_future, 10.0)
 
         gh = send_future.result()
         if gh is None or not gh.accepted:
@@ -270,7 +284,7 @@ class TaskManagerNode(Node):
             return False
 
         result_future = gh.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future, timeout_sec=timeout)
+        self._wait_future(result_future, timeout)
 
         if result_future.result() is None:
             self.get_logger().error('DrawOnCake 결과 수신 실패 (timeout)')
@@ -358,7 +372,7 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

@@ -6,17 +6,12 @@ set -eo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source /opt/ros/jazzy/setup.bash
 
-# 새 워크스페이스를 우선 사용한다. 미빌드 상태에서는 보존된 기존 설치본을 사용한다.
-# 이 fallback은 모델/드라이버 재설치 없이 시각화를 확인하기 위한 명시적 임시 경로다.
-if [[ -f "$project_root/ws_dsr/install/setup.bash" ]]; then
-  source "$project_root/ws_dsr/install/setup.bash"
-elif [[ -f "$HOME/ws_cobot_pjt_jihwan/ws_dsr/install/setup.bash" ]]; then
-  echo "기존 로봇 설치본 사용: ~/ws_cobot_pjt_jihwan/ws_dsr/install"
-  source "$HOME/ws_cobot_pjt_jihwan/ws_dsr/install/setup.bash"
-else
-  echo "먼저 ws_dsr의 로봇 실행환경을 빌드하세요." >&2
-  exit 1
+# 현재 저장소 설치본을 사용한다. 별도 강의 설치본은 명시적으로 지정한다.
+robot_setup="${CAKE_ROBOT_SETUP:-$project_root/ws_dsr/install/local_setup.bash}"
+if [[ ! -f "$robot_setup" ]]; then
+  bash "$project_root/scripts/setup_project.sh"
 fi
+source "$robot_setup"
 
 if [[ ! -f "$project_root/ws_cobot1/install/local_setup.bash" ]]; then
   echo "먼저 ws_cobot1의 cake_workcell 패키지를 빌드하세요." >&2
