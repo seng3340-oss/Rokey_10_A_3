@@ -104,6 +104,29 @@ class WorkcellTests(unittest.TestCase):
                 box = robot.find(f"link[@name='{tray}']/visual/geometry/box")
                 self.assertEqual(box.get("size"), "0.15 0.15 0.003")
 
+    def test_station_tray_shows_cake_and_separate_opener(self):
+        """원뿔대의 상·하단 치수와 틀 위 안착 위치, 따개의 독립 배치를 검사한다."""
+        robot = self.model()
+        tray = robot.find("link[@name='cake_tray_surface']")
+        self.assertIsNone(tray.find("visual[@name='corner_grip']"))
+        cake = tray.find("visual[@name='drawing_cake']")
+        self.assertEqual(cake.find("origin").get("xyz"), "0 0 0")
+        filename = cake.find("geometry/mesh").get("filename")
+        self.assertEqual(filename, "package://cake_workcell_description/meshes/station_cake_frustum.stl")
+        mesh = ROOT / "meshes" / filename.rsplit("/", 1)[1]
+        vertices = [
+            tuple(map(float, line.split()[1:]))
+            for line in mesh.read_text().splitlines()
+            if line.startswith("vertex ")
+        ]
+        # 메시 좌표의 두 높이에서 둘레 반지름을 읽어 상·하단 지름을 각각 검사한다.
+        self.assertEqual({z for _, _, z in vertices}, {0.0, 0.08})
+        for height, diameter in ((0.0, 0.120), (0.08, 0.1135)):
+            with self.subTest(height=height):
+                radius = max(math.hypot(x, y) for x, y, z in vertices if z == height)
+                self.assertAlmostEqual(2 * radius, diameter)
+        self.assertIsNotNone(robot.find("link[@name='cake_opener']/visual/geometry/mesh"))
+
     def test_station_opening_and_base_contacts(self):
         """실제 메시에서 아랫판 접합과 40mm 개구부, 10mm 돌출을 확인한다."""
         def bounds(stem):

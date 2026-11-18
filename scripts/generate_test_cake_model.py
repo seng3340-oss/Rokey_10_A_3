@@ -1,5 +1,6 @@
 """공통 원뿔대 설정으로 케이크 STL과 케이크판의 시각·충돌 형상을 갱신한다."""
 
+import argparse
 import json
 import math
 from pathlib import Path
@@ -29,6 +30,9 @@ def triangle(a, b, c):
     return "\n".join(lines + ["endloop", "endfacet"])
 
 
+def write_cake_mesh(name, *, top, bottom, height):
+    """반지름과 높이(m)로 닫힌 STL을 생성한다. 바닥 중심은 원점에 둔다."""
+    
 def generate():
     """원본 A안 자산은 보존하고 새 실측 모델만 생성한다. 위치는 임시 시각화 배치다."""
     cake = json.loads((ROOT / "config/test_cake.json").read_text())
@@ -39,8 +43,9 @@ def generate():
     depth = cake["board_depth_mm"] / 1000
     thickness = cake["board_thickness_mm"] / 1000
     faces = []
+    # 마지막 면을 첫 번째 꼭짓점에 연결해 상·하단 둘레의 이음새를 닫는다.
     for i in range(96):
-        a, b = 2 * math.pi * i / 96, 2 * math.pi * (i + 1) / 96
+        a, b = 2 * math.pi * i / 96, 2 * math.pi * ((i + 1) % 96) / 96
         lo = (bottom * math.cos(a), bottom * math.sin(a), 0.0)
         ln = (bottom * math.cos(b), bottom * math.sin(b), 0.0)
         hi = (top * math.cos(a), top * math.sin(a), height)
@@ -53,9 +58,19 @@ def generate():
                 triangle((0.0, 0.0, 0.0), ln, lo),
             ]
         )
-    (MODEL / "meshes/test_cake.stl").write_text(
-        "solid test_cake\n" + "\n".join(faces) + "\nendsolid test_cake\n"
+    (MODEL / "meshes" / f"{name}.stl").write_text(
+        f"solid {name}\n" + "\n".join(faces) + f"\nendsolid {name}\n"
     )
+
+
+def generate():
+    """공통 설정으로 레거시 원통과 케이크판의 시각·충돌 형상을 갱신한다."""
+    cake = json.loads((ROOT / "config/test_cake.json").read_text())
+    radius = cake["diameter_mm"] / 2000
+    width = cake["board_width_mm"] / 1000
+    depth = cake["board_depth_mm"] / 1000
+    thickness = cake["board_thickness_mm"] / 1000
+    write_cake_mesh("test_cake", top=radius, bottom=radius, height=cake["height_mm"] / 1000)
     path = MODEL / "urdf/workcell.urdf.xacro"
     text = path.read_text()
 
@@ -97,4 +112,10 @@ def generate():
 
 
 if __name__ == "__main__":
-    generate()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--station", action="store_true", help="스테이션 원뿔대 STL만 생성한다.")
+    if parser.parse_args().station:
+        # README의 3D 프린트 규격(상단 Ø113.5, 하단 Ø120, 높이 80mm)을 m로 변환한다.
+        write_cake_mesh("station_cake_frustum", top=0.05675, bottom=0.06, height=0.08)
+    else:
+        generate()
