@@ -376,51 +376,38 @@ class FrustumCake:
         cos_yaw = math.cos(self.yaw)
         sin_yaw = math.sin(self.yaw)
         return (
-            -(local_x * cos_yaw - local_y * sin_yaw),
-            -(local_x * sin_yaw + local_y * cos_yaw),
-            -sa,
+            local_x * cos_yaw - local_y * sin_yaw,
+            local_x * sin_yaw + local_y * cos_yaw,
+            sa,
         )
 
-    # 펜 방향 계산: SIDE 면에서 내향 법선과 위쪽 방향을 합성해 30도 아래로 기울어지도록 한다.
     def side_pen_direction(
-        self, x_arc: float, y_height: float,
+        self, x_arc: float, y_height: float, tilt_deg: float = 0.0,
     ) -> tuple[float, float, float]:
+        """그리퍼에서 펜촉으로 향하는 도구 +Z축을 계산한다.
 
-        # 1. 외향 법선
-        n_out = self.side_outward_normal(x_arc, y_height)
+        tilt_deg는 내향 법선에서 아래로 기울이는 각도다.
+        DP에서 원뿔대 경사를 보정한 값을 받아 수직 기준 각도를 유지한다.
+        """
+        if not math.isfinite(tilt_deg):
+            raise ValueError("펜 기울기는 유한한 각도여야 합니다.")
+        outward = self.side_outward_normal(x_arc, y_height)
+        inward = tuple(-value for value in outward)
 
-        # 2. 내향 법선
-        n_in = tuple(-v for v in n_out)
-
-        # 3. Base 좌표계의 위쪽 방향
-        z = (0.0, 0.0, 1.0)
-
-        # 4. 위쪽 방향을 표면에 투영
-        dot = sum(z[i] * n_in[i] for i in range(3))
-
-        t = tuple(
-            z[i] - dot * n_in[i]
+        # 위쪽을 표면에 투영한 단위 접선이다. 이 방향을 빼야 아래로 기울어진다.
+        upward = tuple(
+            (1.0 if i == 2 else 0.0) - inward[2] * inward[i]
             for i in range(3)
         )
-
-        # 5. 단위 벡터 정규화
-        norm = math.sqrt(sum(v * v for v in t))
-
+        norm = math.sqrt(sum(value * value for value in upward))
         if norm < 1e-6:
             raise ValueError("위쪽 방향을 표면에 투영할 수 없습니다.")
-
-        t = tuple(v / norm for v in t)
-
-        # 6. 표면 기준 30도
-        angle = math.radians(60.0)
-
-        direction = tuple(
-            math.cos(angle) * n_in[i]
-            + math.sin(angle) * t[i]
+        angle = math.radians(tilt_deg)
+        return tuple(
+            math.cos(angle) * inward[i]
+            - math.sin(angle) * upward[i] / norm
             for i in range(3)
         )
-
-        return direction
 
     def side_abs_with_offset(
         self, x_arc: float, y_height: float, offset: float,
@@ -493,5 +480,6 @@ def pen_quat_side(arc_mm, height_or_cake, cake=None, tilt_deg=0.0):
     """
     if cake is None:
         return _pen_quat_cylinder_side(arc_mm, height_or_cake, tilt_deg=tilt_deg)
-    nx, ny, nz = cake.side_pen_direction(arc_mm, height_or_cake)
-    return direction_to_quaternion(-nx, -ny, -nz)
+    # 새 함수는 이미 펜촉으로 향하는 +Z축을 반환한다. 여기서 다시 뒤집지 않는다.
+    direction = cake.side_pen_direction(arc_mm, height_or_cake, tilt_deg=tilt_deg)
+    return direction_to_quaternion(*direction)

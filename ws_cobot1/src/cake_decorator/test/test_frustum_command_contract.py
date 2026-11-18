@@ -125,3 +125,40 @@ def test_rotated_side_approach_stays_outside_sloped_cake(node):
                 radius_at_z = 60 - 3.25 * (z - 71) / 79
                 distance = (math.hypot(x,y) - radius_at_z) / math.hypot(1,3.25/79)
                 assert distance >= 10 - 1e-8
+
+
+@pytest.mark.parametrize("points", [
+    [(64, 384), (512, 384)],
+    [(512, 320), (512, 440)],
+    [(288, 320), (512, 440), (736, 340)],
+])
+def test_real_path_calls_new_pen_direction_and_points_inward_down(node, monkeypatch, points):
+    """실제 DP가 새 함수를 거치며 펜축이 안쪽·아래로 30도를 유지하는지 확인한다."""
+    from cake_decorator.drawing_geometry import FrustumCake
+
+    calls = []
+    original = FrustumCake.side_pen_direction
+
+    def record(self, arc, height, *args, **kwargs):
+        calls.append((arc, height))
+        return original(self, arc, height, *args, **kwargs)
+
+    monkeypatch.setattr(FrustumCake, "side_pen_direction", record)
+    response, _ = convert(node, [points], yaw=0.4)
+    assert calls, "실제 드로잉이 side_pen_direction을 거치지 않았습니다."
+
+    # 최초 두 공중 이동은 영점 자세다. 그 이후 모든 목표·원호·스플라인을 확인한다.
+    poses = []
+    for waypoint in response.waypoints_3d[2:]:
+        poses.append(waypoint.pose)
+        poses.extend(waypoint.spline_poses)
+        if waypoint.motion_type == Waypoint3D.CIRCLE:
+            poses.append(waypoint.via_pose)
+    for pose in poses:
+        p, q = pose.position, pose.orientation
+        axis = (2 * (q.x * q.z + q.w * q.y),
+                2 * (q.y * q.z - q.w * q.x),
+                1 - 2 * (q.x * q.x + q.y * q.y))
+        radius = math.hypot(p.x - 0.4, p.y)
+        assert ((p.x - 0.4) * axis[0] + p.y * axis[1]) / radius == pytest.approx(-0.5)
+        assert axis[2] == pytest.approx(-math.cos(math.radians(30)))

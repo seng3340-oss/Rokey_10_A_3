@@ -57,7 +57,7 @@ class DrawingPathNode(Node):
         self.declare_parameter("duplicate_tolerance_mm", 0.01)
         self.declare_parameter("side_path_error_mm", 0.1)
         self.declare_parameter("side_diagonal_mode", "spline")
-        self.declare_parameter("side_pen_vertical_deg", 30.0)
+        self.declare_parameter("side_pen_vertical_deg", 15.0)
         self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
         # TOP: 수직에서 기울어지는 각도 (0=수직, 30=30도 기울임)
         # SIDE: 법선에서 아래로 기울어지는 각도
@@ -299,20 +299,21 @@ class DrawingPathNode(Node):
                 cake, start, end, offset, self._param("side_path_error_mm")
             )
         )
+        # 높이와 케이크 객체를 각각 전달해 새 펜 방향 계산을 사용한다.
         for move in moves:
-            quat = pen_quat_side(move.arc_mm, cake, tilt_deg=tilt)
+            quat = pen_quat_side(move.arc_mm, move.end[2] - cake.cz, cake, tilt_deg=tilt)
             target = self._wp(*move.end, quat, speed, force, pen_down=pen_down)
             if isinstance(move, SplineSurfaceMove):
                 target.motion_type = Waypoint3DMsg.SPLINE
                 target.spline_poses = [
                     self._wp(
-                        *sample, pen_quat_side(arc, cake, tilt_deg=tilt), speed, force
+                        *sample, pen_quat_side(arc, sample[2] - cake.cz, cake, tilt_deg=tilt), speed, force
                     ).pose
                     for sample, arc in zip(move.samples, move.sample_arcs)
                 ]
             elif move.via is not None:
                 target.motion_type = Waypoint3DMsg.CIRCLE
-                via_quat = pen_quat_side(move.via_arc_mm, cake, tilt_deg=tilt)
+                via_quat = pen_quat_side(move.via_arc_mm, move.via[2] - cake.cz, cake, tilt_deg=tilt)
                 target.via_pose = self._wp(*move.via, via_quat, speed, force).pose
             waypoints.append(target)
             states.append(pen_down)
@@ -339,13 +340,13 @@ class DrawingPathNode(Node):
         vertical_angle = self._param("side_pen_vertical_deg")
         if not math.isfinite(vertical_angle) or not 0 < vertical_angle < 90:
             raise ValueError("옆면 펜의 수직 기준 각도는 0~90도 사이여야 합니다.")
-        # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 30도면 해당 함수에는 60도.
+        # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 15도면 해당 함수에는 75도.
         # 경사 법선은 이미 아래로 기울어져 있다. 그 각도를 빼야 PR #16의
         # 수직 기준 펜 각도가 원뿔대에서도 그대로 유지된다.
         tilt = 90.0 - vertical_angle - math.degrees(cake.slant_angle)
         if not all(0 <= h <= cake.height for _, h in points):
             raise ValueError("옆면 입력이 편집 띠 높이 밖입니다.")
-        quat = pen_quat_side(first[0], cake, tilt_deg=tilt)
+        quat = pen_quat_side(first[0], first[1], cake, tilt_deg=tilt)
         if previous is None:
             # 시작 TCP가 상면 중심인 계약을 따른다. 먼저 위로 빠져나와 원통 밖으로 간다.
             # 옆면 자세를 상면 위부터 유지해 수직 자세의 손목 특이점을 반복 통과하지 않는다.
@@ -407,7 +408,7 @@ class DrawingPathNode(Node):
                 poses = [
                     self._wp(
                         *sample,
-                        pen_quat_side(arc, cake, tilt_deg=tilt),
+                        pen_quat_side(arc, sample[2] - cake.cz, cake, tilt_deg=tilt),
                         draw_speed,
                         force,
                     ).pose
@@ -415,7 +416,7 @@ class DrawingPathNode(Node):
                 ]
                 target = self._wp(
                     *chunk[-1][0],
-                    pen_quat_side(chunk[-1][1], cake, tilt_deg=tilt),
+                    pen_quat_side(chunk[-1][1], chunk[-1][0][2] - cake.cz, cake, tilt_deg=tilt),
                     draw_speed,
                     force,
                     pen_down=True,
@@ -439,7 +440,7 @@ class DrawingPathNode(Node):
                     states,
                 )
         x, y, z = cake.side_abs_with_offset(*last, clearance)
-        quat = pen_quat_side(last[0], cake, tilt_deg=tilt)
+        quat = pen_quat_side(last[0], last[1], cake, tilt_deg=tilt)
         waypoints.append(self._wp(x, y, z, quat, travel_speed, force))
         states.append(False)
         return last
