@@ -192,7 +192,7 @@
     <visual name="drawing_cake">
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://cake_workcell_description/meshes/test_cake.stl" />
+        <mesh filename="package://cake_workcell_description/meshes/station_cake_frustum.stl" />
       </geometry>
       <material name="drawing_cake_cream">
         <color rgba="0.97 0.83 0.60 1" />
