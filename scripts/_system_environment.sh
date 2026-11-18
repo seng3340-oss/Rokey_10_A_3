@@ -47,18 +47,24 @@ if [[ -n "$robot_setup" ]]; then
     exit 1
   fi
 else
-  for candidate in \
-    "$project_root/ws_dsr/install/local_setup.bash" \
-    "$HOME/ws_cobot_pjt_jihwan/ws_dsr/install/local_setup.bash"; do
-    if robot_environment_ready "$candidate"; then
-      robot_setup="$candidate"
-      break
-    fi
-  done
+  candidate="$project_root/ws_dsr/install/local_setup.bash"
+  if robot_environment_ready "$candidate"; then
+    robot_setup="$candidate"
+  fi
 fi
-if [[ -z "$robot_setup" || ! -f "$project_root/ws_cobot1/install/local_setup.bash" ]]; then
-  echo "완성된 ROS 빌드 결과가 없습니다. README의 로봇 환경 빌드 순서를 확인하세요." >&2
-  exit 1
+needs_setup=false
+if [[ -z "$robot_setup" || ! -f "$project_root/ws_cobot1/install/local_setup.bash" || ! -f "$project_root/frontend/node_modules/vite/bin/vite.js" || ! -x "$project_root/backend/.venv/bin/python" ]]; then
+  needs_setup=true
+fi
+if $needs_setup; then
+  if [[ " $* " == *" --check "* ]]; then
+    echo "설치 준비가 필요합니다. bash scripts/setup_project.sh를 먼저 실행하세요." >&2
+    exit 1
+  fi
+  echo "처음 실행에 필요한 패키지 설치와 빌드를 준비합니다. 인터넷 연결이 필요할 수 있습니다."
+  bash "$project_root/scripts/setup_project.sh"
+  robot_setup="${CAKE_ROBOT_SETUP:-$project_root/ws_dsr/install/local_setup.bash}"
+  robot_environment_ready "$robot_setup" || { echo "드라이버 준비 실패" >&2; exit 1; }
 fi
 echo "로봇 환경 자동 준비: $robot_setup"
 source "$robot_setup"

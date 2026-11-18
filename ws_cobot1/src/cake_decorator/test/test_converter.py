@@ -271,11 +271,11 @@ class TestMultipleStrokes:
         contact_points = [wp for wp in response.waypoints_3d if wp.pen_down]
         assert len(contact_points) == 2
         assert contact_points[0].pose.position.x == pytest.approx(
-            CAKE_TOP[0] + 0.05675 * math.cos(math.pi / 2.0),
+            CAKE_TOP[0] + 0.05775 * math.cos(math.pi / 2.0),
             abs=3e-5,
         )
         assert contact_points[0].pose.position.y == pytest.approx(
-            CAKE_TOP[1] + 0.05675,
+            CAKE_TOP[1] + 0.05775,
             abs=3e-5,
         )
         assert contact_points[0].pose.position.z == pytest.approx(
@@ -283,11 +283,11 @@ class TestMultipleStrokes:
             abs=3e-5,
         )
         assert contact_points[1].pose.position.x == pytest.approx(
-            CAKE_TOP[0] + 0.06 * math.cos(math.pi / 2.0),
+            CAKE_TOP[0] + 0.061 * math.cos(math.pi / 2.0),
             abs=3e-5,
         )
         assert contact_points[1].pose.position.y == pytest.approx(
-            CAKE_TOP[1] + 0.06,
+            CAKE_TOP[1] + 0.061,
             abs=3e-5,
         )
         assert contact_points[1].pose.position.z == pytest.approx(

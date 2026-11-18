@@ -34,3 +34,11 @@ export ROS_DOMAIN_ID=30
 과거 실물 로그에는 pymodbus 누락이 있었으므로 RG2 Python 의존성도 확인해야 합니다.
 빌드가 끝나면 기존 sod 별칭이 가리키는 ~/ws_cobot_pjt/ws_dsr/install/setup.bash를 사용할 수 있습니다.
 sodvir/sodreal, 네트워크 설정은 변경하지 않았습니다. 에뮬레이터나 실물 브링업은 실행하지 않았습니다.
+
+## 공통 실행
+
+현재 실행기는 개인 작업 경로 대신 복제한 저장소의 설치본을 사용합니다.
+저장소 루트에서 `bash scripts/setup_project.sh`로 준비한 뒤
+`bash scripts/start_real.sh` 또는 `bash scripts/start_virtual.sh`를 실행합니다.
+전체 실행기는 설치·빌드가 없으면 같은 준비 스크립트를 자동으로 호출합니다.
+ROS Jazzy·시스템 의존성·Node.js 준비 방법은 최상위 README를 따릅니다.

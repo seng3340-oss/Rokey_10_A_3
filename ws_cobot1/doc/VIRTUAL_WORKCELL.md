@@ -69,8 +69,8 @@ ws_cobot1/src/
 
 ## 기존 드로잉 데모 배치
 
-`scripts/virtual_draw_demo.py`는 이전 장면의 케이크 윗면 중심 (500, 0, 142) mm를 사용합니다.
-해당 데모를 실행하려면 작업셀을 아래처럼 띄웁니다.
+이전 고정구 배치는 legacy 옵션으로 확인할 수 있습니다.
+작업셀만 표시하려면 아래처럼 띄웁니다.
 
 ```bash
 bash scripts/start_virtual_workcell.sh layout:=legacy

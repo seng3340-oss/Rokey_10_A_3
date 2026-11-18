@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Optional
 
 import threading
-import json
 import math
 import time
 import xml.etree.ElementTree as ET
@@ -30,6 +29,9 @@ from dsr_msgs2.srv import (
     GetCurrentPosx,
     GetCurrentPosj,
     GetSolutionSpace,
+    GetCurrentToolFlangePosx,
+    Ikin,
+    Fkin,
 )
 from rcl_interfaces.srv import GetParameters
 from onrobot_rg_msgs.srv import SetCommand
@@ -77,6 +79,9 @@ class DoosanRobotClient:
             "/dsr01/dsr_controller2/aux_control/get_solution_space",
             GetSolutionSpace,
         ),
+        "inverse": ("/dsr01/dsr_controller2/motion/ikin", Ikin),
+        "forward": ("/dsr01/dsr_controller2/motion/fkin", Fkin),
+        "flange": ("/dsr01/dsr_controller2/aux_control/get_current_tool_flange_posx", GetCurrentToolFlangePosx),
         "move_jointx": ("/dsr01/dsr_controller2/motion/move_jointx", MoveJointx),
         "move_circle": ("/dsr01/dsr_controller2/motion/move_circle", MoveCircle),
         "move_line": ("/dsr01/dsr_controller2/motion/move_line", MoveLine),
@@ -314,6 +319,71 @@ class DoosanRobotClient:
                 return False
             time.sleep(0.05)
 
+    def select_reachable_side_commands(self, commands, cancelled):
+        """이동 전에 제어기의 IK/FK를 조회해 현재 관절 해에서 가능한 펜 자세를 찾는다."""
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+        from .side_pose_selection import select_side_roll
+
+        self._side_validated_solution = None
+        joints = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        pose = self._call("current_pose", GetCurrentPosx.Request(ref=0), timeout=3)
+        flange = self._call("flange", GetCurrentToolFlangePosx.Request(ref=0), timeout=3)
+        if not (joints and joints.success and pose and pose.success and pose.task_pos_info and flange and flange.success):
+            raise RuntimeError("옆면 도달 검사에 필요한 현재 로봇 상태를 읽지 못했습니다.")
+        solution = self._call("solution", GetSolutionSpace.Request(pos=list(joints.pos)), timeout=3)
+        current_fk = self._call("forward", Fkin.Request(pos=list(joints.pos), ref=0), timeout=3)
+        if not (solution and solution.success and current_fk and current_fk.success):
+            raise RuntimeError("현재 관절 해·순기구학 조회 실패")
+        tcp = list(pose.task_pos_info[0].data[:6])
+        flange_pose = list(flange.pos)
+
+        def matches(first, second):
+            distance = math.dist(first[:3], second[:3])
+            rotation = (Rotation.from_euler("ZYZ", first[3:], degrees=True).inv()
+                        * Rotation.from_euler("ZYZ", second[3:], degrees=True))
+            return distance < 0.5 and math.degrees(rotation.magnitude()) < 0.5
+
+        # 드라이버 버전마다 FK의 출력 기준이 다를 수 있어 현재 실제 조회값으로 확인한다.
+        flange_basis = False
+        if not matches(list(current_fk.conv_posx), tcp):
+            if not matches(list(current_fk.conv_posx), flange_pose):
+                raise RuntimeError("현재 FK가 TCP·플랜지 어느 쪽과도 맞지 않아 도달 검사를 중단합니다.")
+            flange_basis = True
+        flange_rotation = Rotation.from_euler("ZYZ", flange_pose[3:], degrees=True)
+        tcp_rotation = Rotation.from_euler("ZYZ", tcp[3:], degrees=True)
+        local_rotation = flange_rotation.inv() * tcp_rotation
+        local_offset = flange_rotation.inv().apply(np.array(tcp[:3]) - np.array(flange_pose[:3]))
+        deadline = time.monotonic() + 90.0
+
+        def inverse(target):
+            if time.monotonic() > deadline:
+                raise RuntimeError("옆면 도달 검사가 90초를 넘었습니다. 이동하지 않습니다.")
+            native = target.to_list()
+            if flange_basis:
+                rotation = Rotation.from_euler("ZYZ", native[3:], degrees=True) * local_rotation.inv()
+                position = np.array(native[:3]) - rotation.apply(local_offset)
+                native = [*map(float, position), *map(float, rotation.as_euler("ZYZ", degrees=True))]
+            result = self._call("inverse", Ikin.Request(pos=native, sol_space=solution.sol_space, ref=0), timeout=3)
+            if not result or not result.success:
+                return None
+            values = list(result.conv_posj)
+            if not all(math.isfinite(value) for value in values):
+                return None
+            check = self._call("forward", Fkin.Request(pos=values, ref=0), timeout=3)
+            # 일부 드라이버는 IK 실패도 success=True를 반환하므로 FK 왕복으로 검증한다.
+            if not check or not check.success or not matches(list(check.conv_posx), native):
+                return None
+            return values
+
+        self._logger.info("옆면 도달 가능 자세 검사 시작. 아직 이동하지 않습니다.")
+        selected = select_side_roll(commands, list(joints.pos), inverse, cancelled, self._logger.info)
+        after = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        if not after or not after.success or max(abs(a-b) for a,b in zip(joints.pos, after.pos)) > 0.1:
+            raise RuntimeError("도달 검사 중 로봇 자세가 바뀌었습니다. 다시 영점을 준비하세요.")
+        self._side_validated_solution = int(solution.sol_space)
+        return selected
+
     def move_task_joint(self, target: DsrPos) -> bool:
         """옆면 케이크 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
         joints = self._call("current_joints", GetCurrentPosj.Request())
@@ -324,20 +394,10 @@ class DoosanRobotClient:
         )
         if solution is None or not solution.success:
             return False
-        # 실물 연결 중 인터넷을 쓸 수 없는 환경에서도 원인을 분석할 수 있게
-        # 현재 관절값·TCP·목표를 기존 실행기 로그에 함께 남긴다.
-        pose = self._call("current_pose", GetCurrentPosx.Request(ref=DR_BASE))
-        current = (
-            list(pose.task_pos_info[0].data[:6])
-            if pose and pose.success and pose.task_pos_info else None
-        )
-        diagnostic = dict(
-            current_joints_deg=list(joints.pos),
-            current_tcp=current,
-            target_tcp=target.to_list(),
-            solution_space=int(solution.sol_space),
-        )
-        self._logger.info("SIDE_APPROACH_DIAGNOSTIC " + json.dumps(diagnostic))
+        validated = getattr(self, "_side_validated_solution", None)
+        if validated is not None and int(solution.sol_space) != validated:
+            self._logger.error("검사한 관절 해와 현재 해가 달라 자세 전환을 중단합니다.")
+            return False
         self._logger.info(
             f"옆면 자세 전환: 현재 팔꿈치 해 {solution.sol_space} 유지, "
             f"목표 TCP={target.to_list()}"
@@ -354,12 +414,6 @@ class DoosanRobotClient:
         moved = self._call_checked("move_jointx", request) and self.verify_pose(
             target.to_list()
         )
-        if not moved:
-            # 자동으로 다른 해를 선택하거나 관절 회전을 재시도하지 않는다.
-            after = self._call("current_joints", GetCurrentPosj.Request())
-            if after and after.success:
-                diagnostic["after_joints_deg"] = list(after.pos)
-            self._logger.error("SIDE_APPROACH_FAILED " + json.dumps(diagnostic))
         return moved
 
     def execute_drawing_command(self, command) -> bool:

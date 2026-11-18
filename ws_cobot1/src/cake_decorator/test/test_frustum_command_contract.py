@@ -19,6 +19,10 @@ def node():
     """로봇 서비스 없이 실제 DP 노드만 열고 테스트 후 ROS 자원을 해제한다."""
     rclpy.init()
     value = DrawingPathNode()
+    # 이 계약 검사는 원뿔대 변환 수식의 기준값(30도, 펜촉 보정0)을 명시한다.
+    from rclpy.parameter import Parameter
+    value.set_parameters([Parameter("side_pen_vertical_deg", value=30.0),
+                          Parameter("side_diameter_allowance_mm", value=0.0)])
     yield value
     value.destroy_node()
     rclpy.try_shutdown()
@@ -94,7 +98,7 @@ def test_two_letters_travel_outside_frustum(node):
             # 원뿔대 법선 거리: (radial-r(z))/sqrt(1+slope²).
             radius = math.hypot(p.x - 400, p.y)
             radius_at_z = 60 - 3.25 * (p.z - 71) / 79
-            assert (radius - radius_at_z) / math.hypot(1, 3.25 / 79) == pytest.approx(10)
+            assert (radius - radius_at_z) / math.hypot(1, 3.25 / 79) >= 10 - 1e-6
 
 
 def test_top_taught_orientation_is_separate_from_cake_yaw(node):
@@ -162,3 +166,86 @@ def test_real_path_calls_new_pen_direction_and_points_inward_down(node, monkeypa
         radius = math.hypot(p.x - 0.4, p.y)
         assert ((p.x - 0.4) * axis[0] + p.y * axis[1]) / radius == pytest.approx(-0.5)
         assert axis[2] == pytest.approx(-math.cos(math.radians(30)))
+
+
+def test_roll_selection_uses_reachable_orientation_and_preserves_pen_axis():
+    """현재 자세가 불가능해도 펜축을 바꾸지 않고 도달 가능한 회전 후보를 선택한다."""
+    from dataclasses import replace
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    from cake_decorator.drawing_motion import DsrPos, MotionCommand, Phase
+    from cake_decorator.side_pose_selection import select_side_roll, roll_pose
+    from cake_decorator.doosan_robot import DoosanRobotClient
+
+    assert all(len(value) == 2 for value in DoosanRobotClient._SERVICES.values())
+    pose = DsrPos(467., -42., 230., 10., 165., 20.)
+    base = MotionCommand(MotionType.MOVE_LINE, pose, 30., 100., Phase.APPROACH, False)
+    commands = [base, base, base, replace(base, pen_down=True, via=pose, spline=[pose, pose])]
+    reachable = Rotation.from_euler("ZYZ", roll_pose(pose, 45).to_list()[3:], degrees=True)
+
+    def inverse(target):
+        rotation = Rotation.from_euler("ZYZ", target.to_list()[3:], degrees=True)
+        # 처음 두 수직 접근과 +45도 후보만 가능한 가짜 로봇이다.
+        original = Rotation.from_euler("ZYZ", pose.to_list()[3:], degrees=True)
+        if (rotation.inv() * reachable).magnitude() < 1e-6:
+            return [0., 0., 90., 0., 90., 20.]
+        # 접근점은 별도 위치로 구분한다.
+        if target.z == 250.:
+            return [0., 0., 90., 0., 90., 0.]
+        return None
+
+    commands[0] = replace(base, pos=replace(pose, z=250.))
+    commands[1] = commands[0]
+    selected = select_side_roll(commands, [0., 0., 90., 0., 90., 0.], inverse)
+    assert selected[0] is commands[0]
+    for target in (selected[2].pos, selected[3].via, *selected[3].spline):
+        rotation = Rotation.from_euler("ZYZ", target.to_list()[3:], degrees=True)
+        original = Rotation.from_euler("ZYZ", pose.to_list()[3:], degrees=True)
+        assert np.allclose(rotation.apply([0,0,1]), original.apply([0,0,1]))
+        assert target.to_list()[:3] == pose.to_list()[:3]
+
+
+def test_roll_selection_rejects_path_when_only_start_is_reachable():
+    """처음만 도달하고 이후 그리기 점이 불가능하면 이동 전에 거부한다."""
+    from dataclasses import replace
+    from cake_decorator.drawing_motion import DsrPos, MotionCommand, Phase
+    from cake_decorator.side_pose_selection import select_side_roll
+
+    base = MotionCommand(MotionType.MOVE_LINE, DsrPos(400., 0., 250., 0., 165., 0.), 30., 100., Phase.APPROACH, False)
+    commands = [base, base, base, replace(base, pos=replace(base.pos, z=200.), pen_down=True)]
+    def inverse(target):
+        return [0., 0., 90., 0., 90., 0.] if target.z > 200. else None
+    with pytest.raises(RuntimeError, match="대표 목표"):
+        select_side_roll(commands, [0., 0., 90., 0., 90., 0.], inverse)
+
+
+def test_side_precheck_thins_dense_samples_but_keeps_command_boundaries():
+    """촘촘한1600개 점을 줄이되 최초 기울이기·획 경계·원호 경유점은 보존한다."""
+    from dataclasses import replace
+    from cake_decorator.drawing_motion import DsrPos, MotionCommand, Phase
+    from cake_decorator.side_pose_selection import sampled_command_points
+
+    initial = DsrPos(400., 0., 230., 0., 160., 0.)
+    command = MotionCommand(MotionType.MOVE_LINE, initial, 60., 300., Phase.APPROACH, False)
+    samples = [replace(initial, x=400. + i * 0.01) for i in range(1600)]
+    spline = replace(command, motion_type=MotionType.MOVE_SPLINE,
+                     pos=samples[-1], spline=samples, pen_down=True)
+    via = replace(initial, y=10.)
+    arc = replace(command, motion_type=MotionType.MOVE_CIRCLE,
+                  pos=replace(initial, y=20.), via=via)
+    selected = sampled_command_points([command, command, command, spline, arc])
+    assert len(selected) < 120
+    assert samples[0] in selected and samples[-1] in selected
+    assert initial in selected and via in selected and arc.pos in selected
+
+
+def test_released_defaults_match_verified_seventeen_degrees_and_one_mm_clearance():
+    """배포 기본값은 실기17도와 반지름1mm 보정을 사용한다."""
+    rclpy.init()
+    value = DrawingPathNode()
+    try:
+        assert value._param("side_pen_vertical_deg") == 17.0
+        assert value._param("side_diameter_allowance_mm") / 2 == 1.0
+    finally:
+        value.destroy_node()
+        rclpy.try_shutdown()

@@ -160,3 +160,45 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
         )
         for group in split_spline_samples(list(zip(samples, arcs)))
     ]
+
+
+def side_clearance_leg(cake, start, end, clearance_mm):
+    """펜을 뗀 획 사이 이동을 상면 위·최대 반지름 밖에서 구성한다.
+
+    높이가 다른 두 점을 미세 원호·수직 이동 수백 개로 나누지 않는다.
+    짧은 각도는 원의 두 접선으로 돌아가므로 현으로 내부를 통과하지 않는다.
+    """
+    if not math.isfinite(clearance_mm) or clearance_mm <= 0:
+        raise ValueError("공중 이동 여유 거리는 양수여야 합니다.")
+    radius = max(cake.r_top, cake.r_bottom) + cake.radial_offset_mm + clearance_mm
+    z = cake.cz + cake.height + clearance_mm
+    arc0, arc1 = start[0], end[0]
+    theta0, theta1 = arc0 / cake.radius, arc1 / cake.radius
+    count = max(1, math.ceil(abs(theta1 - theta0) / (math.pi / 2)))
+
+    def point(theta, distance=radius):
+        angle = theta + cake.yaw
+        return (cake.cx + distance * math.cos(angle),
+                cake.cy + distance * math.sin(angle), z)
+
+    moves = [SurfaceMove(point(theta0), arc0)]
+    previous = theta0
+    for i in range(1, count + 1):
+        theta = theta0 + (theta1 - theta0) * i / count
+        if abs(theta - previous) < 1e-10:
+            continue
+        mid = (previous + theta) / 2
+        if abs(theta - previous) < math.radians(5):
+            # 작은 원호 대신 두 접선의 교점을 경유한다. 선분 전체가 원 밖이다.
+            corner_radius = radius / math.cos((theta - previous) / 2)
+            moves.append(SurfaceMove(point(mid, corner_radius), mid * cake.radius))
+            moves.append(SurfaceMove(point(theta), theta * cake.radius))
+        else:
+            moves.append(SurfaceMove(
+                end=point(theta), arc_mm=theta * cake.radius,
+                via=point(mid), via_arc_mm=mid * cake.radius,
+                start_angle=previous, end_angle=theta,
+            ))
+        previous = theta
+    moves.append(SurfaceMove(cake.side_abs_with_offset(*end, clearance_mm), arc1))
+    return moves

@@ -6,12 +6,17 @@
 """
 
 import math
+from dataclasses import dataclass
 
 from .drawing_geometry import FrustumCake, pixel_to_mm_side
 
 
+@dataclass(frozen=True)
 class DrawingFrustum(FrustumCake):
     """높이와 무관한 호 좌표를 소비하는 실행용 형상. 원본 형상 API와 분리한다."""
+
+    # 실제 형상과 픽셀 매핑은 유지하고 옆면 목표의 반지름만 보정한다(mm).
+    radial_offset_mm: float = 0.0
 
     @property
     def radius(self):
@@ -21,7 +26,13 @@ class DrawingFrustum(FrustumCake):
     def side_to_abs(self, arc_mm, height_mm):
         """고정 기준 호 좌표를 해당 높이의 실제 표면 좌표(mm)로 바꾼다."""
         local_arc = arc_mm / self.radius * self.radius_at(height_mm)
-        return FrustumCake.side_to_abs(self, local_arc, height_mm)
+        point = FrustumCake.side_to_abs(self, local_arc, height_mm)
+        theta = arc_mm / self.radius + self.yaw
+        return (
+            point[0] + self.radial_offset_mm * math.cos(theta),
+            point[1] + self.radial_offset_mm * math.sin(theta),
+            point[2],
+        )
 
     def side_outward_normal(self, arc_mm, height_mm=None):
         """경사각·yaw를 포함한 단위 법선. 같은 각도의 법선은 높이와 무관하다."""

@@ -23,9 +23,9 @@ def test_short_top_lines_accelerate_faster_without_changing_geometry():
     top, side = plan("TOP"), plan("SIDE")
     assert top.success and side.success
 
-    # 접촉 전후의 두 직선만 빨라지고 옆면은 기존 값을 그대로 사용한다.
+    # 접촉 전후의 두 직선만 빨라지고 접촉·이탈은 기존 값을 사용한다.
     assert [c.acc for c in top.commands] == [100.0, 100.0, 300.0, 300.0, 100.0]
-    assert [c.acc for c in side.commands] == [100.0] * 5
+    assert [c.acc for c in side.commands] == [100.0, 100.0, 300.0, 300.0, 100.0]
     assert top.total_strokes == side.total_strokes == 1
 
     # 속도 조정으로 경로·선속도·획 경계가 달라지지 않아야 한다.

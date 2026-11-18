@@ -541,6 +541,23 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
+        if request.drawing_surface == 'SIDE':
+            try:
+                plan.commands = self._robot.select_reachable_side_commands(
+                    plan.commands, lambda: goal_handle.is_cancel_requested,
+                )
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(f'옆면 자세 선택 실패: {error}')
+                result.success = False
+                result.completed_strokes = 0
+                if goal_handle.is_cancel_requested:
+                    result.error_code = 'CANCELLED'
+                    goal_handle.canceled()
+                else:
+                    result.error_code = 'SIDE_POSE_UNREACHABLE'
+                    goal_handle.abort()
+                return result
+
         # 명령 실행
         total = len(plan.commands)
         completed_strokes = 0
