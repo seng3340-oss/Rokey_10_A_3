@@ -12,16 +12,19 @@ TM(task_manager)에서 ExecuteTask Goal을 보내면 전체 작업 흐름을
 from __future__ import annotations
 
 import traceback
+import threading
 
 import rclpy
 from rclpy.action import ActionServer, GoalResponse, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from std_srvs.srv import Trigger
 
 from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
 from .doosan_robot import DoosanRobotClient
+from .plate_sequence import PlateSequence
 from .drawing_motion import (
     DsrPos,
     TaskState,
@@ -37,6 +40,42 @@ class RobotExecutorNode(Node):
 
     # 파라미터 기본값
     _PARAM_DEFAULTS = {
+        'plate_sequence_enabled': False,  # [변경] 기본 비활성: 실물 충돌 검증 전 작동 금지
+        'opener_grip_width_mm': 10.0,
+        'opener_grip_force_n': 20.0,
+        'opener_open_width_mm': 100.0,
+        'opener_close_wait_sec': 0.5,
+        'opener_close_settle_sec': 0.5,
+        'opener_open_wait_sec': 1.0,
+        'opener_pre_open_wait_sec': 1.0,  # [변경] pick 전 열림 안정화
+        'plate_safe_position_1': [35.0, 40.0, 35.0, -20.0, 120.0, 120.0],
+        'plate_pick_opener1': [426.73, 252.72, 379.41, 30.09, 179.36, 28.13],
+        'plate_pick_opener2': [0.0, 0.0, -100.0, 0.0, 0.0, 0.0],
+        'plate_move_cake_ps_l': [426.73, 252.72, 379.41, 30.09, 179.36, 28.13],
+        'plate_move_cake_ps_l2': [606.73, 252.72, 379.41, 30.09, 179.36, 28.13],
+        'plate_move_cake_plate_ps1': [-0.12, 38.25, 45.36, 0.15, 96.65, -0.02],
+        'plate_move_cake_plate_ps2': [0.0, 0.0, 0.0, 0.0, -7.0, 0.0],
+        'plate_move_cake_plate_ps3': [-0.15, 34.97, 45.68, 0.15, 88.96, -0.02],
+        'plate_move_cake_plate_ps4': [0.0, 0.0, 80.0, 0.0, 0.0, 0.0],
+        'plate_safe_position_2': [35.0, 40.0, 35.0, -20.0, 120.0, 120.0],
+        'plate_cake_station_ps1': [6.75, 25.95, 57.94, -7.64, 109.05, 140.45],
+        'plate_cake_station_ps2': [6.76, 26.11, 62.27, -7.39, 105.25, 140.45],
+        'plate_cake_station_ps3': [8.14, 23.79, 66.06, -5.0, 97.29, 145.51],
+        'plate_cake_station_ps4': [13.26, 24.26, 62.83, -3.12, 93.19, 138.85],
+        'plate_safe_position_3': [35.0, 40.0, 35.0, -20.0, 120.0, 120.0],
+        'plate_pickup_cake_station_ps1': [13.26, 24.26, 62.83, -3.12, 93.19, 138.85],
+        'plate_pickup_cake_station_ps2': [8.14, 23.79, 66.06, -5.0, 97.29, 145.51],
+        'plate_pickup_cake_station_ps3': [10.23, 28.3, 60.43, -11.81, 107.74, 145.51],
+        'plate_pickup_cake_station_ps4': [10.08, 25.88, 55.17, -12.15, 111.92, 145.51],
+        'plate_safe_position_4': [35.0, 40.0, 35.0, -20.0, 120.0, 120.0],
+        'plate_deliver_cake_station_ps1': [-0.17, 41.12, 21.84, 0.16, 106.65, 0.01],
+        'plate_deliver_cake_station_ps2': [0.5, 33.55, 47.47, -1.71, 87.35, 1.79],
+        'plate_deliver_cake_station_ps3': [0.86, 36.47, 48.75, -2.0, 86.71, -0.01],
+        'plate_deliver_cake_station_ps4': [-0.09, 32.95, 54.3, 0.15, 93.31, -0.02],
+        'plate_deliver_cake_station_ps5': [0.0, 0.0, 80.0, 0.0, 0.0, 0.0],
+        'plate_safe_position_5': [35.0, 40.0, 35.0, -20.0, 120.0, 120.0],
+        'plate_deliver_opener_ps1': [426.73, 252.72, 379.41, 30.09, 179.36, 28.13],
+        'plate_deliver_opener_ps2': [0.0, 0.0, -100.0, 0.0, 0.0, 0.0],
         'service_timeout': 5.0,
         'pen_grip_width': 10.0,    # mm
         'pen_grip_force': 20.0,    # N
@@ -57,6 +96,9 @@ class RobotExecutorNode(Node):
             self,
             service_timeout=self._param('service_timeout'),
         )
+
+        # 기존 로봇 클라이언트를 공유하여 플레이트 시퀀스를 실행합니다.
+        self._plate_sequence = PlateSequence(self._robot, self._param)
 
         # 콜백 그룹
         self._cb = ReentrantCallbackGroup()
@@ -82,9 +124,42 @@ class RobotExecutorNode(Node):
             )
             self._action_servers.append(srv)
 
+        # 기존 액션을 유지하며 준비/후처리 작업만 서비스로 추가.
+        # 두 요청의 동시 실행을 방지한다. 드로잉 중에는 Task Manager가 요청하지 않는다.
+        self._plate_lock = threading.Lock()
+        self._plate_prepare_srv = self.create_service(
+            Trigger, 'plate_prepare', self._execute_plate_prepare, callback_group=self._cb)
+        self._plate_finish_srv = self.create_service(
+            Trigger, 'plate_finish', self._execute_plate_finish, callback_group=self._cb)
         self.get_logger().info(
             'robot_executor_node 시작 — 상태 머신 + 액션 서버 대기 중'
         )
+
+    def _plate_run(self, response, phase: str, callback):
+        if not self._param('plate_sequence_enabled'):
+            response.success = False
+            response.message = 'plate_sequence_enabled=false: 플레이트 시퀀스 비활성(기존 드로잉만 실행).' 
+            return response
+        if not self._plate_lock.acquire(blocking=False):
+            response.success = False
+            response.message = '다른 플레이트 작업 실행 중'
+            return response
+        try:
+            response.success = bool(callback())
+            response.message = f'{phase} 완료' if response.success else f'{phase} 이동/그리퍼 실패, 즉시 중단'
+        except Exception as exc:
+            self.get_logger().error(f'{phase} 예외: {exc}\n{traceback.format_exc()}')
+            response.success = False
+            response.message = f'{phase} 예외: {exc}'
+        finally:
+            self._plate_lock.release()
+        return response
+
+    def _execute_plate_prepare(self, request, response):
+        return self._plate_run(response, '드로잉 준비', self._plate_sequence._plate_prepare_steps)
+
+    def _execute_plate_finish(self, request, response):
+        return self._plate_run(response, '드로잉 후처리', self._plate_sequence._plate_finish_steps)
 
     # ------------------------------------------------------------------
     # 파라미터 헬퍼

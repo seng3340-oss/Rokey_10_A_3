@@ -449,6 +449,7 @@ class DoosanRobotClient:
         speed_deg_s: float = 30.0,
         acc_deg_s2: float = 30.0,
         sync: bool = True,
+        mode: int = DR_MV_MOD_ABS,
     ) -> bool:
         """관절 이동 (MoveJoint).
 
@@ -457,6 +458,7 @@ class DoosanRobotClient:
         joints : 6축 관절 각도 (°)
         speed_deg_s : 각속도 (°/s)
         acc_deg_s2 : 각가속도 (°/s²)
+        mode : 절대(0, 기존 기본값) / 상대(1). [변경 2026-11-18]
         """
         req = MoveJoint.Request()
         req.pos = joints
@@ -464,7 +466,7 @@ class DoosanRobotClient:
         req.acc = acc_deg_s2
         req.time = 0.0
         req.radius = 0.0
-        req.mode = DR_MV_MOD_ABS
+        req.mode = mode  # [변경 2026-11-18] 기존 절대 이동 호출과 호환
         req.blend_type = 0
         req.sync_type = SYNC if sync else ASYNC
         return self._call_checked("move_joint", req)
@@ -564,6 +566,9 @@ class DoosanRobotClient:
         open_width: float = 100.0,
         speed_approach: float = 80.0,
         speed_slow: float = 30.0,
+        close_wait_sec: float = 0.0,
+        close_settle_sec: float = 0.0,
+        pre_open_wait_sec: float = 0.0,
     ) -> bool:
         """접근 → 그리퍼 열기 → 하강 → 그리퍼 닫기 → 들어올리기.
 
@@ -577,10 +582,19 @@ class DoosanRobotClient:
         """
         if not self.move_line(approach, speed_mm_s=speed_approach):
             return False
-        self.gripper_open(open_width)
+        if not self.gripper_open(open_width):
+            return False
+        # [변경] 오프너 접근 전 열림 완료 대기. 기본 0초로 기존 호출 호환.
+        import time
+        time.sleep(max(0.5, pre_open_wait_sec))
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
-        self.gripper_close(grip_width, grip_force)
+        if not self.gripper_close(grip_width, grip_force):
+            return False
+        # [변경 2026-11-18] 오프너 원본의 닫힘 대기시간. 기존 호출 기본값은 0초.
+        import time
+        time.sleep(max(0.0, close_wait_sec))
+        time.sleep(max(0.0, close_settle_sec))
         if not self.move_line(approach, speed_mm_s=speed_slow):
             return False
         return True
@@ -593,6 +607,7 @@ class DoosanRobotClient:
         speed_approach: float = 80.0,
         speed_slow: float = 30.0,
         speed_retract: float = 50.0,
+        open_wait_sec: float = 0.0,
     ) -> bool:
         """접근 → 하강 → 그리퍼 열기 → 후퇴.
 
@@ -605,7 +620,11 @@ class DoosanRobotClient:
             return False
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
-        self.gripper_open(open_width)
+        if not self.gripper_open(open_width):
+            return False
+        # [변경 2026-11-18] 오프너 원본의 열림 대기시간. 기존 호출 기본값은 0초.
+        import time
+        time.sleep(max(0.0, open_wait_sec))
         if not self.move_line(approach, speed_mm_s=speed_retract):
             return False
         return True

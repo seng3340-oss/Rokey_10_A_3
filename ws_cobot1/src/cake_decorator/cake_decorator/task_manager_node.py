@@ -11,6 +11,7 @@ from rclpy.action import ActionServer, ActionClient, GoalResponse, CancelRespons
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from std_srvs.srv import Trigger
 
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Pose, Point, Quaternion
@@ -26,7 +27,9 @@ from cake_decorator_interfaces.srv import GenerateTrajectory
 
 
 class Phase(str, Enum):
+    PREPARING = 'PREPARING'  # [변경 2026-11-18] 드로잉 전 플레이트 준비
     DRAWING = 'DRAWING'
+    FINISHING = 'FINISHING'  # [변경] 드로잉 후 회수·출고·오프너 반환
     COMPLETED = 'COMPLETED'
     FAILED = 'FAILED'
     CANCELED = 'CANCELED'
@@ -39,6 +42,7 @@ class TaskManagerNode(Node):
         super().__init__('task_manager_node')
 
         # ── 파라미터 ──
+        self.declare_parameter('plate_sequence_enabled', False)  # 기본 비활성, 명시적 검증 후 활성화
         self.declare_parameter('drawing_speed', 30.0)     # mm/s, DP 기본값과 통일
         self.declare_parameter('contact_force', 1.0)      # N
         # DP로 넘길 작업 속도 퍼센트. 0을 그대로 보내면 DP가 1%로
@@ -66,6 +70,12 @@ class TaskManagerNode(Node):
             self, DrawOnCake, 'draw_on_cake',
             callback_group=self._cb,
         )
+
+        # [변경 2026-11-18] 기존 드로잉 액션은 유지하고 플레이트 전/후 서비스 추가.
+        self._plate_prepare_client = self.create_client(
+            Trigger, 'plate_prepare', callback_group=self._cb)
+        self._plate_finish_client = self.create_client(
+            Trigger, 'plate_finish', callback_group=self._cb)
 
         # ── GenerateTrajectory 서비스 클라이언트 ──
         self._gen_traj_client = self.create_client(
@@ -121,12 +131,29 @@ class TaskManagerNode(Node):
             if self._check_cancel(goal_handle):
                 return self._cancel(goal_handle, result, start_time)
 
+            # [변경 2026-11-18] 원본 plate 시퀀스를 드로잉 앞/뒤로 분리.
+            if self.get_parameter('plate_sequence_enabled').value:
+                self._set_phase(Phase.PREPARING, goal_handle, 0.0, '플레이트 준비')
+                if not self._run_plate_service(self._plate_prepare_client, '드로잉 준비'):
+                    return self._fail(goal_handle, result, 'PLATE_PREPARE_FAILED',
+                                      '플레이트 준비 실패', start_time)
+                if self._check_cancel(goal_handle):
+                    return self._cancel(goal_handle, result, start_time)
+
             self._set_phase(Phase.DRAWING, goal_handle, 0.0, '드로잉 시작')
 
             ok = self._execute_drawing(request, goal_handle)
             if not ok:
                 return self._fail(goal_handle, result, 'DRAWING_FAILED',
                                   '드로잉 실패', start_time)
+
+            if self.get_parameter('plate_sequence_enabled').value:
+                if self._check_cancel(goal_handle):
+                    return self._cancel(goal_handle, result, start_time)
+                self._set_phase(Phase.FINISHING, goal_handle, 90.0, '플레이트 회수 및 출고')
+                if not self._run_plate_service(self._plate_finish_client, '드로잉 후처리'):
+                    return self._fail(goal_handle, result, 'PLATE_FINISH_FAILED',
+                                      '플레이트 후처리 실패', start_time)
 
             # ── 완료 ──
             self._set_phase(Phase.COMPLETED, goal_handle, 100.0, '완료')
@@ -152,6 +179,24 @@ class TaskManagerNode(Node):
         finally:
             self._is_busy = False
             self._current_order_id = None
+
+    def _run_plate_service(self, client, phase: str) -> bool:
+        """[변경 2026-11-18] Robot Executor에 작업 단위 요청. TM은 좌표를 다루지 않는다."""
+        if not client.wait_for_service(timeout_sec=10.0):
+            self.get_logger().error(f'{phase}: 서비스 연결 실패')
+            return False
+        future = client.call_async(Trigger.Request())
+        # 기존 ROS future 대기 헬퍼 재사용; 플레이트 작업은 드로잉보다 길 수 있음.
+        try:
+            self._wait_future(future, 300.0)
+            result = future.result()
+            if result is None or not result.success:
+                self.get_logger().error(f'{phase}: {getattr(result, "message", "응답 없음")}')
+                return False
+            return True
+        except Exception as exc:
+            self.get_logger().error(f'{phase}: {exc}')
+            return False
 
     # ── 드로잉 실행 (GenerateTrajectory → DrawOnCake) ──
 
