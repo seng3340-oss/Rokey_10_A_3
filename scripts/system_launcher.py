@@ -736,6 +736,13 @@ def main():
             )
             if name == "robot_executor_node" and args.mode == "virtual":
                 command += ["-p", "virtual_initial_approach:=true"]
+            # start_real_pen_cycle.sh로 실행한 경우에만 드로잉 전후 펜 집기·반납을 켠다.
+            # 기존 start_real.sh·start_virtual.sh의 동작은 바뀌지 않는다.
+            if (
+                name == "robot_executor_node"
+                and os.environ.get("CAKE_PEN_TOOL_CYCLE") == "1"
+            ):
+                command += ["-p", "pen_tool_cycle:=true"]
             processes.start(name, command)
         session.ready_application()
         processes.start(

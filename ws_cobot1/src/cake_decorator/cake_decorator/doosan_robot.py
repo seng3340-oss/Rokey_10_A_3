@@ -30,6 +30,7 @@ from dsr_msgs2.srv import (
     GetCurrentPosx,
     GetCurrentPosj,
     GetSolutionSpace,
+    SetCtrlBoxDigitalOutput,
 )
 from rcl_interfaces.srv import GetParameters
 from onrobot_rg_msgs.srv import SetCommand
@@ -58,7 +59,7 @@ class DoosanRobotClient:
     """
 
     # 서비스 이름 상수.
-    # 도선 모션 서비스는 /dsr01 네임스페이스의 dsr_controller2 컨트롤러 노드
+    # 두산 모션 서비스는 /dsr01 네임스페이스의 dsr_controller2 컨트롤러 노드
     # 아래에 등록되므로 실제 경로는 '/dsr01/dsr_controller2/motion/...'이다
     # (가상 에뮬레이터에서 ros2 service list로 확인). '/dsr01/motion/...'으로
     # 두면 클라이언트가 서비스를 찾지 못해 모션이 한 번도 실행되지 않는다.
@@ -85,6 +86,10 @@ class DoosanRobotClient:
         "move_spline": (
             "/dsr01/dsr_controller2/motion/move_spline_task",
             MoveSplineTask,
+        ),
+        "set_digital_output": (
+            "/dsr01/dsr_controller2/io/set_ctrl_box_digital_output",
+            SetCtrlBoxDigitalOutput,
         ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
     }
@@ -456,27 +461,57 @@ class DoosanRobotClient:
         return self._call_checked("move_spline", req)
 
     # ------------------------------------------------------------------
-    # 그리퍼 제어
+    # 그리퍼 제어 (제어박스 Digital Output)
     # ------------------------------------------------------------------
 
+    # 그리퍼 개폐 펄스 유지 시간(초)
+    _GRIPPER_PULSE_SEC = 0.5
+
+    def set_digital_output(self, index: int, value: int) -> bool:
+        """제어박스 디지털 출력(DO) 상태를 설정한다.
+
+        Parameters
+        ----------
+        index : 제어박스 DO 포트 번호 (1~16)
+        value : 출력 값 (1=ON, 0=OFF)
+
+        Returns
+        -------
+        서비스 호출 성공 여부
+        """
+        req = SetCtrlBoxDigitalOutput.Request()
+        req.index = index
+        req.value = value
+        return self._call_checked("set_digital_output", req)
+
     def gripper_open(self, width_mm: float = 100.0) -> bool:
-        """그리퍼 열기. RG2 최대 110mm."""
-        return self._gripper_command(f"open({width_mm})")
+        """그리퍼 열기 (제어박스 DO 1번 펄스 출력).
+
+        Parameters
+        ----------
+        width_mm : 기존 호출부 호환을 위한 열림 폭 인자 (DO 제어에서는 미사용)
+        """
+        del width_mm
+        # 1번 포트를 0.5초간 ON 후 OFF 하여 열림 신호를 전달한다.
+        if not self.set_digital_output(2, 1):
+            return False
+        time.sleep(self._GRIPPER_PULSE_SEC)
+        return self.set_digital_output(2, 0)
 
     def gripper_close(self, width_mm: float = 10.0, force_n: float = 20.0) -> bool:
-        """그리퍼 닫기. RG2 범위: 3~40N."""
-        return self._gripper_command(f"close({width_mm},{force_n})")
+        """그리퍼 닫기 (제어박스 DO 2번 펄스 출력).
 
-    def _gripper_command(self, command: str) -> bool:
-        """OnRobot RG2 SetCommand 서비스 호출."""
-        req = SetCommand.Request()
-        req.command = command
-        result = self._call("gripper", req)
-        if result is None:
+        Parameters
+        ----------
+        width_mm : 기존 호출부 호환을 위한 파지 폭 인자 (DO 제어에서는 미사용)
+        force_n : 기존 호출부 호환을 위한 파지 힘 인자 (DO 제어에서는 미사용)
+        """
+        del width_mm, force_n
+        # 2번 포트를 0.5초간 ON 후 OFF 하여 닫힘 신호를 전달한다.
+        if not self.set_digital_output(1, 1):
             return False
-        if not result.success:
-            self._logger.warn(f"그리퍼 명령 실패: {command} → {result.message}")
-        return result.success
+        time.sleep(self._GRIPPER_PULSE_SEC)
+        return self.set_digital_output(1, 0)
 
     # ------------------------------------------------------------------
     # 상태 확인
@@ -489,7 +524,7 @@ class DoosanRobotClient:
         -------
         모든 서비스 연결 성공 여부
         """
-        required = ["move_line", "move_joint", "gripper"]
+        required = ["move_line", "move_joint", "set_digital_output"]
         for key in required:
             if not self._clients[key].wait_for_service(timeout_sec=timeout):
                 self._logger.error(f"{key} 서비스를 찾을 수 없습니다.")
