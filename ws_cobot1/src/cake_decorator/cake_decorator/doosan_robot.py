@@ -32,6 +32,7 @@ from dsr_msgs2.srv import (
     GetCurrentPosx,
     GetCurrentPosj,
     GetSolutionSpace,
+    GetWorkpieceWeight,
     SetCtrlBoxDigitalOutput,
 )
 from rcl_interfaces.srv import GetParameters
@@ -155,6 +156,9 @@ class DoosanRobotClient:
         "set_digital_output": (
             "/dsr01/dsr_controller2/io/set_ctrl_box_digital_output",
             SetCtrlBoxDigitalOutput,
+        ),
+        "get_workpiece_weight": (
+            "/dsr01/dsr_controller2/force/get_workpiece_weight", GetWorkpieceWeight,
         ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
     }
@@ -526,6 +530,20 @@ class DoosanRobotClient:
         req.blend_type = 0
         req.sync_type = SYNC if sync else ASYNC
         return self._call_checked("move_joint", req)
+
+    def get_workpiece_weight(self) -> float | None:
+        """작업물 추정 하중을 읽습니다. 실패하면 None을 반환합니다.
+
+        서비스의 실제 단위와 저중량 측정 가능 범위는 실물 장비에서 확인해야 합니다.
+        """
+        response = self._call('get_workpiece_weight', GetWorkpieceWeight.Request(), timeout=10.0)
+        if response is None:
+            return None
+        weight = float(response.weight)
+        if not math.isfinite(weight) or weight < 0.0:
+            self._logger.error(f'하중 측정 오류: {weight}')
+            return None
+        return weight
 
     def move_home(self) -> bool:
         """홈 위치로 이동."""

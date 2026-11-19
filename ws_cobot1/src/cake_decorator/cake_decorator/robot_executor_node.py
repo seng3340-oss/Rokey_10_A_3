@@ -41,6 +41,11 @@ class RobotExecutorNode(Node):
 
     # 파라미터 기본값
     _PARAM_DEFAULTS = {
+        'plate_weight_check_enabled': False,  # 실물 검증 전 OFF
+        'plate_opener_weight_kg': 0.05,  # 예시값: 실측 필요
+        'plate_cake_weight_kg': 0.20,  # 예시값: 실측 필요
+        'plate_weight_tolerance_percent': 10.0,
+        'plate_weight_wait_sec': 3.0,
         'plate_sequence_enabled': False,  # [변경] 기본 비활성: 실물 충돌 검증 전 작동 금지
         'opener_grip_width_mm': 10.0,
         'opener_grip_force_n': 20.0,
