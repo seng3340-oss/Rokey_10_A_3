@@ -121,7 +121,9 @@ def split_spline_samples(samples):
     return result
 
 
-def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
+def continuous_side_leg(
+    cake, start, end, offset_mm=0.0, max_angle_deg=1.0, max_height_mm=0.5,
+):
     """원통 반지름을 유지하며 각도와 높이를 함께 변화시킨 표본을 생성한다.
 
     movesx는 표본 사이를 자체 보간한다. 이 함수는 목표점의 표면 일치만 보장하며
@@ -129,7 +131,7 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
     """
     if not all(
         math.isfinite(v)
-        for v in (*start, *end, cake.radius, cake.height, offset_mm, max_angle_deg)
+        for v in (*start, *end, cake.radius, cake.height, offset_mm, max_angle_deg, max_height_mm)
     ):
         raise ValueError("연속 표면 입력은 유한 값이어야 합니다.")
     if (
@@ -137,6 +139,7 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
         or cake.height <= 0
         or offset_mm < 0
         or not 0 < max_angle_deg <= 5
+        or not 0 < max_height_mm <= 1.0
     ):
         raise ValueError("연속 표면 치수·오프셋·각도 간격이 유효하지 않습니다.")
     if not all(0 <= point[1] <= cake.height for point in (start, end)):
@@ -145,7 +148,7 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
     count = max(
         2,
         math.ceil(abs(delta_arc / cake.radius) / math.radians(max_angle_deg)),
-        math.ceil(abs(delta_height) / 0.5),
+        math.ceil(abs(delta_height) / max_height_mm),
     )
     if count > 4096:
         raise ValueError("연속 옆면 표본 한도를 초과했습니다.")
@@ -160,3 +163,45 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
         )
         for group in split_spline_samples(list(zip(samples, arcs)))
     ]
+
+
+def side_clearance_leg(cake, start, end, clearance_mm):
+    """케이크 위로 상승하지 않고 바깥 원주에서 다음 획 높이로 연속 이동한다.
+
+    먼저 현재 높이에서 최대 반지름 밖으로 빠진다. 각도와 높이를 함께
+    보간한 뒤 다음 획의 바깥 접근점으로 들어간다. 원을 가로지르는 현은 쓰지 않는다.
+    """
+    if not math.isfinite(clearance_mm) or clearance_mm <= 0:
+        raise ValueError("공중 이동 여유 거리는 양수여야 합니다.")
+    if not all(math.isfinite(v) for v in (*start, *end)):
+        raise ValueError("획 사이 좌표는 유한해야 합니다.")
+    if not all(0 <= value[1] <= cake.height for value in (start, end)):
+        raise ValueError("획 사이 높이가 케이크 범위 밖입니다.")
+    radius = max(cake.r_top, cake.r_bottom) + cake.radial_offset_mm + clearance_mm
+    arc0, arc1 = start[0], end[0]
+    theta0, theta1 = arc0 / cake.radius, arc1 / cake.radius
+    z0 = cake.side_abs_with_offset(*start, clearance_mm)[2]
+    z1 = cake.side_abs_with_offset(*end, clearance_mm)[2]
+
+    def point(theta, z):
+        angle = theta + cake.yaw
+        return (cake.cx + radius * math.cos(angle),
+                cake.cy + radius * math.sin(angle), z)
+
+    # 표면에서 떼는 동작은 기존 PEN_UP이 담당한다. 여기서는 같은 높이로 외곽에 맞춘다.
+    moves = [SurfaceMove(point(theta0, z0), arc0)]
+    count = max(2, math.ceil(abs(theta1 - theta0) / math.radians(4)),
+                math.ceil(abs(z1 - z0)))
+    if count > 20000:
+        raise ValueError("획 사이 연속 표본 한도를 초과했습니다.")
+    samples = [
+        (point(theta0 + (theta1 - theta0) * i / count, z0 + (z1 - z0) * i / count),
+         arc0 + (arc1 - arc0) * i / count)
+        for i in range(1, count + 1)
+    ]
+    for group in split_spline_samples(samples):
+        moves.append(SplineSurfaceMove(
+            tuple(sample for sample, _ in group), tuple(arc for _, arc in group),
+        ))
+    moves.append(SurfaceMove(cake.side_abs_with_offset(*end, clearance_mm), arc1))
+    return moves

@@ -5,6 +5,8 @@ string drawing_surface
 float64 contact_force
 # 드로잉 속도 mm/s. waypoint별 speed와 우선순위는 팀 확인 항목이다.
 float64 speed
+# 같은 주문에 다음 면이 남아 있으면 중간 펜 반납 속도를 유지한다.
+bool has_more_surfaces
 ---
 # Result: 끝난 획 개수의 집계 규칙은 원본 획 정보 연결 후 정한다.
 bool success

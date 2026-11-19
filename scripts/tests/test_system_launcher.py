@@ -384,6 +384,73 @@ def test_pending_order_reset_uses_authenticated_resolution_api(tmp_path, monkeyp
     assert json.loads(requests[0].data)["confirmed_not_running"] is True
 
 
+def test_real_defaults_are_configured_without_contact_cli_flags():
+    """실물 실행은 조정한 상면222mm와 YES 후 TCP 설정을 사용한다."""
+    import json
+    config = json.loads((PATH.parents[1] / "config/real_robot.json").read_text())
+    assert config["cake_top_z_mm"] == 222.0
+    assert config["configure_pen_tcp_on_yes"] is True
+    # 확인 전에 거치대 위치를 중심으로 기록하지 않도록 명시한 좌표다.
+    assert config["side_cake_center_xy_mm"] == [
+        396.8743225097656, -50.559329986572266,
+    ]
+
+
+def test_side_tcp_exit_restore_uses_fresh_process(tmp_path, monkeypatch):
+    """부모 ROS가 종료돼도 같은 검색 환경에서 별도 초기화 프로세스를 실행한다."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="기본 TCP 복원 완료\n"))
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    env = {"ROS_DOMAIN_ID": "30", "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"}
+    launcher.restore_side_tcp_after_exit(
+        SimpleNamespace(host="192.168.1.100", mode="real"), env, tmp_path,
+    )
+    command = run.call_args.args[0]
+    assert "--reset-side-tcp" in command
+    assert "--side-pen-45" not in command
+    assert run.call_args.kwargs["env"] == env
+    assert (tmp_path / "tcp_restore.log").read_text() == "기본 TCP 복원 완료\n"
+
+
+def test_virtual_side_policy_isolates_robot_domain():
+    """가상 옆면 검증은 실물 도메인30과 외부 주소를 사용할 수 없다."""
+    from types import SimpleNamespace
+    import pytest
+
+    args = SimpleNamespace(side_pen_45=True, mode="virtual", domain_id=None, host=None)
+    launcher.configure_side_test(args)
+    assert args.domain_id == 187
+    for fields in ({"domain_id": 30}, {"host": "192.168.1.100"}):
+        args = SimpleNamespace(side_pen_45=True, mode="virtual", domain_id=None, host=None)
+        for key, value in fields.items():
+            setattr(args, key, value)
+        with pytest.raises(ValueError):
+            launcher.configure_side_test(args)
+
+
+def test_tcp_cleanup_runs_after_app_before_owned_driver(tmp_path):
+    """가상 업무 노드를 먼저 끄고 드라이버가 살아 있을 때 TCP를 복원한다."""
+    processes = launcher.Processes(tmp_path, os.environ)
+    try:
+        processes.start("driver", [sys.executable, "-c", "import time; time.sleep(60)"])
+        processes.start("drawing", [sys.executable, "-c", "import time; time.sleep(60)"])
+        driver = processes.children[0][1]
+        drawing = processes.children[1][1]
+        called = []
+
+        def restore():
+            assert drawing.poll() is not None
+            assert driver.poll() is None
+            called.append(True)
+
+        processes.close(grace=.2, terminate_grace=.2, before_driver_close=restore)
+        assert called == [True]
+        assert driver.poll() is not None
+    finally:
+        processes.close(grace=.1, terminate_grace=.1)
+
 
 def _write_cake_files(tmp_path, real_config):
     """기준점 테스트용 real_robot.json과 최소 workspace_config.yaml을 만든다."""

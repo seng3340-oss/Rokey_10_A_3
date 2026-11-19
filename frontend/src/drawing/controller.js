@@ -58,7 +58,7 @@ export function mountDrawing() {
       : p.x >= side.x + 5 &&
           p.x <= side.x + side.width - 5 &&
           p.y >= side.y + 5 &&
-          p.y <= side.y + side.height - 5;
+          p.y <= side.drawableBottomY - 5;
   }
   /** 화면 크기와 무관하게 포인터 위치를 원본 1024×768 캔버스 좌표로 환산한다. */
   function point(e) {
@@ -117,6 +117,16 @@ export function mountDrawing() {
     ctx.setLineDash([7, 8]);
     ctx.stroke();
     ctx.setLineDash([]);
+    if (surface === "side") {
+      // 케이크 전체 비율을 유지하면서 하단 금지 띠를 눈에 보이게 구분한다.
+      const blockedHeight = region.y + region.height - region.drawableBottomY;
+      ctx.fillStyle = "#e8e4df";
+      ctx.fillRect(region.x, region.drawableBottomY, region.width, blockedHeight);
+      ctx.fillStyle = "#746d65";
+      ctx.font = "13px sans-serif";
+      ctx.fillText("하단 1cm · 그릴 수 없는 영역", region.x + 14, region.drawableBottomY + blockedHeight / 2 + 4);
+      // fillRect는 경로를 바꾸지 않으므로 아래 clip은 원래 케이크 외곽을 쓴다.
+    }
     // 점선 내부로 필기 표시를 제한하고, 이후 렌더링에는 클리핑을 남기지 않는다.
     ctx.save();
     ctx.clip();
@@ -212,10 +222,10 @@ export function mountDrawing() {
     render();
   };
   /**
-   * 선택한 한 면만 전송 형식으로 복사한다. 미리보기는 두 면을 보여도 요청은 한 면이다.
+   * 각 면의 원본 획을 전송 형식으로 복사한다. 두 면은 아래에서 한 주문으로 묶는다.
    * 유효 획을 순서대로 재번호화하고, 좌표 정밀도만 소수 셋째 자리로 맞춘다.
    */
-  function payload() {
+  function pathPayload(surface) {
     return {
       canvas_width: 1024,
       canvas_height: 768,
@@ -231,6 +241,16 @@ export function mountDrawing() {
         })),
     };
   }
+  // 한 케이크의 두 면은 주문 하나로 제출한다. 면 안의 획 순서는 유지한다.
+  function payload() {
+    const paths = ["top", "side"]
+      .map(pathPayload)
+      .filter((path) => path.strokes.length > 0);
+    if (!paths.length) return null;
+    return paths.length === 2
+      ? { ...paths[0], additional_paths: [paths[1]] }
+      : paths[0];
+  }
   // 확인 창을 열 때 요청 사본을 고정해 사용자가 확인한 면과 제출할 면을 일치시킨다.
   document.querySelector("#review").onclick = () => {
     finish();
@@ -238,11 +258,11 @@ export function mountDrawing() {
       document.querySelector("#hint").textContent = "그림을 먼저 그려주세요.";
       return;
     }
-    // 전체 그림이 있더라도 선택 면이 비어 있을 수 있어 제출 시에도 별도로 검사한다.
+    // 두 면의 유효 획을 모아 확인 시점의 주문 사본을 만든다.
     reviewedPayload = payload();
     document.querySelector("#payload-panel").hidden = true;
     document.querySelector("#confirm").disabled = false;
-    document.querySelector("#confirm").textContent = "선택한 면 제작 요청";
+    document.querySelector("#confirm").textContent = "제작 요청";
     modal.showModal();
     if (!review)
       review = cakeView(document.querySelector("#review3d"), textures);
@@ -265,7 +285,7 @@ export function mountDrawing() {
     const result = document.querySelector("#result");
     if (!reviewedPayload?.strokes.length) {
       result.textContent =
-        "선택한 면에 그림이 없습니다. 수정하기에서 그림이 있는 면을 선택해주세요.";
+        "그림을 먼저 그려주세요.";
       return;
     }
     // 응답 대기 중에는 제출과 복귀를 잠시 막아 요청 대상이 바뀌지 않도록 한다.

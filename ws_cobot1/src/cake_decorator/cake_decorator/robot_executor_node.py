@@ -26,6 +26,7 @@ from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
 from .doosan_robot import DoosanRobotClient
 from .plate_sequence import PlateSequence
+from .integrated_pen_cycle import IntegratedPenCycle
 from .drawing_motion import (
     DsrPos,
     TaskState,
@@ -91,10 +92,23 @@ class RobotExecutorNode(Node):
         # /onrobot/sendCommand를 대체 경로로 사용한다.
         'gripper_virtual_fallback': True,
         'approach_height': 0.05,   # m
+        'side_pen_45': False,  # 실물 원주로 확인한 고정 파지 자세 사용
+        'side_return_pen': True,  # 가상 이동 검증에서는 반납·그리퍼 조작 생략
         'virtual_initial_approach': False,  # 실행기가 가상 모드에서만 활성화
         # true면 웹 드로잉 전후에 _do_grasping_tool·_do_returning_tool을 호출한다.
         # scripts/start_real_pen_cycle.sh로 실행할 때만 켜진다.
         'pen_tool_cycle': False,
+        # 주문별 SIDE 집기·펜촉 TCP·반납. TOP/플레이트는 영점 TCP를 유지한다.
+        'integrated_side_cycle': False,
+        # 빈손·도구만 들고 움직이는 구간은 1.5배, 케이크 상하 동작은 감속한다.
+        'free_joint_speed_deg_s': 45.0,
+        'free_joint_acc_deg_s2': 45.0,
+        'free_line_speed_mm_s': 75.0,
+        'free_line_acc_mm_s2': 150.0,
+        'cake_lift_speed_mm_s': 25.0,
+        'cake_lift_acc_mm_s2': 50.0,
+        'cake_seat_joint_speed_deg_s': 15.0,
+        'cake_seat_joint_acc_deg_s2': 15.0,
     }
 
     def __init__(self):
@@ -129,6 +143,7 @@ class RobotExecutorNode(Node):
         )
 
         self._plate_sequence = PlateSequence(self._robot, self._param)
+        self._pen_cycle = IntegratedPenCycle(self._robot, self._param)
 
         # 콜백 그룹
         self._cb = ReentrantCallbackGroup()
@@ -168,13 +183,15 @@ class RobotExecutorNode(Node):
     def _plate_run(self, response, phase: str, callback):
         if not self._param('plate_sequence_enabled'):
             response.success = False
-            response.message = 'plate_sequence_enabled=false: 플레이트 시퀀스 비활성(기존 드로잉만 실행).' 
+            response.message = 'plate_sequence_enabled=false: 플레이트 시퀀스 비활성(기존 드로잉만 실행).'
             return response
         if not self._plate_lock.acquire(blocking=False):
             response.success = False
             response.message = '다른 플레이트 작업 실행 중'
             return response
         try:
+            # 플레이트 좌표는 팀 플랜지 영점 티칭이므로 펜촉 TCP를 허용하지 않는다.
+            self._pen_cycle.ensure_default()
             response.success = bool(callback())
             response.message = f'{phase} 완료' if response.success else f'{phase} 이동/그리퍼 실패, 즉시 중단'
         except Exception as exc:
@@ -182,6 +199,12 @@ class RobotExecutorNode(Node):
             response.success = False
             response.message = f'{phase} 예외: {exc}'
         finally:
+            try:
+                self._pen_cycle.ensure_default(stop_running=not response.success)
+            except Exception as exc:
+                response.success = False
+                response.message = f'{phase} TCP 복원 실패: {exc}'
+                self.get_logger().error(response.message)
             self._plate_lock.release()
         return response
 
@@ -478,7 +501,12 @@ class RobotExecutorNode(Node):
                 f'{cmd.phase.value} pos={cmd.pos.to_list()}'
             )
 
-            if not self._execute_motion_command(cmd, i):
+            if not self._execute_motion_command(
+                cmd, i,
+                side_45=(surface == 'SIDE' and (
+                    self._param('side_pen_45') or self._param('integrated_side_cycle')
+                )),
+            ):
                 self._fail(f'{cmd.motion_type.value} 실패 (#{i})')
                 return False
 
@@ -611,12 +639,32 @@ class RobotExecutorNode(Node):
     # 공통 액션 콜백
     # ==================================================================
 
-    def _execute_motion_command(self, command, index):
+    def _execute_motion_command(self, command, index, *, side_45=None):
         """가상 첫 접근의 특이점 보완만 분리하며 획 완료·취소 판단은 유지한다."""
+        # 액션은 요청 면에서 계산한 값을 명시한다. TOP에 전역 SIDE 설정이 새지 않는다.
+        # 생략값은 기존 독립 시험 호출과의 호환을 위한 것이다.
+        if side_45 is None:
+            side_45 = bool(self._param('side_pen_45'))
+        if index == 0 and side_45:
+            from dsr_msgs2.srv import GetCurrentPosx
+
+            current = self._robot._call('current_pose', GetCurrentPosx.Request(ref=0))
+            if current is None or not current.success or not current.task_pos_info:
+                return False
+            raised = list(current.task_pos_info[0].data[:6])
+            raised[2] = max(raised[2] + 50., command.pos.z)
+            if not self._robot.move_line(DsrPos(*raised), speed_mm_s=80., acc_mm_s2=200.):
+                return False
+            if not self._robot.verify_pose(raised):
+                return False
+            # 첫 이탈 중 취소되었으면 이어지는 케이크 접근을 보내지 않는다.
+            if getattr(self, '_cancel_requested', False):
+                return False
         if (
             index == 0
             and not command.pen_down
             and self._param('virtual_initial_approach')
+            and not side_45
         ):
             self.get_logger().info('가상 첫 접근: 현재 자세로 이탈 후 movejx로 접근합니다.')
             return self._robot.prepare_virtual_approach(command.pos)
@@ -636,138 +684,217 @@ class RobotExecutorNode(Node):
     # ==================================================================
 
     def _execute_draw(self, goal_handle):
-        """DrawOnCake 액션 — 웨이포인트를 하나씩 MoveLine으로 실행."""
+        """TCP 정리를 확인한 뒤에만 액션을 종료한다. 실패 시 펜을 자동 반납하지 않는다."""
+        surface = goal_handle.request.drawing_surface
+        integrated = surface == 'SIDE' and self._param('integrated_side_cycle')
+        side_45 = surface == 'SIDE' and (integrated or self._param('side_pen_45'))
+        top_cycle = surface == 'TOP' and (
+            self._param('pen_tool_cycle') or self._param('integrated_side_cycle')
+        )
+        result = None
+        try:
+            # TOP 경로·팀 거치대는 영점 좌표다. named nonzero TCP를 그대로 쓰지 않는다.
+            if top_cycle:
+                self._pen_cycle.ensure_default()
+            result = self._execute_draw_motion(goal_handle)
+        except Exception as error:
+            self.get_logger().error(f'펜/드로잉 동작 예외: {error}')
+            result = DrawOnCake.Result(success=False, error_code='PEN_OPERATION_FAILED')
+        finally:
+            if side_45 or top_cycle:
+                # 독립 시험만 재시작을 요구한다. 통합 모드는 다음 주문에서 새로 집는다.
+                if side_45:
+                    self._side_pen_returned = not integrated
+                try:
+                    interrupted = result is None or not result.success
+                    if integrated or top_cycle:
+                        self._pen_cycle.ensure_default(stop_running=interrupted)
+                    else:
+                        self._robot.reset_default_tcp(stop_running=interrupted)
+                except Exception as error:
+                    self.get_logger().error(f'기본 TCP 복원 실패. 펜던트 확인 필요: {error}')
+                    if result is None:
+                        result = DrawOnCake.Result(success=False)
+                    result.success = False
+                    result.error_code = 'TCP_RESET_FAILED'
+                # 실패/취소 뒤에도 상태 머신 전이 잔재로 다음 주문을 막지 않는다.
+                self._state = TaskState.IDLE
+                self._cancel_requested = False
+
+        # 정리 중 발생한 취소도 성공으로 보고하지 않는다.
+        if result.success and goal_handle.is_cancel_requested:
+            result.success = False
+            result.error_code = 'CANCELLED'
+        if result.success:
+            goal_handle.succeed()
+        elif goal_handle.is_cancel_requested and result.error_code != 'TCP_RESET_FAILED':
+            goal_handle.canceled()
+        else:
+            goal_handle.abort()
+        return result
+
+    def _execute_draw_motion(self, goal_handle):
+        """요청 면별 집기 → 기존 경로 → 반납을 실행하고 종료 판단은 래퍼에 맡긴다."""
         request = goal_handle.request
         result = DrawOnCake.Result()
-
-        self.get_logger().info(
-            f'드로잉 시작: waypoints={len(request.waypoints)}, '
-            f'surface={request.drawing_surface}'
+        surface = request.drawing_surface
+        integrated = surface == 'SIDE' and self._param('integrated_side_cycle')
+        side_45 = surface == 'SIDE' and (integrated or self._param('side_pen_45'))
+        pen_cycle = surface == 'TOP' and (
+            self._param('pen_tool_cycle') or self._param('integrated_side_cycle')
         )
 
+        def cancelled():
+            """순환 동작의 매 단계에서 액션 취소와 내부 중단 플래그를 확인한다."""
+            return goal_handle.is_cancel_requested or getattr(self, '_cancel_requested', False)
+
+        def failed(code):
+            """완료한 획 수를 보존하며 이동·반납 없이 실패 결과를 만든다."""
+            result.success = False
+            result.error_code = 'CANCELLED' if cancelled() else code
+            return result
+
+        self.get_logger().info(
+            f'드로잉 시작: waypoints={len(request.waypoints)}, surface={surface}'
+        )
+        if cancelled():
+            return failed('CANCELLED')
         waypoints_dict, pen_states = self._convert_waypoints(
             request.waypoints, default_speed=request.speed,
         )
-
-        plan = plan_drawing_motion(
-            waypoints_dict, pen_states, request.drawing_surface,
-        )
-
+        plan = plan_drawing_motion(waypoints_dict, pen_states, surface)
         if not plan.success:
-            self.get_logger().error(f'동작 계획 실패: {plan.error_msg}')
-            result.success = False
-            result.error_code = plan.error_msg
-            result.completed_strokes = 0
-            goal_handle.abort()
-            return result
+            return failed(plan.error_msg)
 
-        # 펜 순환 모드: 윗면 그림만 받고, 그리기 전에 거치대에서 펜을 집는다.
-        pen_cycle = self._param('pen_tool_cycle')
+        if self._param('pen_tool_cycle') and surface != 'TOP' and not integrated:
+            return failed('TOP_ONLY')
+        if surface == 'SIDE' and not side_45:
+            try:
+                plan.commands = self._robot.select_reachable_side_commands(
+                    plan.commands, cancelled,
+                )
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(f'옆면 자세 선택 실패: {error}')
+                return failed('SIDE_POSE_UNREACHABLE')
+
+        initial_joints = None
+        rack_ready = getattr(self, '_top_pen_rack_ready', False)
+        self._top_pen_rack_ready = False
+        if integrated:
+            try:
+                initial_joints = self._pen_cycle.pick_side(
+                    cancelled,
+                    reuse_rack_position=rack_ready,
+                    preserve_speed=rack_ready,
+                )
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(f'45도 펜 파지 실패: {error}')
+                return failed('PEN_PICK_FAILED')
+        elif side_45:
+            if getattr(self, '_side_pen_returned', False):
+                return failed('PEN_RETURNED_REGRASP_AND_RESTART')
+            from dsr_msgs2.srv import GetCurrentPosj
+            measured = self._robot._call('current_joints', GetCurrentPosj.Request())
+            if measured is None or not measured.success or len(measured.pos) != 6:
+                return failed('PEN_START_JOINT_QUERY_FAILED')
+            initial_joints = list(measured.pos)
+
         if pen_cycle:
-            if request.drawing_surface != 'TOP':
-                self.get_logger().error('펜 순환 모드는 윗면(TOP)만 그립니다.')
-                result.success = False
-                result.error_code = 'TOP_ONLY'
-                result.completed_strokes = 0
-                goal_handle.abort()
-                return result
-            # _do_grasping_tool은 상태 머신의 GRASPING_TOOL 단계 함수라서
-            # 바로 앞 단계(PLACING_CAKE)에서만 전이할 수 있다. 케이크 운반은 하지 않으므로
-            # 상태만 그 단계로 맞춘 뒤 호출한다.
+            # 팀의 TOP 파지·반납 함수와 DO 그리퍼 제어 순서를 그대로 사용한다.
             self._state = TaskState.PLACING_CAKE
             if not self._do_grasping_tool(goal_handle, request):
-                self._state = TaskState.IDLE
-                result.success = False
-                result.error_code = 'PEN_PICK_FAILED'
-                result.completed_strokes = 0
-                goal_handle.abort()
-                return result
-            # 펜을 집은 뒤 케이크 중심 상공 → 첫 획 시작점 상공으로 이동한다.
-            # 하강과 펜 내림은 아래 드로잉 명령(접근점 → PEN_DOWN)이 수행한다.
-            if not (
-                self._go_to_cake_center(goal_handle, request)
-                and self._move_above_first_stroke(plan)
-            ):
-                self._state = TaskState.IDLE
-                result.success = False
-                result.error_code = 'MOVING_TO_CAKE_CENTER_FAILED'
-                result.completed_strokes = 0
-                goal_handle.abort()
-                return result
+                return failed('PEN_PICK_FAILED')
+            if cancelled():
+                return failed('CANCELLED')
+            # 케이크 중심으로 이동/접촉하지 않고 첫 획 위로 직접 접근한다.
+            if not self._prepare_first_stroke(plan, cancelled):
+                return failed('FIRST_STROKE_APPROACH_FAILED')
 
-        # 명령 실행
         total = len(plan.commands)
         completed_strokes = 0
         prev_stroke_idx = 0
-
         for i, cmd in enumerate(plan.commands):
-            # 취소 확인
-            if goal_handle.is_cancel_requested:
-                self.get_logger().info('드로잉 취소됨')
-                result.success = False
-                result.error_code = 'CANCELLED'
-                result.completed_strokes = completed_strokes
-                goal_handle.canceled()
-                return result
-
-            # feedback
+            if cancelled():
+                return failed('CANCELLED')
             feedback = DrawOnCake.Feedback()
             feedback.current_stroke_idx = cmd.stroke_idx
             feedback.total_strokes = plan.total_strokes
             feedback.progress_pct = float(i) / total * 100.0
             feedback.phase = cmd.phase.value
             goal_handle.publish_feedback(feedback)
-
-            # 획·펜 상태가 바뀔 때만 주요 진행 상황을 터미널에 남긴다.
-            if i == 0 or cmd.phase != plan.commands[i - 1].phase or cmd.stroke_idx != plan.commands[i - 1].stroke_idx:
+            if (
+                i == 0 or cmd.phase != plan.commands[i - 1].phase
+                or cmd.stroke_idx != plan.commands[i - 1].stroke_idx
+            ):
                 self.get_logger().info(
-                    f'동작 {i+1}/{total}, 획 {cmd.stroke_idx+1}: '
+                    f'동작 {i + 1}/{total}, 획 {cmd.stroke_idx + 1}: '
                     f'{cmd.phase.value}, {cmd.motion_type.value}'
                 )
-            # DP가 지정한 직선·원호·스플라인 명령을 실행한다.
-            side_rotation = request.drawing_surface == 'SIDE' and i == 2 and not cmd.pen_down
-            if side_rotation:
-                # 표면 바깥에서만 펜 자세를 바꾸고 현재 관절 해를 사용한다.
-                moved = self._robot.move_task_joint(cmd.pos)
-            else:
-                moved = self._execute_motion_command(cmd, i)
+            # 로컬 SIDE의 세 번째 비접촉 자세 전환과 첫 상승 접근을 보존한다.
+            side_rotation = surface == 'SIDE' and i == 2 and not cmd.pen_down
+            moved = (
+                self._robot.move_task_joint(cmd.pos) if side_rotation
+                else self._execute_motion_command(cmd, i, side_45=side_45)
+            )
             if not moved:
-                self.get_logger().error(
-                    f'{"movejx(옆면 자세 전환)" if side_rotation else cmd.motion_type.value} '
-                    f'실패 (#{i}): {cmd.pos.to_list()}'
-                )
-                result.success = False
-                result.error_code = f'MOVE_FAILED_AT_{i}'
-                result.completed_strokes = completed_strokes
-                goal_handle.abort()
-                return result
-
+                self.get_logger().error(f'드로잉 이동 실패 (#{i}): {cmd.pos.to_list()}')
+                return failed(f'MOVE_FAILED_AT_{i}')
             if cmd.stroke_idx > prev_stroke_idx:
                 completed_strokes += 1
                 prev_stroke_idx = cmd.stroke_idx
+                result.completed_strokes = completed_strokes
 
-        self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
-
-        # 펜 순환 모드: 그리기가 끝나면 펜을 거치대에 반납한다.
-        # 드로잉 중 실패·취소했다면 위에서 이미 반환했으므로 반납하지 않는다(펜은 그리퍼에 남음).
-        if pen_cycle:
-            # GRASPING_TOOL → DRAWING → RETURNING_TOOL 순서로만 전이할 수 있다.
+        # 마지막 이동 중 취소가 들어온 경우에도 반납/열기 명령을 보내지 않는다.
+        if cancelled():
+            return failed('CANCELLED')
+        result.completed_strokes = plan.total_strokes
+        if integrated:
+            try:
+                self._pen_cycle.return_side(initial_joints, cancelled)
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(f'45도 펜 반납 실패: {error}')
+                return failed('PEN_RETURN_FAILED')
+        elif side_45 and self._param('side_return_pen'):
+            try:
+                from .side_pen_return import return_pen
+                return_pen(self._robot, initial_joints, cancelled)
+                self._side_pen_returned = True
+            except RuntimeError as error:
+                self.get_logger().error(str(error))
+                return failed('PEN_RETURN_FAILED')
+        elif pen_cycle:
             self._transition_to(TaskState.DRAWING)
-            returned = self._do_returning_tool(goal_handle, request)
-            # 다음 웹 주문에서 다시 PLACING_CAKE부터 시작할 수 있게 대기 상태로 돌린다.
-            self._state = TaskState.IDLE
-            if not returned:
-                result.success = False
-                result.error_code = 'PEN_RETURN_FAILED'
-                result.completed_strokes = plan.total_strokes
-                goal_handle.abort()
-                return result
+            if not self._do_returning_tool(goal_handle, request):
+                return failed('PEN_RETURN_FAILED')
+            self._top_pen_rack_ready = True
 
         result.success = True
-        result.completed_strokes = plan.total_strokes
         result.error_code = ''
-        goal_handle.succeed()
+        self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
         return result
+
+    def _prepare_first_stroke(self, plan, cancelled=lambda: False):
+        """현재 위치에서 안전 높이로 상승한 뒤 첫 접근점 바로 위로 이동한다.
+
+        중심 좌표는 사용하지 않는다. XY 이동 전에 현재 자세로 높이만 확보해
+        거치대에서 케이크로 대각 하강하는 경로가 생기지 않게 한다.
+        """
+        if not plan.commands or plan.commands[0].pen_down or cancelled():
+            return False
+        first = plan.commands[0].pos
+        current = self._robot.current_pose()
+        if current is None or len(current) != 6:
+            return False
+        safe_z = max(current[2], first.z + 50.)
+        if current[2] < safe_z:
+            raised = list(current)
+            raised[2] = safe_z
+            if not self._robot.move_line(DsrPos(*raised), speed_mm_s=50.):
+                return False
+        if cancelled():
+            return False
+        above = DsrPos(first.x, first.y, safe_z, first.rz1, first.ry, first.rz2)
+        return self._robot.move_line(above, speed_mm_s=50.)
 
     # ==================================================================
     # GraspTool 액션 실행
@@ -800,6 +927,8 @@ class RobotExecutorNode(Node):
 
     def _do_grasping_tool(self, goal_handle, task_goal) -> bool:
         """펜 집기: 상공 → 펜 위치 → 그리퍼 닫기 → 수직 상공"""
+        if self._check_cancel(goal_handle):
+            return False
         if not self._transition_to(TaskState.GRASPING_TOOL):
             return False
 
@@ -809,7 +938,11 @@ class RobotExecutorNode(Node):
 
         # 1. 펜 상공으로 이동 (관절)
         self.get_logger().info('펜 상공 이동')
-        if not self._robot.move_joint(approach):
+        if not self._robot.move_joint(
+            approach,
+            speed_deg_s=self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=self._param('free_joint_acc_deg_s2'),
+        ):
             self._fail('펜 상공 이동 실패')
             return False
 
@@ -823,12 +956,18 @@ class RobotExecutorNode(Node):
         # time.sleep(0.5)  # 대기 시간 추가
 
         # 3. 펜 위치로 하강 (직선)
+        if self._check_cancel(goal_handle):
+            return False
         self.get_logger().info('펜 위치로 하강')
-        if not self._robot.move_line(DsrPos(*stand), speed_mm_s=30.0):
+        if not self._robot.move_line(
+            DsrPos(*stand), speed_mm_s=45.0, acc_mm_s2=150.0,
+        ):
             self._fail('펜 하강 실패')
             return False
 
         # 4. 펜 잡기
+        if self._check_cancel(goal_handle):
+            return False
         if not self._robot.gripper_close(
             self._param('pen_grip_width'),
             self._param('pen_grip_force'),
@@ -837,6 +976,8 @@ class RobotExecutorNode(Node):
             return False
 
         # 5. 수직 상공으로 올리기 (직선)
+        if self._check_cancel(goal_handle):
+            return False
         self.get_logger().info('펜 들어올리기')
         if not self._robot.move_line(DsrPos(*gripper_up), speed_mm_s=30.0):
             self._fail('펜 들어올리기 실패')
@@ -900,27 +1041,42 @@ class RobotExecutorNode(Node):
 
     def _do_returning_tool(self, goal_handle, task_goal) -> bool:
         """펜 반납: 상공 → 펜 놓을 위치 → 그리퍼 열기 → 상공"""
+        if self._check_cancel(goal_handle):
+            return False
         if not self._transition_to(TaskState.RETURNING_TOOL):
             return False
 
         drop_approach = self._param('pen_drop_approach_pose')
         drop = self._param('pen_drop_pose')
         drop_after = self._param('pen_drop_after_pose')
+        # TOP 후 SIDE가 남으면 중간 반납도 보호 구간이다. 마지막 반납만 가속한다.
+        more_surfaces = bool(getattr(task_goal, 'has_more_surfaces', False))
 
         # 1. 놓을 위치 상공으로 이동 (관절)
         self.get_logger().info('펜 반납 상공 이동')
-        if not self._robot.move_joint(drop_approach):
+        if not self._robot.move_joint(
+            drop_approach,
+            speed_deg_s=30.0 if more_surfaces else self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=30.0 if more_surfaces else self._param('free_joint_acc_deg_s2'),
+        ):
             self._fail('펜 반납 상공 이동 실패')
             return False
 
         # 2. 펜 놓을 위치로 하강 (직선)
+        if self._check_cancel(goal_handle):
+            return False
         self.get_logger().info('펜 놓을 위치로 하강')
-        if not self._robot.move_line(DsrPos(*drop), speed_mm_s=30.0):
+        if not self._robot.move_line(
+            DsrPos(*drop), speed_mm_s=30.0 if more_surfaces else 45.0,
+            acc_mm_s2=100.0 if more_surfaces else 150.0,
+        ):
             self._fail('펜 하강 실패')
             return False
 
         # 3. 그리퍼 열기 (펜 놓기)
         time.sleep(0.5)
+        if self._check_cancel(goal_handle):
+            return False
         # [변경 2026-11-19] 열기 실패 시 후퇴 이동을 보내지 않는다.
         if not self._robot.gripper_open(self._param('gripper_open_width')):
             self._fail('펜 그리퍼 열기 실패')
@@ -928,8 +1084,14 @@ class RobotExecutorNode(Node):
         time.sleep(0.5)
 
         # 4. 상공으로 후퇴 (직선)
+        if self._check_cancel(goal_handle):
+            return False
         self.get_logger().info('펜 반납 후 상공 이동')
-        if not self._robot.move_line(DsrPos(*drop_after), speed_mm_s=50.0):
+        if not self._robot.move_line(
+            DsrPos(*drop_after),
+            speed_mm_s=50.0 if more_surfaces else self._param('free_line_speed_mm_s'),
+            acc_mm_s2=100.0 if more_surfaces else self._param('free_line_acc_mm_s2'),
+        ):
             self._fail('펜 반납 후퇴 실패')
             return False
 

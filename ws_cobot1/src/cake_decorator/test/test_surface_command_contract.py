@@ -32,6 +32,9 @@ class SurfaceContractTests(unittest.TestCase):
     def setUpClass(cls):
         rclpy.init()
         cls.node = DrawingPathNode()
+        from rclpy.parameter import Parameter
+        cls.node.set_parameters([Parameter("side_pen_vertical_deg", value=30.0),
+                                 Parameter("side_diameter_allowance_mm", value=0.0)])
 
     @classmethod
     def tearDownClass(cls):
@@ -111,12 +114,13 @@ class SurfaceContractTests(unittest.TestCase):
         clear_arcs = [
             c
             for c in plan.commands
-            if c.motion_type == MotionType.MOVE_CIRCLE and not c.pen_down
+            if c.motion_type == MotionType.MOVE_SPLINE and not c.pen_down
         ]
         self.assertTrue(clear_arcs)
         for command in clear_arcs:
             self.assertAlmostEqual(math.hypot(command.pos.x - 500, command.pos.y), 60.0)
-            self.assertAlmostEqual(math.hypot(command.via.x - 500, command.via.y), 60.0)
+            for point in command.spline:
+                self.assertAlmostEqual(math.hypot(point.x - 500, point.y), 60.0)
 
     def test_diagonal_side_plan_keeps_every_circle_horizontal(self):
         response = self.request("SIDE", [[(64, 380), (288, 390)]])

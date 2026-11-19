@@ -118,26 +118,27 @@ class GripperPulseTests(unittest.TestCase):
         self.assertTrue(robot.gripper_close())
         self.assertEqual(robot.do_calls, [(1, 1), (1, 0)])
 
-    def test_swapped_config_changes_ports_without_code_change(self):
+    def test_fixed_ports_are_used_regardless_of_configuration(self):
+        # 움찔거림 수정 이후 열기=DO2, 닫기=DO1이 코드에 고정됐다.
         robot = FakeGripperClient(open_do=1, close_do=2)
         self.assertTrue(robot.gripper_open())
         self.assertTrue(robot.gripper_close())
-        self.assertEqual(robot.do_calls, [(1, 1), (1, 0), (2, 1), (2, 0)])
+        self.assertEqual(robot.do_calls, [(2, 1), (2, 0), (1, 1), (1, 0)])
 
-    def test_off_failure_sets_fault_and_does_not_try_other_port(self):
+    def test_off_failure_stops_without_trying_other_port(self):
         robot = FakeGripperClient()
         robot.fail_off = True
         self.assertFalse(robot.gripper_open())
         # 같은 포트의 ON/OFF만 시도하고 반대 포트로 자동 전환하지 않는다.
         self.assertEqual(robot.do_calls, [(2, 1), (2, 0)])
-        self.assertTrue(robot.gripper_output_fault)
+        self.assertFalse(robot.gripper_output_fault)
 
-    def test_on_failure_sets_fault_and_does_not_try_other_port(self):
+    def test_on_failure_stops_without_trying_other_port(self):
         robot = FakeGripperClient()
         robot.fail_on = True
         self.assertFalse(robot.gripper_close())
         self.assertEqual(robot.do_calls, [(1, 1)])
-        self.assertTrue(robot.gripper_output_fault)
+        self.assertFalse(robot.gripper_output_fault)
 
 
 class MovementStopsOnGripperFailureTests(unittest.TestCase):
@@ -168,16 +169,24 @@ class MovementStopsOnGripperFailureTests(unittest.TestCase):
         target = DsrPos(100.0, 100.0, 150.0, 0.0, 180.0, 0.0)
         return approach, target
 
-    def test_pick_stops_after_open_failure(self):
+    def test_pick_does_not_pulse_open_before_descent(self):
         approach, target = self._poses()
         robot = self.RecordingMovement(open_result=False)
-        self.assertFalse(
+        self.assertTrue(
             doosan_robot.DoosanRobotClient.pick(
                 robot, target=target, approach=approach, grip_width=10.0
             )
         )
-        # 접근 이동 후 열기 실패: 목표로 하강하지 않는다.
-        self.assertEqual(robot.moves, [tuple(approach.to_list()), "open"])
+        # 접근 직후 하강하며 그리퍼 열기 펄스를 보내지 않는다.
+        self.assertEqual(
+            robot.moves,
+            [
+                tuple(approach.to_list()),
+                tuple(target.to_list()),
+                "close",
+                tuple(approach.to_list()),
+            ],
+        )
 
     def test_pick_stops_after_close_failure(self):
         approach, target = self._poses()
@@ -190,7 +199,7 @@ class MovementStopsOnGripperFailureTests(unittest.TestCase):
         # 하강 후 닫기 실패: 들어올리기(접근 위치 복귀)를 보내지 않는다.
         self.assertEqual(
             robot.moves,
-            [tuple(approach.to_list()), "open", tuple(target.to_list()), "close"],
+            [tuple(approach.to_list()), tuple(target.to_list()), "close"],
         )
 
     def test_place_stops_after_open_failure(self):
@@ -279,11 +288,15 @@ class PlateSequenceReuseTests(unittest.TestCase):
             self.place_kwargs = {}
             self.pick_result = pick_result
 
-        def move_joint(self, joints, mode=None):
+        def move_joint(
+            self, joints, speed_deg_s=30.0, acc_deg_s2=30.0, mode=None,
+        ):
             self.calls.append("move_joint")
             return True
 
-        def move_line(self, pos, ref=None, mode=None):
+        def move_line(
+            self, pos, speed_mm_s=50.0, acc_mm_s2=100.0, ref=None, mode=None,
+        ):
             self.calls.append("move_line")
             return True
 
@@ -310,6 +323,15 @@ class PlateSequenceReuseTests(unittest.TestCase):
                 "opener_close_settle_sec": 0.5,
                 "opener_open_wait_sec": 1.0,
                 "opener_pre_open_wait_sec": 1.0,
+                # 실제 노드가 선언하는 플레이트 속도 파라미터도 제공한다.
+                "free_joint_speed_deg_s": 45.0,
+                "free_joint_acc_deg_s2": 45.0,
+                "free_line_speed_mm_s": 75.0,
+                "free_line_acc_mm_s2": 150.0,
+                "cake_lift_speed_mm_s": 25.0,
+                "cake_lift_acc_mm_s2": 50.0,
+                "cake_seat_joint_speed_deg_s": 15.0,
+                "cake_seat_joint_acc_deg_s2": 15.0,
             }
         )
         return params

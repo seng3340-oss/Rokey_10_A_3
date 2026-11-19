@@ -84,7 +84,7 @@ def align_virtual_kinematics(root):
         origin.set("rpy", " ".join(str(value) for value in rpy))
 
 
-def add_pen(description, extension_m):
+def add_pen(description, extension_m, side_pen_45=False):
     """강의 URDF를 복사한 문자열에만 펜을 덧붙인다. 외부 벤더 파일은 수정하지 않는다."""
     root = hardware_params(description)
     align_virtual_kinematics(root)
@@ -102,15 +102,29 @@ def add_pen(description, extension_m):
     joint = ET.SubElement(root, "joint", name="virtual_pen_tip_joint", type="fixed")
     ET.SubElement(joint, "parent", link="virtual_gripper_tip")
     ET.SubElement(joint, "child", link="virtual_pen_tip")
-    ET.SubElement(joint, "origin", xyz=f"0 0 {extension_m}", rpy="0 0 0")
+    tip_offset = [0., 0., extension_m]
+    if side_pen_45:
+        # 실물에서 자동 교정한 펜촉 위치. TCP 축은 플랜지와 같고 몸통만 45도다.
+        tip_offset = [.001095, -.046474, .271695 - gripper_tip]
+    ET.SubElement(joint, "origin", xyz=" ".join(map(str, tip_offset)), rpy="0 0 0")
     # 손가락 안쪽에 24mm 들어간 몸통과 마지막 4mm의 가는 펜촉을 표시한다.
     body_length = extension_m + 0.024 - 0.004
+    if side_pen_45:
+        # 몸통 길이는 시각화용 임시값이며 펜촉 위치와 기울기는 검증값을 따른다.
+        body_length = math.hypot(.046474, .271695 - .220) + .024 - .004
     for length, radius, z, color in (
         (body_length, PEN_RADIUS, -0.004 - body_length / 2, "0.82 0.16 0.12 1"),
         (0.004, 0.0008, -0.002, "0.12 0.12 0.12 1"),
     ):
         visual = ET.SubElement(pen, "visual")
-        ET.SubElement(visual, "origin", xyz=f"0 0 {z}")
+        if side_pen_45:
+            ET.SubElement(
+                visual, "origin",
+                xyz=f"0 {-z * math.sqrt(.5)} {z * math.sqrt(.5)}",
+                rpy=f"{math.pi / 4} 0 0",
+            )
+        else:
+            ET.SubElement(visual, "origin", xyz=f"0 0 {z}")
         geometry = ET.SubElement(visual, "geometry")
         ET.SubElement(geometry, "cylinder", radius=str(radius), length=str(length))
         material = ET.SubElement(visual, "material", name="")
@@ -119,17 +133,33 @@ def add_pen(description, extension_m):
 
 
 def tcp_from_description(description):
-    """표시 모델의 두 고정 변환을 합쳐 플랜지→펜촉 TCP(mm, ZYZ deg)를 구한다."""
+    """회전이 0인 두 고정 변환의 XYZ를 합쳐 플랜지→펜촉 TCP를 구한다."""
     root = hardware_params(description)
-    distance = 0.0
+    offset = [0., 0., 0.]
     for name in ("virtual_gripper_tip_joint", "virtual_pen_tip_joint"):
         joint = root.find(f"joint[@name='{name}']")
         if joint is None:
             raise RuntimeError(
                 "가상 펜 모델이 없습니다. 펜 전용 virtual launch를 사용하세요."
             )
-        distance += float(joint.find("origin").attrib["xyz"].split()[2])
-    return [0.0, 0.0, distance * 1000, 0.0, 0.0, 0.0]
+        xyz = list(map(float, joint.find("origin").attrib["xyz"].split()))
+        offset = [a + b for a, b in zip(offset, xyz)]
+    return [*(value * 1000 for value in offset), 0., 0., 0.]
+
+
+def align_side_workcell(description, center_m, height_m=.079, board_thickness_m=.002):
+    """시각화 복사본의 케이크를 옆면 실행 중심·높이와 일치시킨다."""
+    root = ET.fromstring(description)
+    mount = root.find("joint[@name='station_mount']/origin")
+    cake = root.find("link[@name='cake_tray_surface']/visual[@name='drawing_cake']")
+    if mount is None or cake is None:
+        raise ValueError("45도 옆면 검증은 station 배치에서 실행하세요.")
+    # 기존 안착면은 139mm, 메시 높이는 80mm다. 이번 주문의 높이만 비율로 맞춘다.
+    xyz = [center_m[0], center_m[1], center_m[2] - .139 - board_thickness_m - height_m]
+    mount.set("xyz", " ".join(map(str, xyz)))
+    cake.find("origin").set("xyz", f"0 0 {board_thickness_m}")
+    cake.find("geometry/mesh").set("scale", f"1 1 {height_m / .080}")
+    return ET.tostring(root, encoding="unicode")
 
 
 def main():

@@ -81,3 +81,35 @@ class VirtualPenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_side_pen_visual_tip_matches_calibrated_tcp():
+    """45도 펜의 표시 끝점은 실물 자동 교정값과 같고 몸통은 45도로 기울어진다."""
+    import math
+
+    text = HELPERS["add_pen"](robot_description(), .04, side_pen_45=True)
+    pose = HELPERS["tcp_from_description"](text)
+    for actual, expected in zip(pose, [1.095, -46.474, 271.695, 0., 0., 0.]):
+        assert math.isclose(actual, expected, abs_tol=1e-8)
+    root = ET.fromstring(text)
+    visual = root.find("link[@name='virtual_pen_tip']/visual/origin")
+    rpy = list(map(float, visual.get("rpy").split()))
+    assert math.isclose(rpy[0], math.pi / 4, abs_tol=1e-8)
+
+
+def test_side_workcell_cake_top_uses_execution_center():
+    """화면 케이크의 상면 중심과 실제 실행에 쓰는 중심이 일치한다."""
+    source = '''<robot name="scene">
+    <joint name="station_mount"><origin xyz=".399 -.049 0"/></joint>
+    <link name="cake_tray_surface"><visual name="drawing_cake">
+      <origin xyz="0 0 0"/><geometry><mesh filename="cake.stl"/></geometry>
+    </visual></link></robot>'''
+    changed = ET.fromstring(HELPERS["align_side_workcell"](
+        source, [.399274, -.054559, .220], .079, .002,
+    ))
+    mount = list(map(float, changed.find("joint/origin").get("xyz").split()))
+    cake = changed.find("link/visual")
+    origin = list(map(float, cake.find("origin").get("xyz").split()))
+    scale = list(map(float, cake.find("geometry/mesh").get("scale").split()))
+    assert mount[:2] == [.399274, -.054559]
+    assert abs(mount[2] + .139 + origin[2] + .080 * scale[2] - .220) < 1e-10

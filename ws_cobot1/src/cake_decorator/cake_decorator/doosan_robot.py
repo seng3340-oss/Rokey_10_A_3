@@ -32,6 +32,15 @@ from dsr_msgs2.srv import (
     GetCurrentPosx,
     GetCurrentPosj,
     GetSolutionSpace,
+    GetCurrentToolFlangePosx,
+    Ikin,
+    Fkin,
+    CheckMotion,
+    GetCurrentTcp,
+    GetRobotMode,
+    MoveStop,
+    SetCurrentTcp,
+    SetRobotMode,
     SetCtrlBoxDigitalOutput,
 )
 from rcl_interfaces.srv import GetParameters
@@ -144,6 +153,9 @@ class DoosanRobotClient:
             "/dsr01/dsr_controller2/aux_control/get_solution_space",
             GetSolutionSpace,
         ),
+        "inverse": ("/dsr01/dsr_controller2/motion/ikin", Ikin),
+        "forward": ("/dsr01/dsr_controller2/motion/fkin", Fkin),
+        "flange": ("/dsr01/dsr_controller2/aux_control/get_current_tool_flange_posx", GetCurrentToolFlangePosx),
         "move_jointx": ("/dsr01/dsr_controller2/motion/move_jointx", MoveJointx),
         "move_circle": ("/dsr01/dsr_controller2/motion/move_circle", MoveCircle),
         "move_line": ("/dsr01/dsr_controller2/motion/move_line", MoveLine),
@@ -158,6 +170,12 @@ class DoosanRobotClient:
             SetCtrlBoxDigitalOutput,
         ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
+        "check_motion": ("/dsr01/dsr_controller2/motion/check_motion", CheckMotion),
+        "move_stop": ("/dsr01/dsr_controller2/motion/move_stop", MoveStop),
+        "get_tcp": ("/dsr01/dsr_controller2/tcp/get_current_tcp", GetCurrentTcp),
+        "set_tcp": ("/dsr01/dsr_controller2/tcp/set_current_tcp", SetCurrentTcp),
+        "get_mode": ("/dsr01/dsr_controller2/system/get_robot_mode", GetRobotMode),
+        "set_mode": ("/dsr01/dsr_controller2/system/set_robot_mode", SetRobotMode),
     }
 
     def __init__(
@@ -473,6 +491,72 @@ class DoosanRobotClient:
                 diagnostic["after_joints_deg"] = list(after.pos)
             self._logger.error("SIDE_APPROACH_FAILED " + json.dumps(diagnostic))
         return moved
+
+    def select_reachable_side_commands(self, commands, cancelled):
+        """이동 전에 제어기의 IK/FK를 조회해 현재 관절 해에서 가능한 펜 자세를 찾는다."""
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+        from .side_pose_selection import select_side_roll
+
+        self._side_validated_solution = None
+        joints = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        pose = self._call("current_pose", GetCurrentPosx.Request(ref=0), timeout=3)
+        flange = self._call("flange", GetCurrentToolFlangePosx.Request(ref=0), timeout=3)
+        if not (joints and joints.success and pose and pose.success and pose.task_pos_info and flange and flange.success):
+            raise RuntimeError("옆면 도달 검사에 필요한 현재 로봇 상태를 읽지 못했습니다.")
+        solution = self._call("solution", GetSolutionSpace.Request(pos=list(joints.pos)), timeout=3)
+        current_fk = self._call("forward", Fkin.Request(pos=list(joints.pos), ref=0), timeout=3)
+        if not (solution and solution.success and current_fk and current_fk.success):
+            raise RuntimeError("현재 관절 해·순기구학 조회 실패")
+        tcp = list(pose.task_pos_info[0].data[:6])
+        flange_pose = list(flange.pos)
+
+        def matches(first, second):
+            distance = math.dist(first[:3], second[:3])
+            rotation = (Rotation.from_euler("ZYZ", first[3:], degrees=True).inv()
+                        * Rotation.from_euler("ZYZ", second[3:], degrees=True))
+            return distance < 0.5 and math.degrees(rotation.magnitude()) < 0.5
+
+        # 드라이버 버전마다 FK의 출력 기준이 다를 수 있어 현재 실제 조회값으로 확인한다.
+        flange_basis = False
+        if not matches(list(current_fk.conv_posx), tcp):
+            if not matches(list(current_fk.conv_posx), flange_pose):
+                raise RuntimeError("현재 FK가 TCP·플랜지 어느 쪽과도 맞지 않아 도달 검사를 중단합니다.")
+            flange_basis = True
+        flange_rotation = Rotation.from_euler("ZYZ", flange_pose[3:], degrees=True)
+        tcp_rotation = Rotation.from_euler("ZYZ", tcp[3:], degrees=True)
+        local_rotation = flange_rotation.inv() * tcp_rotation
+        local_offset = flange_rotation.inv().apply(np.array(tcp[:3]) - np.array(flange_pose[:3]))
+        deadline = time.monotonic() + 90.0
+
+        def inverse(target):
+            if time.monotonic() > deadline:
+                raise RuntimeError("옆면 도달 검사가 90초를 넘었습니다. 이동하지 않습니다.")
+            native = target.to_list()
+            if flange_basis:
+                rotation = Rotation.from_euler("ZYZ", native[3:], degrees=True) * local_rotation.inv()
+                position = np.array(native[:3]) - rotation.apply(local_offset)
+                native = [*map(float, position), *map(float, rotation.as_euler("ZYZ", degrees=True))]
+            result = self._call("inverse", Ikin.Request(pos=native, sol_space=solution.sol_space, ref=0), timeout=3)
+            if not result or not result.success:
+                return None
+            values = list(result.conv_posj)
+            if not all(math.isfinite(value) for value in values):
+                return None
+            check = self._call("forward", Fkin.Request(pos=values, ref=0), timeout=3)
+            # 일부 드라이버는 IK 실패도 success=True를 반환하므로 FK 왕복으로 검증한다.
+            if not check or not check.success or not matches(list(check.conv_posx), native):
+                return None
+            return values
+
+        self._logger.info("옆면 도달 가능 자세 검사 시작. 아직 이동하지 않습니다.")
+        selected = select_side_roll(commands, list(joints.pos), inverse, cancelled, self._logger.info)
+        after = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        if not after or not after.success or max(abs(a-b) for a,b in zip(joints.pos, after.pos)) > 0.1:
+            raise RuntimeError("도달 검사 중 로봇 자세가 바뀌었습니다. 다시 영점을 준비하세요.")
+        self._side_validated_solution = int(solution.sol_space)
+        return selected
+
 
     def execute_drawing_command(self, command) -> bool:
         """이동 종류만 분기한다. 액션 반복·획 완료 판단은 RE에 그대로 둔다."""
@@ -893,3 +977,28 @@ class DoosanRobotClient:
         if not self.move_line(approach, speed_mm_s=speed_retract):
             return False
         return True
+
+    def reset_default_tcp(self, *, stop_running=False):
+        """옆면 동작 종료 후 TCP 선택을 해제하고 플랜지 기준 복원을 확인한다."""
+        from .tcp_scope import reset_default_tcp
+
+        by_path = {path: key for key, (path, _) in self._SERVICES.items()}
+
+        def call(kind, path, request, *, timeout=5):
+            # 이미 생성한 재진입 서비스 그룹을 사용해 액션 실행 중에도 응답을 받는다.
+            return self._call(by_path[path], request, timeout=timeout)
+
+        description = self._call(
+            "description", GetParameters.Request(names=["robot_description"]), timeout=5,
+        )
+        if description is None or not description.values:
+            raise RuntimeError("TCP 복원 전 실물·가상 모드를 확인하지 못했습니다.")
+        root = ET.fromstring(description.values[0].string_value)
+        params = {item.get("name"): item.text for item in root.findall(".//ros2_control/hardware/param")}
+        mode = params.get("mode")
+        if mode not in ("real", "virtual"):
+            raise RuntimeError("TCP 복원 대상 모드를 확인하지 못했습니다.")
+        reset_default_tcp(
+            call, stop_running=stop_running,
+            flange_euler="ZYX" if mode == "virtual" else "ZYZ",
+        )

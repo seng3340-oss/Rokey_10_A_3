@@ -63,7 +63,7 @@ class InitialApproachTests(unittest.TestCase):
             execute_drawing_command=lambda command: calls.append("normal") or True,
         )
         owner = SimpleNamespace(
-            _param=lambda key: True,
+            _param=lambda key: key == "virtual_initial_approach",
             _robot=robot,
             get_logger=lambda: SimpleNamespace(info=lambda message: None),
         )
@@ -103,3 +103,18 @@ def test_success_response_without_arrival_stops_before_rotation():
     )
     assert len([key for key, _ in robot.calls if key == "move_jointx"]) == 1
     assert not any(key == "move_line" for key, _ in robot.calls)
+
+
+def test_side_45_does_not_stack_vertical_pen_virtual_approach():
+    """45도 검증에 수직 펜용 추가100mm 이탈이 겹쳐 도달 불가가 되지 않는다."""
+    from unittest.mock import Mock
+
+    robot = Mock()
+    robot._call.return_value = SimpleNamespace(
+        success=True, task_pos_info=[SimpleNamespace(data=[399., -55., 270., 0., 180., 0.])],
+    )
+    owner = SimpleNamespace(_param=lambda _: True, _robot=robot, get_logger=Mock())
+    command = SimpleNamespace(pen_down=False, pos=DsrPos(399., -55., 290., 0., 180., 0.))
+    assert RobotExecutorNode._execute_motion_command(owner, command, 0)
+    robot.prepare_virtual_approach.assert_not_called()
+    assert robot.move_line.call_args.args[0].z == 320.

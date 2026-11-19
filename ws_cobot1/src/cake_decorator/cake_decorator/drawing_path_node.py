@@ -18,6 +18,7 @@ DP(이 노드) 내부에서 픽셀→mm 변환 후 원뿔대 좌표 계산을 �
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 from cake_decorator_interfaces.msg import Waypoint3D as Waypoint3DMsg
 from cake_decorator_interfaces.srv import GenerateTrajectory
@@ -29,6 +30,7 @@ from .frustum_path import DrawingFrustum, pixel_to_path_mm
 from .path_simplification import simplify_stroke_mm
 from .surface_path import (
     side_surface_leg,
+    side_clearance_leg,
     continuous_side_leg,
     SplineSurfaceMove,
     split_spline_samples,
@@ -52,13 +54,18 @@ class DrawingPathNode(Node):
         self.declare_parameter("side_drawing_speed", 60.0)  # 옆면 접촉 후 그리기 mm/s
         self.declare_parameter("travel_speed", 80.0)  # mm/s (펜 올린 상태)
         self.declare_parameter("approach_height", 10.0)  # mm (펜 접근 높이)
+        self.declare_parameter("side_diameter_allowance_mm", 3.5)  # 옆면 경로 지름 보정(mm)
         self.declare_parameter("drawing_z_offset", 0.0)  # mm (표면 접촉 보정)
         self.declare_parameter("default_contact_force", 0.5)  # N
         self.declare_parameter("simplify_tolerance_mm", 0.15)
         self.declare_parameter("duplicate_tolerance_mm", 0.01)
         self.declare_parameter("side_path_error_mm", 0.1)
         self.declare_parameter("side_diagonal_mode", "spline")
-        self.declare_parameter("side_pen_vertical_deg", 15.0)
+        self.declare_parameter("side_pen_vertical_deg", 17.0)
+        # 양수이면 BASE +Y/-Y 가장자리를 각각 같은 거리만큼 안으로 줄인다.
+        self.declare_parameter("side_y_inset_mm", 0.0)
+        self.declare_parameter("integrated_side_cycle", False)
+        self.declare_parameter("side_pen_45", False)  # 45도 실물 파지 웹 검증 모드
         self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
         # TOP: 수직에서 기울어지는 각도 (0=수직, 30=30도 기울임)
         # SIDE: 법선에서 아래로 기울어지는 각도
@@ -184,6 +191,21 @@ class DrawingPathNode(Node):
                 "옆면 안쪽으로 들어가는 음수 접촉 오프셋은 허용하지 않습니다."
             )
 
+        if surface == "SIDE":
+            allowance = self._param("side_diameter_allowance_mm")
+            if not math.isfinite(allowance) or not 0 <= allowance <= 20:
+                raise ValueError("옆면 지름 보정은 0~20mm여야 합니다.")
+            y_inset = self._param("side_y_inset_mm")
+            if not math.isfinite(y_inset) or not 0 <= y_inset <= 5:
+                raise ValueError("옆면 Y 양쪽 보정은 각각 0~5mm여야 합니다.")
+            cake = replace(
+                cake,
+                radial_offset_mm=allowance / 2.0,
+                side_y_inset_mm=y_inset,
+            )
+            self.get_logger().info(f"옆면 BASE Y 양쪽 안쪽 보정: 각각 {y_inset:.2f}mm")
+            self.get_logger().info(f"옆면 펜촉 반지름 보정: +{allowance / 2.0:.2f}mm")
+
         waypoints: list[Waypoint3DMsg] = []
         pen_states: list[bool] = []
 
@@ -211,6 +233,10 @@ class DrawingPathNode(Node):
                 math.hypot(x, y) > cake.r_top + 1e-4 for x, y in raw_mm
             ):
                 raise ValueError("점이 윗면 원형 영역 밖입니다.")
+            if surface == "SIDE":
+                from .drawing_geometry import validate_side_drawing_height
+
+                validate_side_drawing_height(raw_mm)
             selected = simplify_stroke_mm(
                 raw_mm,
                 self._param("simplify_tolerance_mm"),
@@ -258,6 +284,20 @@ class DrawingPathNode(Node):
         waypoint_states = [waypoint.pen_down for waypoint in waypoints]
         if pen_states != waypoint_states:
             raise ValueError("웨이포인트와 펜 상태 배열이 일치하지 않습니다.")
+        # 이미 기울어진 펜을 잡고 시작하는 독립 시험은 TOP을 허용하지 않는다.
+        if self._param("side_pen_45") and surface == "TOP" and not self._param("integrated_side_cycle"):
+            raise ValueError("독립 45도 파지 시험에서는 옆면만 그릴 수 있습니다.")
+        # TOP은 기존 수직 펜 경로를 유지하며 SIDE에만 검증된 45도 자세를 적용한다.
+        if self._param("side_pen_45") and surface == "SIDE":
+            from .bent_pen import apply_side_gripper_orientations
+
+            apply_side_gripper_orientations(waypoints, cake.cx / 1000., cake.cy / 1000.)
+            # 거치대에서 접근할 때의 자세 전환은 공중 원주 시험과 같이 상면 위에서 한다.
+            # 370mm 바깥 목표는 긴 펜 TCP를 적용한 가상 제어기에서 도달 불가였다.
+            # 실제 상면220mm에서 70mm 위인290mm로 이동·공중 회전을 검증했다.
+            safe_z = (cake.cz + cake.height + 70.) / 1000.
+            for waypoint in waypoints[:3]:
+                waypoint.pose.position.z = max(waypoint.pose.position.z, safe_z)
         return waypoints, waypoint_states
 
     def _convert_top_mm(
@@ -297,13 +337,15 @@ class DrawingPathNode(Node):
         if mode not in ("spline", "arc_vertical"):
             raise ValueError("옆면 대각선 모드가 유효하지 않습니다.")
         diagonal = abs(end[0] - start[0]) > 1e-9 and abs(end[1] - start[1]) > 1e-9
-        moves = (
-            continuous_side_leg(cake, start, end, offset)
-            if pen_down and diagonal and mode == "spline"
-            else side_surface_leg(
+        if not pen_down:
+            # 획 사이에는 현재 높이에서 케이크 바깥으로 빠져 다음 획 높이까지 곡선 이동한다.
+            moves = side_clearance_leg(cake, start, end, offset)
+        elif diagonal and mode == "spline":
+            moves = continuous_side_leg(cake, start, end, offset)
+        else:
+            moves = side_surface_leg(
                 cake, start, end, offset, self._param("side_path_error_mm")
             )
-        )
         # 높이와 케이크 객체를 각각 전달해 새 펜 방향 계산을 사용한다.
         for move in moves:
             quat = pen_quat_side(move.arc_mm, move.end[2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat)
@@ -345,7 +387,7 @@ class DrawingPathNode(Node):
         vertical_angle = self._param("side_pen_vertical_deg")
         if not math.isfinite(vertical_angle) or not 0 < vertical_angle < 90:
             raise ValueError("옆면 펜의 수직 기준 각도는 0~90도 사이여야 합니다.")
-        # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 15도면 해당 함수에는 75도.
+        # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 17도면 해당 함수에는 73도.
         # 경사 법선은 이미 아래로 기울어져 있다. 그 각도를 빼야 PR #16의
         # 수직 기준 펜 각도가 원뿔대에서도 그대로 유지된다.
         tilt = 90.0 - vertical_angle - math.degrees(cake.slant_angle)
@@ -399,15 +441,29 @@ class DrawingPathNode(Node):
         states.append(True)
         is_horizontal = all(abs(point[1] - first[1]) < 1e-8 for point in points)
         is_vertical = all(abs(point[0] - first[0]) < 1e-8 for point in points)
-        if self._param("side_diagonal_mode") == "spline" and not (
-            is_horizontal or is_vertical
+        side_45 = self._param("side_pen_45")
+        if side_45 or (
+            self._param("side_diagonal_mode") == "spline"
+            and not (is_horizontal or is_vertical)
         ):
             # 한 획의 연속 곡선을 모아 보내 RDP 점마다 정지하지 않게 한다.
+            # 45도 펜은 수평·수직도 같은 획으로 묶어 90도 원호 경계 정지를 없앤다.
+            # 표본은 최대 4도/1mm로 생성해 100점 제한 때문에 생기는 명령 경계를 줄인다.
+            # 큰 반지름에서는 현의 처짐이 0.05mm 이내가 되도록 각도를 더 좁힌다.
+            max_radius = max(cake.r_top, cake.r_bottom) + cake.radial_offset_mm + clearance
+            angle_step = min(
+                4.0,
+                math.degrees(2 * math.acos(1 - min(0.05 / max_radius, 1.0))),
+            ) if side_45 else 1.0
             samples = []
             for start, end in zip(points, points[1:]):
                 if math.dist(start, end) < 1e-9:
                     continue
-                for move in continuous_side_leg(cake, start, end, offset):
+                for move in continuous_side_leg(
+                    cake, start, end, offset,
+                    max_angle_deg=angle_step,
+                    max_height_mm=1.0 if side_45 else 0.5,
+                ):
                     samples.extend(zip(move.samples, move.sample_arcs))
             if len(samples) > 20000:
                 raise ValueError("옆면 연속 표본 한도 초과")

@@ -39,3 +39,9 @@ test("케이크 밑면은 받침판 위에 놓인다", () => {
     MODEL_SIZE.cakeBottom + MODEL_SIZE.cakeHeight,
   );
 });
+
+test("옆면 하단 10mm를 제외하고 나머지 좌표 비율은 유지한다", () => {
+  const side = DRAWING_LAYOUT.side;
+  assert.equal(CAKE_DIMENSIONS.sideBottomClearanceMm, 10);
+  assert.ok(Math.abs(side.drawableBottomY - (side.y + side.height * (1 - 10 / 79))) < 1e-10);
+});

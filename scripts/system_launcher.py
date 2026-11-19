@@ -41,6 +41,16 @@ def configure_discovery(mode, env):
     env["ROS_AUTOMATIC_DISCOVERY_RANGE"] = "LOCALHOST"
 
 
+def configure_side_test(args):
+    """가상 옆면 검증을 도메인187과 localhost로 제한한다."""
+    if args.side_pen_45 and args.mode == "virtual":
+        if args.domain_id not in (None, 187):
+            raise ValueError("가상 옆면 검증은 ROS_DOMAIN_ID=187 전용입니다.")
+        if args.host not in (None, "127.0.0.1"):
+            raise ValueError("가상 옆면 검증은 localhost 에뮬레이터만 사용합니다.")
+        args.domain_id = 187
+
+
 def validate_identity(description, mode, host):
     """조회한 모델의 모드·주소가 실행 대상과 일치할 때만 다음 단계로 진행한다."""
     robot = ET.fromstring(description)
@@ -164,6 +174,215 @@ def prepare_reference(
     return session.pose()
 
 
+def prepare_side_pen_reference(session, reference, answer=input, *, skip_confirm=False):
+    """설정한 중앙으로 이동하고 선택적으로 확인을 기다린 뒤 위로 이탈한다."""
+    from dsr_msgs2.srv import (
+        GetRobotMode,
+        SetRobotMode,
+        SetCurrentTcp,
+        GetCurrentTcp,
+        GetCurrentToolFlangePosx,
+    )
+    from scipy.spatial.transform import Rotation
+    from cake_decorator.bent_pen import (
+        SIDE_TCP_NAME,
+        SIDE_TCP_OFFSET_MM,
+        VERTICAL_GRIPPER_ZYZ,
+    )
+    from cake_decorator.doosan_robot import DoosanRobotClient
+    from cake_decorator.drawing_motion import DsrPos
+    from cake_decorator.goal_mapping import validate_reference
+    from contact_tcp import relative_tcp
+
+    prefix = "/dsr01/dsr_controller2/"
+    # 펜 거치대 위 현재 위치와 케이크 중심을 절대로 혼용하지 않는다.
+    # 접근 목표는 명시한 설정값에서만 가져온다.
+    reference = validate_reference(reference)
+    mode = session.call(
+        GetRobotMode,
+        prefix + "system/get_robot_mode",
+        GetRobotMode.Request(),
+    ).robot_mode
+    if mode not in (0, 1):
+        raise RuntimeError("TCP 설정이 가능한 수동 또는 자동 모드로 준비하세요.")
+
+    # 위치를 맞추기 전에 실제 교정한 펜촉 TCP를 적용한다.
+    # TCP 설정은 좌표 기준을 바꾸며, 관절 이동 명령을 보내지 않는다.
+    try:
+        if mode != 0:
+            session.call(
+                SetRobotMode,
+                prefix + "system/set_robot_mode",
+                SetRobotMode.Request(robot_mode=0),
+            )
+        session.call(
+            SetCurrentTcp,
+            prefix + "tcp/set_current_tcp",
+            SetCurrentTcp.Request(name=SIDE_TCP_NAME),
+        )
+    finally:
+        if mode != 0:
+            session.call(
+                SetRobotMode,
+                prefix + "system/set_robot_mode",
+                SetRobotMode.Request(robot_mode=int(mode)),
+            )
+
+    # 자동 이동 전에 펜촉 TCP 이름과 교정값을 대조한다.
+    selected = session.call(
+        GetCurrentTcp,
+        prefix + "tcp/get_current_tcp",
+        GetCurrentTcp.Request(),
+    ).info
+    current = session.pose()
+    flange = session.call(
+        GetCurrentToolFlangePosx,
+        prefix + "aux_control/get_current_tool_flange_posx",
+        GetCurrentToolFlangePosx.Request(ref=0),
+    ).pos
+    measured = relative_tcp(list(flange), current)
+    orientation_error = Rotation.from_euler(
+        "ZYZ", measured[3:], degrees=True,
+    ).magnitude()
+    if (
+        selected != SIDE_TCP_NAME
+        or math.dist(measured[:3], SIDE_TCP_OFFSET_MM) > 1.0
+        or orientation_error > math.radians(1.0)
+    ):
+        raise RuntimeError("Pen_Side_45의 실제 교정값을 확인하세요.")
+
+    robot = DoosanRobotClient(session.node)
+
+    def move_checked(target, label, speed_mm_s=30.0):
+        """모든 접근·이탈 단계에서 성공 응답과 실제 도달을 확인한다."""
+        latest_mode = session.call(
+            GetRobotMode,
+            prefix + "system/get_robot_mode",
+            GetRobotMode.Request(),
+        ).robot_mode
+        if latest_mode not in (0, 1):
+            raise RuntimeError("접근 전 로봇 모드를 확인하세요.")
+        if latest_mode == 0:
+            session.call(
+                SetRobotMode,
+                prefix + "system/set_robot_mode",
+                SetRobotMode.Request(robot_mode=1),
+            )
+        print(f"{label}: 펜촉 XYZ [mm] {target[:3]}", flush=True)
+        if not robot.move_line(
+            DsrPos(*target),
+            speed_mm_s=speed_mm_s,
+            acc_mm_s2=200.0,
+            angular_speed_deg_s=30.0,
+            angular_acc_deg_s2=60.0,
+        ) or not robot.verify_pose(target):
+            raise RuntimeError(f"{label} 실패. 현재 로봇 상태를 확인하세요.")
+
+    # 실제 파지 후 자세를 유지하고, 거치대에서 먼저 위로 빠져나온다.
+    # 케이크 상공은 검증한 상면 +70mm로 접근하며 접촉 중 회전하지 않는다.
+    raised = list(current)
+    raised[2] = max(current[2] + 50.0, reference[2] + 70.0)
+    above = [*reference[:2], reference[2] + 70.0, *current[3:]]
+    contact = [*reference[:3], *current[3:]]
+    print(f"사용 TCP {SIDE_TCP_NAME}. 설정된 케이크 상면 중심으로 이동합니다.")
+    move_checked(raised, "거치대 위로 이탈", speed_mm_s=100.0)
+    move_checked(above, "케이크 중심 상공으로 접근", speed_mm_s=100.0)
+    move_checked(contact, "케이크 상면 중앙 확인 위치로 하강")
+
+    if skip_confirm:
+        # 검증된 설정 중심을 사용하며, 접촉 위치에서 사용자 입력을 기다리지 않는다.
+        print("설정한 케이크 중앙 기록 후 바로 위로 50mm 올립니다.")
+    else:
+        print("펜촉이 실제 상면 중앙에 가볍게 닿는지 확인하세요.")
+        print("위치가 다르면 펜던트로 보정한 뒤 YES를 입력하세요.")
+        confirmed = answer("케이크 중앙 확인 후 YES (그 외 종료): ")
+        if confirmed.strip().upper() != "YES":
+            raise RuntimeError("옆면 영점 확인을 취소했습니다.")
+
+    # 확인 중 수동으로 보정했다면 보정한 좌표를 이번 주문의 중심으로 쓴다.
+    selected = session.call(
+        GetCurrentTcp,
+        prefix + "tcp/get_current_tcp",
+        GetCurrentTcp.Request(),
+    ).info
+    if selected != SIDE_TCP_NAME:
+        raise RuntimeError("중앙 확인 중 TCP가 변경됐습니다. 다시 실행하세요.")
+    current = session.pose()
+    pose = validate_reference(current)
+    pose[3:] = VERTICAL_GRIPPER_ZYZ
+    print(f"확인한 케이크 상면 중심 XYZ [mm] {pose[:3]}", flush=True)
+    lifted = list(current)
+    lifted[2] += 50.0
+    move_checked(lifted, "중앙 확인 후 펜 이탈", speed_mm_s=60.0)
+
+    # 브릿지는 접촉 영점 대신 펜을 뗀 시작 위치가 유지되는지 확인한다.
+    return list(pose), session.pose()
+
+
+def prepare_virtual_side_pen(session):
+    """가상 모델 초기화 뒤 교정한 45도 펜 TCP와 파지 완료 관절 자세를 준비한다."""
+    from dsr_msgs2.srv import ConfigCreateTcp, GetCurrentTcp, SetCurrentTcp, SetRobotMode
+    from cake_decorator.bent_pen import SIDE_TCP_NAME, SIDE_TCP_OFFSET_MM
+    from cake_decorator.doosan_robot import DoosanRobotClient
+
+    # 도메인 분리 외에도 드라이버 description으로 실제 연결 대상을 확인한다.
+    session.identity("virtual", "127.0.0.1")
+    prefix = "/dsr01/dsr_controller2/"
+    deadline = time.monotonic() + 60
+    while session.call(GetCurrentTcp, prefix + "tcp/get_current_tcp", GetCurrentTcp.Request()).info != "Virtual_Pen_TCP":
+        if time.monotonic() > deadline:
+            raise RuntimeError("가상 펜 모델 초기화를 확인하지 못했습니다.")
+        time.sleep(.2)
+    try:
+        session.call(SetRobotMode, prefix + "system/set_robot_mode", SetRobotMode.Request(robot_mode=0))
+        session.call(ConfigCreateTcp, prefix + "tcp/config_create_tcp", ConfigCreateTcp.Request(
+            name=SIDE_TCP_NAME, pos=[*SIDE_TCP_OFFSET_MM, 0., 0., 0.],
+        ))
+        session.call(SetCurrentTcp, prefix + "tcp/set_current_tcp", SetCurrentTcp.Request(name=SIDE_TCP_NAME))
+    finally:
+        session.call(SetRobotMode, prefix + "system/set_robot_mode", SetRobotMode.Request(robot_mode=1))
+    robot = DoosanRobotClient(session.node)
+    try:
+        if not robot.move_joint(
+            [43.59, .54, 69.87, .09, 109.62, 43.31],
+            speed_deg_s=30., acc_deg_s2=60.,
+        ):
+            raise RuntimeError("가상 45도 파지 완료 자세로 이동하지 못했습니다.")
+    finally:
+        for client in robot._clients.values():
+            session.node.destroy_client(client)
+
+
+def restore_side_tcp_after_exit(args, env, folder):
+    """업무 노드를 회수한 뒤 별도 ROS 프로세스로 TCP를 초기화한다.
+
+    Ctrl+C로 부모의 ROS context가 이미 닫혔더라도 복원을 시도할 수 있다.
+    드라이버는 기존 sodreal 연결을 재사용하므로 계속 살아 있다.
+    """
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--mode", args.mode,
+        "--host", args.host,
+        "--reset-side-tcp",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=25,
+        )
+        (folder / "tcp_restore.log").write_text(completed.stdout)
+        print(completed.stdout, end="", flush=True)
+        if completed.returncode != 0:
+            raise RuntimeError("기본 TCP 초기화를 확인하지 못했습니다. tcp_restore.log를 확인하세요.")
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("기본 TCP 초기화 응답이 없습니다. 펜던트에서 TCP를 확인하세요.") from error
+
+
 def load_real_robot_config(config_path=REAL_ROBOT_CONFIG):
     """config/real_robot.json의 실물 설정을 읽고 검증한다. 파일만 읽고 부수 효과는 없다.
 
@@ -217,6 +436,61 @@ def load_config_cake_reference(
     if math.hypot(reference[0], reference[1]) > 900 or not 0 <= reference[2] <= 900:
         raise RuntimeError(f"케이크 기준 좌표가 작업 영역 밖입니다: {reference[:3]}")
     return reference
+
+
+def load_side_cake_reference(config_path=REAL_ROBOT_CONFIG):
+    """파일만 읽어 SIDE 펜촉의 BASE mm·ZYZ deg 기준점을 검증한다.
+
+    TOP 티칭 TCP 높이와 구분해 실측 상면 높이를 사용한다. 통합 실행과
+    --check에서 호출하며 로봇 조회·TCP 변경·이동은 하지 않는다.
+    """
+    from cake_decorator.bent_pen import VERTICAL_GRIPPER_ZYZ
+
+    config = load_real_robot_config(config_path)
+    xy = config.get("side_cake_center_xy_mm")
+    if not isinstance(xy, (list, tuple)) or len(xy) != 2:
+        raise RuntimeError("side_cake_center_xy_mm는 X, Y 두 값이어야 합니다.")
+    reference = [
+        *map(float, xy), float(config["cake_top_z_mm"]), *VERTICAL_GRIPPER_ZYZ,
+    ]
+    if not all(math.isfinite(value) for value in reference):
+        raise RuntimeError("SIDE 기준 좌표에 유한하지 않은 값이 있습니다.")
+    if math.hypot(*reference[:2]) > 900:
+        raise RuntimeError(f"SIDE 기준 좌표가 작업 영역 밖입니다: {reference[:3]}")
+    return reference
+
+
+def load_runtime_parameters(args, workspace_path=WORKSPACE_CONFIG):
+    """독립 옆면 시험 또는 통합 공정의 실행용 파라미터를 메모리에 만든다.
+
+    원본 yaml은 보존한다. 통합 모드는 DP의 옆면 경로만 45도 펜으로 만들고
+    RE가 주문 표면별로 동작을 선택하게 해 TOP의 기존 실행을 유지한다.
+    """
+    import yaml
+
+    runtime = yaml.safe_load(Path(workspace_path).read_text(encoding="utf-8"))
+    dp = runtime["drawing_path_node"]["ros__parameters"]
+    executor = runtime["robot_executor_node"]["ros__parameters"]
+    if args.integrated_side_cycle:
+        # 지름 유격은 현장 yaml 값을 그대로 쓴다. 누락·오타는 기동 전에 알린다.
+        allowance = float(dp["side_diameter_allowance_mm"])
+        if not math.isfinite(allowance) or allowance < 0:
+            raise RuntimeError("side_diameter_allowance_mm는 0 이상의 유한한 값이어야 합니다.")
+    dp.update(
+        side_pen_45=True,
+        side_drawing_speed=30.0,
+        travel_speed=100.0,
+        side_y_inset_mm=1.0 if args.integrated_side_cycle else args.side_y_inset_mm,
+    )
+    if args.integrated_side_cycle:
+        dp["integrated_side_cycle"] = True
+        executor.update(integrated_side_cycle=True, side_pen_45=False)
+    else:
+        executor["side_pen_45"] = True
+        if args.mode == "virtual":
+            # 가상 독립 검증은 이미 펜을 잡은 상태이므로 반납하지 않는다.
+            executor["side_return_pen"] = False
+    return runtime
 
 
 class RobotSession:
@@ -413,14 +687,19 @@ def bridge_worker(args):
     session = RobotSession()
     try:
         session.identity(args.mode, args.host)
-        # YES 영점은 '지금 TCP 위치'가 곧 기준점이라 그 사이 이동을 막아야 한다.
-        # 설정 파일 기준점은 로봇 위치와 무관한 고정 좌표이므로 이 검사를 하지 않는다.
-        if reference.get("source") != "config" and math.dist(
-            session.pose()[:3], reference["pose"][:3]
-        ) > 0.1:
-            raise RuntimeError(
-                "영점 기록 후 TCP가 이동했습니다. 실행기를 다시 시작하세요."
-            )
+        # 설정 기준점은 현재 TCP와 무관하다. 로봇 위치 조회·이동 검사는
+        # YES 영점과 독립 옆면 시험의 기록된 시작 자세에만 적용한다.
+        if reference.get("source") != "config":
+            observed = session.pose()
+            recorded = reference.get("start_pose", reference["pose"])
+            # 독립 옆면 시험은 접촉 후 이탈한 start_pose를 검사한다.
+            distance = math.dist(observed[:3], recorded[:3])
+            moved = distance >= 0.5 if "start_pose" in reference else distance > 0.1
+            if moved:
+                raise RuntimeError(
+                    f"영점 기록 후 TCP 위치 차이 {distance:.3f}mm: "
+                    f"기록={recorded[:3]}, 관측={observed[:3]}. 실행기를 다시 시작하세요."
+                )
     finally:
         session.close()
     import rclpy
@@ -533,12 +812,13 @@ class Processes:
         except ProcessLookupError:
             pass
 
-    def _wait_groups(self, timeout):
+    def _wait_groups(self, timeout, children=None):
         """종료한 직접 자식은 회수하고, 남은 하위 프로세스 그룹을 기다린다."""
+        children = self.children if children is None else children
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             alive = False
-            for _, process in self.children:
+            for _, process in children:
                 process.poll()
                 try:
                     os.killpg(process.pid, 0)
@@ -550,35 +830,48 @@ class Processes:
             time.sleep(0.05)
         return False
 
-    def close(self, grace=3.0, terminate_grace=2.0):
+    def close(self, grace=3.0, terminate_grace=2.0, before_driver_close=None):
         """정리 중 추가 Ctrl+C는 무시하고 소유 그룹을 끝까지 회수한다."""
         # 두 번째 Ctrl+C가 finally를 끊으면 ros2 부모만 끝나고 노드가 남는다.
         # 신호 변경은 메인 스레드에서만 허용되므로 다른 스레드에서는 생략한다.
         main_thread = threading.current_thread() is threading.main_thread()
         previous = signal.signal(signal.SIGINT, signal.SIG_IGN) if main_thread else None
         try:
-            self._close_groups(grace, terminate_grace)
+            if before_driver_close is None:
+                self._close_groups(grace, terminate_grace)
+            else:
+                application = [(name, process) for name, process in self.children if name != "driver"]
+                driver = [(name, process) for name, process in self.children if name == "driver"]
+                self._close_groups(grace, terminate_grace, application)
+                try:
+                    # 가상 드라이버가 살아 있을 때 TCP를 초기화한다.
+                    before_driver_close()
+                finally:
+                    self._close_groups(grace, terminate_grace, driver)
         finally:
             if main_thread:
                 signal.signal(signal.SIGINT, previous)
 
-    def _close_groups(self, grace, terminate_grace):
+    def _close_groups(self, grace, terminate_grace, children=None):
         """정상 종료를 기다린 뒤 응답하지 않는 자식 그룹에 TERM·KILL을 보낸다."""
+        children = self.children if children is None else children
         # 그룹 ID는 start_new_session으로 만든 이 실행기 소유의 값만 사용한다.
         # 부모 ros2가 먼저 종료돼도 남은 실제 ROS 노드가 빠지지 않도록 한다.
-        for _, process in reversed(self.children):
+        for _, process in reversed(children):
             self._signal_group(process.pid, signal.SIGINT)
-        if not self._wait_groups(grace):
-            for _, process in reversed(self.children):
+        if not self._wait_groups(grace, children):
+            for _, process in reversed(children):
                 self._signal_group(process.pid, signal.SIGTERM)
-            if not self._wait_groups(terminate_grace):
-                for _, process in reversed(self.children):
+            if not self._wait_groups(terminate_grace, children):
+                for _, process in reversed(children):
                     self._signal_group(process.pid, signal.SIGKILL)
-        for _, process in self.children:
+        for _, process in children:
             process.wait()
         # 그룹 종료 후 EOF까지 남은 로그를 비우고 pipe·파일 해제를 기다린다.
+        names = {f"log-{name}" for name, _ in children}
         for reader in self._readers:
-            reader.join()
+            if reader.name in names:
+                reader.join()
 
 
 def healthy(port):
@@ -632,17 +925,55 @@ def main():
         action="store_true",
         help=(
             "real: YES 영점 대신 config/real_robot.json의 side_cake_center_xy_mm·"
-            "cake_top_z_mm를 드로잉 기준점으로 사용(YES·펜촉 TCP 등록 없음)"
+            "yaml cake_center_pose를 드로잉 기준점으로 사용(YES·펜촉 TCP 등록 없음)"
         ),
+    )
+    parser.add_argument(
+        "--integrated-side-cycle",
+        action="store_true",
+        help="real: 설정 기준점으로 TOP/SIDE 전체 공정 실행(기동 중앙 이동·YES 없음)",
     )
     parser.add_argument(
         "--check",
         action="store_true",
         help="준비 상태만 검사하고 아무것도 실행하지 않음",
     )
+    parser.add_argument("--side-pen-45", action="store_true", help="교정한 45도 파지 펜으로 옆면 웹 검증")
+    parser.add_argument(
+        "--side-y-inset-mm",
+        type=float,
+        default=0.0,
+        help="옆면 BASE Y 양쪽을 각각 안으로 줄이는 거리(mm), 0~5",
+    )
+    parser.add_argument("--skip-center-confirm", action="store_true", help="옆면 중앙 기록 후 YES 없이 바로 이탈")
+    parser.add_argument("--reset-side-tcp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--bridge-reference", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    # start_real.sh 단위 테스트(YES 영점)에서는 real_robot.json 설정대로
+    if not math.isfinite(args.side_y_inset_mm) or not 0 <= args.side_y_inset_mm <= 5:
+        parser.error("--side-y-inset-mm는 0~5mm여야 합니다.")
+    configure_side_test(args)
+    if args.side_pen_45 and args.mode == "real" and not args.reuse_driver:
+        parser.error("옆면 검증은 sodreal을 먼저 켜고 --reuse-driver로 실행하세요.")
+    if args.integrated_side_cycle:
+        # 전체 공정은 펜을 집기 전이므로 중앙 접근·YES·TCP 교정을 하지 않는다.
+        if args.mode != "real" or args.side_pen_45 or args.reset_side_tcp:
+            parser.error("--integrated-side-cycle는 real 전체 공정 전용입니다.")
+        args.cake_center_from_config = True
+        os.environ["CAKE_PEN_TOOL_CYCLE"] = "1"
+        os.environ["CAKE_PLATE_SEQUENCE"] = "1"
+    if args.side_pen_45 and (
+        args.cake_center_from_config or args.calibrate_pen_tcp or args.preview_no_order
+    ):
+        parser.error("--side-pen-45는 설정 기준점·TCP 교정·미리보기와 함께 쓰지 않습니다.")
+    real_config = None
+    if args.side_pen_45 or args.integrated_side_cycle:
+        try:
+            real_config = load_real_robot_config()
+        except (OSError, KeyError, ValueError, RuntimeError) as error:
+            parser.error(f"config/real_robot.json을 읽지 못했습니다: {error}")
+        if args.side_pen_45:
+            args.cake_top_z_mm = float(real_config["cake_top_z_mm"])
+    # 직접 실행하는 실물 단위 테스트(YES 영점)에서는 real_robot.json 설정대로
     # YES 직후 펜촉 TCP를 등록한다. 명령줄 옵션을 직접 준 경우에는 그 값을 우선한다.
     # 다음 경우에는 TCP를 바꾸지 않는다.
     #   - 설정 파일 기준점(전체 공정): YES 자체가 없다.
@@ -656,6 +987,8 @@ def main():
         and not args.cake_center_from_config
         and not args.preview_no_order
         and not args.bridge_reference
+        and not args.reset_side_tcp
+        and not args.side_pen_45
         and os.environ.get("CAKE_PEN_TOOL_CYCLE") != "1"
         and os.environ.get("CAKE_PLATE_SEQUENCE") != "1"
     ):
@@ -671,7 +1004,7 @@ def main():
             parser.error("펜촉 TCP 추정은 real 모드에서 --cake-top-z-mm와 함께 사용하세요.")
         if not math.isfinite(args.cake_top_z_mm) or not 0 <= args.cake_top_z_mm <= 900:
             parser.error("상면 BASE Z는 0~900mm의 유한한 값이어야 합니다.")
-    elif args.cake_top_z_mm is not None:
+    elif args.cake_top_z_mm is not None and not args.side_pen_45:
         parser.error("--cake-top-z-mm는 --calibrate-pen-tcp와 함께 사용하세요.")
     if args.preview_no_order:
         if args.mode != "real":
@@ -702,6 +1035,22 @@ def main():
         os.environ["ROS_DOMAIN_ID"] = str(args.domain_id)
     # 별도 실행되는 브릿지 프로세스도 동일한 검색 정책을 적용한다.
     configure_discovery(args.mode, os.environ)
+    if args.reset_side_tcp:
+        if args.check:
+            parser.error("--check는 TCP 복원을 실행하지 않습니다.")
+        from cake_decorator.tcp_scope import reset_default_tcp
+
+        cleanup_session = RobotSession()
+        try:
+            cleanup_session.identity(args.mode, args.host)
+            reset_default_tcp(
+                cleanup_session.call, stop_running=True,
+                flange_euler="ZYX" if args.mode == "virtual" else "ZYZ",
+            )
+            print("기본 TCP 복원 완료: 선택 없음, 0,0,0,0,0,0", flush=True)
+        finally:
+            cleanup_session.close()
+        return
     if args.bridge_reference:
         bridge_worker(args)
         return
@@ -764,6 +1113,22 @@ def main():
     )
     if config_reference is not None:
         print(f"real_robot.json 케이크 기준점 [mm, deg]: {config_reference}", flush=True)
+    # 기준점·경로 설정 검사는 ROS 세션 생성보다 앞에 둔다. --check는
+    # 두 표면의 파일 설정을 검증한 뒤 드라이버·업무 노드를 시작하지 않고 끝난다.
+    side_reference = load_side_cake_reference() if args.integrated_side_cycle else None
+    runtime_parameters = (
+        load_runtime_parameters(args)
+        if args.side_pen_45 or args.integrated_side_cycle
+        else None
+    )
+    if side_reference is not None:
+        print(f"SIDE 실측 기준점 [mm, deg]: {side_reference}", flush=True)
+        dp = runtime_parameters["drawing_path_node"]["ros__parameters"]
+        print(
+            "통합 공정: 펜 순환·플레이트 사용, SIDE 속도 30mm/s, 공중 100mm/s, "
+            f"Y inset 1mm, 지름 유격 {dp['side_diameter_allowance_mm']}mm",
+            flush=True,
+        )
     if args.check:
         print(
             f"준비 검사 통과: {args.mode}, ROS_DOMAIN_ID={os.environ.get('ROS_DOMAIN_ID', '30')}"
@@ -785,15 +1150,20 @@ def main():
     folder.mkdir(parents=True)
     env = os.environ.copy()
     env["CAKE_BRIDGE_TOKEN"] = env.get("CAKE_BRIDGE_TOKEN") or secrets.token_urlsafe(32)
-    database = env.get("CAKE_DATABASE_PATH") or str(
-        folder / "orders.sqlite3"
-        if args.mode == "virtual"
-        else ROOT / "backend/data/orders.sqlite3"
-    )
+    if args.side_pen_45 and args.mode == "virtual":
+        # 상속된 실물 DB 환경변수가 있어도 가상 주문은 별도 DB에만 저장한다.
+        database = str(folder / "orders.sqlite3")
+    else:
+        database = env.get("CAKE_DATABASE_PATH") or str(
+            folder / "orders.sqlite3"
+            if args.mode == "virtual"
+            else ROOT / "backend/data/orders.sqlite3"
+        )
     env["CAKE_DATABASE_PATH"] = database
     env["API_PROXY_TARGET"] = f"http://127.0.0.1:{args.backend_port}"
     # 다른 포트로 동시에 실행해도 같은 로봇 컨트롤러를 두 번 띄우지 않는다.
-    lock = open(ROOT / "log/system/run.lock", "a+")
+    lock_name = "run-virtual-side-187.lock" if args.side_pen_45 and args.mode == "virtual" else "run.lock"
+    lock = open(ROOT / "log/system" / lock_name, "a+")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -803,6 +1173,7 @@ def main():
         )
     processes = Processes(folder, env)
     session = None
+    side_tcp_started = False
 
     def request_shutdown(_signal, _frame):
         """터미널 종료 신호도 Ctrl+C와 같은 정리 경로로 보낸다."""
@@ -826,6 +1197,14 @@ def main():
                     "virtual.launch.py",
                     f"pen_extension_cm:={args.pen_extension_cm}",
                 ]
+                if args.side_pen_45:
+                    center_xy = real_config["side_cake_center_xy_mm"]
+                    command += [
+                        "side_pen_45:=true",
+                        f"side_center_x:={float(center_xy[0]) / 1000}",
+                        f"side_center_y:={float(center_xy[1]) / 1000}",
+                        f"side_top_z:={args.cake_top_z_mm / 1000}",
+                    ]
             else:
                 command = [
                     "ros2",
@@ -840,6 +1219,9 @@ def main():
             processes.start("driver", command)
         session.identity(args.mode, args.host)
         session.wait_controller()
+        # 통합 공정에서도 SIDE TCP가 남지 않게 종료 시 복원한다. 드라이버의
+        # 대상·연결 확인 전 실패하거나 --check만 실행하면 복원을 시도하지 않는다.
+        side_tcp_started = args.integrated_side_cycle
         processes.start(
             "backend",
             [
@@ -856,11 +1238,32 @@ def main():
         )
         processes.wait(lambda: healthy(args.backend_port), 20)
         resolve_pending_orders(database, args.backend_port, env["CAKE_BRIDGE_TOKEN"])
-        # 기준점 결정: 설정 파일 옵션이면 real_robot.json 좌표를 그대로 쓰고 YES를 묻지 않는다.
-        # 그 외에는 기존처럼 YES 시점의 현재 TCP(단위 테스트용)를 기록한다.
+        start_pose = None
+        reference_source = "tcp"
+        # 전체 공정은 TOP 티칭 자세를 파일에서 읽는다. SIDE의 물리적 상면
+        # 기준점은 TM에 따로 전달하며 여기서 TOP 높이를 바꾸지 않는다.
         if config_reference is not None:
             reference = config_reference
             reference_source = "config"
+        elif args.side_pen_45:
+            # 고정 중심은 설정에서 전달하고 최신 로그나 현재 위치로 추정하지 않는다.
+            center_xy = real_config["side_cake_center_xy_mm"]
+            if (
+                len(center_xy) != 2
+                or not all(math.isfinite(float(value)) for value in center_xy)
+            ):
+                raise ValueError("side_cake_center_xy_mm는 유효한 X, Y 두 값이어야 합니다.")
+            from cake_decorator.bent_pen import VERTICAL_GRIPPER_ZYZ
+
+            # 적용 도중 오류가 나거나 YES 대기 중 종료돼도 복원을 실행한다.
+            side_tcp_started = True
+            if args.mode == "virtual":
+                prepare_virtual_side_pen(session)
+            reference, start_pose = prepare_side_pen_reference(
+                session,
+                [*map(float, center_xy), args.cake_top_z_mm, *VERTICAL_GRIPPER_ZYZ],
+                skip_confirm=args.skip_center_confirm,
+            )
         else:
             reference = prepare_reference(
                 session, args.mode,
@@ -869,16 +1272,28 @@ def main():
                 calibration_log=folder / "contact_tcp.json",
                 no_prompt=args.preview_no_order,
             )
-            reference_source = "tcp"
         print(f"상면 중심 TCP [mm, deg]: {reference}", flush=True)
         reference_file = folder / "reference.json"
-        # source는 브릿지가 'TCP 이동 검사'를 할지 정하는 데 쓴다.
-        reference_file.write_text(
-            json.dumps(
-                {"mode": args.mode, "pose": reference, "source": reference_source}
+        # 브릿지는 설정 기준점에서 TCP 위치 검사를 생략한다. 독립 옆면 시험은
+        # 기존처럼 이탈 후 start_pose를 별도로 보존해 시작 위치를 확인한다.
+        record = {"mode": args.mode, "pose": reference, "source": reference_source}
+        if start_pose is not None:
+            record["start_pose"] = start_pose
+            record["side_pen_45"] = True
+        reference_file.write_text(json.dumps(record))
+        config = str(WORKSPACE_CONFIG)
+        if runtime_parameters is not None:
+            import yaml
+
+            filename = (
+                "integrated_side_cycle.yaml"
+                if args.integrated_side_cycle
+                else "side_pen_45.yaml"
             )
-        )
-        config = str(ROOT / "ws_cobot1/src/cake_decorator/config/workspace_config.yaml")
+            config = str(folder / filename)
+            Path(config).write_text(
+                yaml.safe_dump(runtime_parameters, allow_unicode=True), encoding="utf-8",
+            )
         for name in ("drawing_path_node", "robot_executor_node", "task_manager_node"):
             command = ["ros2", "run", "cake_decorator", name, "--ros-args"]
             command += (
@@ -886,25 +1301,30 @@ def main():
                 if name == "task_manager_node"
                 else ["--params-file", config]
             )
-            if name == "robot_executor_node" and args.mode == "virtual":
+            if name == "robot_executor_node" and args.mode == "virtual" and not args.side_pen_45:
                 command += ["-p", "virtual_initial_approach:=true"]
-            # start_real_pen_cycle.sh로 실행한 경우에만 드로잉 전후 펜 집기·반납을 켠다.
-            # 기존 start_real.sh·start_virtual.sh의 동작은 바뀌지 않는다.
+            # 실물 전체 공정과 명시적 펜 순환 실행에서 집기·반납을 켠다.
             if (
                 name == "robot_executor_node"
                 and os.environ.get("CAKE_PEN_TOOL_CYCLE") == "1"
             ):
                 command += ["-p", "pen_tool_cycle:=true"]
-            # start_real_full_process.sh로 실행한 경우에만 드로잉 앞뒤의
-            # 플레이트 준비(/plate_prepare)·후처리(/plate_finish)를 켠다.
+            # 실물 전체 공정은 드로잉 앞뒤 플레이트 준비·후처리를 켠다.
             # 실행 노드는 서비스를 제공하고 작업 관리 노드는 주문마다 호출하므로
             # 두 노드에 같은 값을 넘겨야 한다. task_manager_node는 yaml을
-            # 읽지 않으므로 -p로 직접 전달한다. 기존 진입점의 기본값(false)은 유지된다.
+            # 읽지 않으므로 -p로 직접 전달한다.
             if (
                 name in ("robot_executor_node", "task_manager_node")
                 and os.environ.get("CAKE_PLATE_SEQUENCE") == "1"
             ):
                 command += ["-p", "plate_sequence_enabled:=true"]
+            if name == "task_manager_node" and args.integrated_side_cycle:
+                # TM은 yaml을 읽지 않는다. SIDE의 실측 펜촉 기준점을 따로
+                # 넘겨 TOP 티칭 자세와 주문 표면에 맞게 구분하도록 한다.
+                command += [
+                    "-p", "integrated_side_cycle:=true",
+                    "-p", f"side_reference_pose:={json.dumps(side_reference)}",
+                ]
             processes.start(name, command)
         session.ready_application()
         processes.start(
@@ -962,8 +1382,14 @@ def main():
     finally:
         # 정리 순서는 자식 프로세스 회수를 우선한다. ROS 조회 노드 종료가
         # 실패하거나 추가 Ctrl+C가 와도 다른 프로세스가 남지 않게 한다.
+        def restore_tcp():
+            try:
+                restore_side_tcp_after_exit(args, env, folder)
+            except (RuntimeError, OSError) as error:
+                print(f"기본 TCP 복원 실패: {error}", file=sys.stderr, flush=True)
+
         try:
-            processes.close()
+            processes.close(before_driver_close=restore_tcp if side_tcp_started else None)
         finally:
             try:
                 if session:
