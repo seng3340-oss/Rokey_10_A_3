@@ -13,7 +13,7 @@ drawing_path_node:
     # 아래 접근·속도 설정은 PR #16의 실행 계약을 유지한다.
     # 테스트2 종이 검증의 30mm/s를 기준으로 한다. 웹 비율은 이 값에 곱한다.
     drawing_speed: 30.0
-    # 옆면 접촉 후의 원호·스플라인만 60mm/s로 높인다. 기울기는 아래 17도를 유지한다.
+    # 옆면 접촉 후의 원호·스플라인만 60mm/s로 높인다. 기울기는 아래 15도를 유지한다.
     side_drawing_speed: 60.0
     travel_speed: 80.0
     # DP 내부 접근 거리 단위는 mm다. RE의 m 파라미터와 구분한다.
@@ -22,12 +22,10 @@ drawing_path_node:
     duplicate_tolerance_mm: 0.01
     side_path_error_mm: 0.1
     side_diagonal_mode: spline
-    side_pen_vertical_deg: 17.0
-    # 실제 치수는 유지하고 옆면 펜촉 목표만 반지름 방향으로 1mm 바깥에 둔다.
-    side_diameter_allowance_mm: 2.0
+    side_pen_vertical_deg: 15.0
     drawing_z_offset: 0.0
     # TOP은 YES 시점의 펜 자세를 우선 유지하고, 영점 자세가 없을 때만 수직을 쓴다.
-    # SIDE의 수직 기준 17도 설정과 별개다.
+    # SIDE의 수직 기준 15도 설정과 별개다.
     pen_tilt_deg: 0.0
     side_margin_ratio: 0.05
     # cake_center_x/y와 cake_top_z는 티칭 전이므로 기본 실행 좌표로 넣지 않는다.
@@ -41,6 +39,15 @@ robot_executor_node:
     pen_grip_width: 10.0
     pen_grip_force: 20.0
     gripper_open_width: 100.0
+    # 펜 거치대 좌표
+    pen_stand_pose: [248.86, 244.77, 312.99, 123.66, 180.00, 123.43] # 펜을 잡을 위치
+    pen_stand_approach_pose: [43.61, -1.88, 99.63, 0.09, 82.26, 43.29] # 펜이 있는 위치의 상공
+    pen_gripper_pose: [248.91, 244.76, 548.06, 37.07, -179.99, 36.84] # 펜을 잡고 수직 상공
+    pen_drop_approach_pose: [43.58, 0.53, 69.85, 0.09, 109.63, 43.31] # 펜을 놓을 위치 상공
+    pen_drop_pose: [248.86, 244.77, 314.84, 40.25, 180.00, 40.02] # 펜을 놓을 위치
+    pen_drop_after_pose: [248.91, 244.76, 548.06, 37.07, -179.99, 36.84] # 펜을 놓은 후 상공
+    cake_center_approach_pose: [-8.65, 8.16, 63.77, 0.00, 108.71, -9.48] # 케이크 중심 상공 위치
+    cake_center_pose: [401.80, -55.57, 510.39, 179.76, 179.35, 179.02] # 케이크 중심 위치
     # [변경 2026-11-18] move cakeplate_update.txt 기준 좌표/주석 정정(기존 잘못된 매핑 수정).
     # 기존 드로잉 파라미터는 유지. 신규 시퀀스는 명시적 활성화 전 실행 금지.
     # 실물 테스트 메모: TCP/툴, 동작 경로, 충돌 가능성은 장비에서 확인.
@@ -50,7 +57,21 @@ robot_executor_node:
     # [요청] 위 원본 속도는 적용하지 않음. Git 함수의 기본값을 사용.
     # 작업 취소/비상정지 메모: ROS2 작업 취소 처리와 장비 물리적 비상정지는 별개.
     plate_sequence_enabled: false
-    # [변경] 원본 DO 명령 대신 Git의 RG2 서비스 사용. 추후 opener gripper 명령 변경 가능.
+    # [변경 2026-11-19] 그리퍼 최신 PM 방식: 제어박스 디지털 출력(DO) 펄스.
+    # 기본 DO2=Open, DO1=Close, 0.5초 유지. 실제 배선이 반대이면 아래 두
+    # 포트 값만 교환한다(예: open=1, close=2). 코드는 수정하지 않는다.
+    # 포트는 1~16 범위여야 하고 서로 달라야 하며, 펄스는 0보다 커야 한다.
+    # 잘못된 값이면 robot_executor_node가 시작 단계에서 오류로 중단한다.
+    # 설정 변경은 로봇이 정지한 상태(노드 시작 전)에서만 적용한다.
+    gripper_open_do: 2
+    gripper_close_do: 1
+    gripper_pulse_sec: 0.5
+    # 가상환경에 set_ctrl_box_digital_output 서비스가 없을 때만 기존
+    # /onrobot/sendCommand를 대체 경로로 사용한다. DO 호출이 실패해도
+    # 다른 포트나 백엔드로 자동 전환하지 않는다.
+    gripper_virtual_fallback: true
+    # 아래 width/force 값은 DO 방식에서 호환용으로만 남긴다.
+    # 가상 RG2 대체 경로에서는 open/close 명령 인수로 사용된다.
     # close: 0.5초 + 0.5초 대기, open: 1.0초 대기.
     opener_grip_width_mm: 10.0  # 기존 gripper_close 기본값. 실제 오프너 폭 확인 필요
     opener_grip_force_n: 20.0   # 기존 gripper_close 기본값. 실제 파지력 확인 필요
@@ -191,8 +212,7 @@ robot_executor_node:
     # 오프너를 최초 파지했던 높이에 다시 위치시킴
     plate_deliver_opener_ps2: [0.00, 0.00, -100.00, 0.00, 0.00, 0.00]
 
-# [변경 2026-11-18] Task Manager에서 준비 → 드로잉 → 후처리 실행 여부.
-# 실제 로봇 TCP/툴/충돌/그리퍼 검증 후 두 노드 모두 true로 설정한다.
+
 task_manager_node:
   ros__parameters:
     plate_sequence_enabled: false

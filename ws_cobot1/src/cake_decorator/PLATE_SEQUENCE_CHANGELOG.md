@@ -31,7 +31,7 @@
 ## 의도적인 원본 대비 변경
 - `move_cake_ps_L`: `pick()`의 접근 위치 복귀와 중복되어 별도 호출하지 않음.
 - 오프너 반환은 `place()`가 접근 위치까지 추가 후퇴함. 원본은 해제 후 종료.
-- DO1/DO2 펄스 대신 기존 RG2 `open`/`close` 서비스 사용. 원본 대기시간을 작업별 설정으로 보존.
+- ~~DO1/DO2 펄스 대신 기존 RG2 `open`/`close` 서비스 사용.~~ (2026-11-19 변경: 아래 최신 그리퍼 절 참조. 제어박스 DO 펄스를 기본으로 사용한다.)
 - `pick_opener2`는 BASE 기준 상대 Z=-100mm를 절대 파지 위치로 환산하여 `pick()`에 전달.
 - 원본 좌표 주석은 YAML에 보존하고, 실제 실행 시 오프너 반납 좌표는 픽업 좌표와 공통 사용.
 
@@ -46,3 +46,64 @@
 - 오프너 반납 완료 후 `safe_position_5` 이동 추가.
 - 기존 `plate_sequence_enabled` 비활성 기본값 유지.
 - 검증: YAML 파싱, 원본 28개 좌표 대조, Python 구문 검사. 실물 구동 검증 아님.
+
+## 2026-11-19 그리퍼 디지털 출력 전환 및 포트 설정
+
+### 플레이트 전용 함수 정리
+- 플레이트 오프너 파지·반환은 기존 `pick()`·`place()`를 그대로 재사용한다.
+- 중복 구현이던 `plate_pick()`, `plate_place()`, `plate_gripper_open/close()`를 제거했다.
+- `pick()`에는 `close_wait_sec`, `close_settle_sec`, `pre_open_wait_sec`,
+  `place()`에는 `open_wait_sec`만 추가했다. 기본값은 0초라 기존 호출과 호환된다.
+- `plate_sequence.py`는 좌표 이동 후 기존 `pick()`/`place()`를 호출한다.
+- PM의 기존 드로잉 호출 경로와 Task Manager의 준비 → 드로잉 → 후처리 순서는 유지한다.
+
+### 그리퍼 제어 방식 (실제 장비)
+- `/onrobot/sendCommand` 대신 제어박스 디지털 출력 서비스
+  `/dsr01/dsr_controller2/io/set_ctrl_box_digital_output`을 사용한다.
+- 기본값: **DO2 = Open, DO1 = Close, 펄스 유지 0.5초**.
+- 각 명령은 지정 포트를 ON → 0.5초 유지 → OFF 순서로 보내고,
+  ON과 OFF의 서비스 결과를 모두 확인한다.
+- ON 또는 OFF가 실패하면 오류를 기록하고 `gripper_output_fault`를 세운다.
+  이 상태에서는 `_fail()`이 홈 복귀 자동 이동도 보내지 않는다.
+- 서비스 호출이 실패해도 다른 포트로 자동 전환하지 않는다.
+
+### 포트 전환 방법
+`ws_cobot1/src/cake_decorator/config/workspace_config.yaml`의
+`robot_executor_node.ros__parameters`에서 아래 값만 바꾼다.
+
+```yaml
+gripper_open_do: 2
+gripper_close_do: 1
+gripper_pulse_sec: 0.5
+```
+
+배선이 반대인 장비는 다음처럼 두 포트만 교환한다.
+
+```yaml
+gripper_open_do: 1
+gripper_close_do: 2
+gripper_pulse_sec: 0.5
+```
+
+검증 규칙:
+- 포트는 정수 1~16이어야 한다.
+- Open과 Close 포트가 같으면 오류로 처리한다.
+- 펄스 시간은 0보다 큰 유한값이어야 한다.
+- 검증 실패 시 `robot_executor_node`가 시작 단계에서 중단되어 로봇을 움직이지 않는다.
+- 포트 설정은 로봇이 정지한 상태에서만 적용한다. 실행 중 변경은 거부된다
+  (`configure_gripper(..., robot_stopped=True)` 명시 필요).
+
+### 가상환경과 실제 장비의 차이
+- 실제 장비: DO 서비스가 있으므로 항상 DO2/DO1 펄스를 사용한다.
+- 가상환경: `set_ctrl_box_digital_output` 서비스가 없을 때만
+  `gripper_virtual_fallback: true` 설정에 따라 `/onrobot/sendCommand`의
+  `open(width)`/`close(width,force)`를 대체 사용한다.
+- 대체 백엔드는 시작 시 한 번만 선택하며, DO 호출 실패 후 자동으로
+  가상 백엔드로 넘어가지 않는다.
+- 가상 RG2에서는 `opener_*_width_mm`, `opener_grip_force_n`이 실제 명령 인수로
+  쓰이지만, 실제 DO 방식에서는 장비 배선·PM 설정이 동작을 결정하므로 호환용이다.
+
+### 검증 범위
+- 단위 테스트: 기본 DO2/DO1, 포트 교환, 범위·중복 검증, ON/OFF 실패 시 중단,
+  `pick()`/`place()` 그리퍼 실패 시 후속 이동 없음, 플레이트 시퀀스의 함수 재사용.
+- 실제 장비의 포트 전환·그리퍼 구동은 실물 확인 전 자동 실행하지 않는다.

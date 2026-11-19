@@ -1,0 +1,10 @@
+{
+  "python.analysis.extraPaths": [
+    "/opt/ros/jazzy/lib/python3.12/site-packages",
+    "${workspaceFolder}/ws_dsr/install/dsr_msgs2/lib/python3.12/site-packages",
+    "${workspaceFolder}/ws_dsr/install/dsr_common2/lib/python3.12/site-packages",
+    "${workspaceFolder}/ws_dsr/install/onrobot_rg_msgs/lib/python3.12/site-packages",
+    "${workspaceFolder}/ws_cobot1/install/cake_decorator_interfaces/lib/python3.12/site-packages",
+    "${workspaceFolder}/ws_cobot1/src/cake_decorator"
+  ]
+}

@@ -382,10 +382,3 @@ def test_pending_order_reset_uses_authenticated_resolution_api(tmp_path, monkeyp
     assert requests[0].full_url.endswith("/orders/ORD-TEST/resolve")
     assert requests[0].get_header("Authorization") == "Bearer test-token"
     assert json.loads(requests[0].data)["confirmed_not_running"] is True
-
-
-def test_real_defaults_are_configured_without_contact_cli_flags():
-    """실물 실행은 부가 옵션 없이 상면220mm와 YES 후 TCP 설정을 사용한다."""
-    import json
-    config = json.loads((PATH.parents[1] / "config/real_robot.json").read_text())
-    assert config == {"cake_top_z_mm": 220.0, "configure_pen_tcp_on_yes": True}

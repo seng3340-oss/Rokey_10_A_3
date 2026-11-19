@@ -18,7 +18,6 @@ DP(이 노드) 내부에서 픽셀→mm 변환 후 원뿔대 좌표 계산을 �
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 
 from cake_decorator_interfaces.msg import Waypoint3D as Waypoint3DMsg
 from cake_decorator_interfaces.srv import GenerateTrajectory
@@ -30,7 +29,6 @@ from .frustum_path import DrawingFrustum, pixel_to_path_mm
 from .path_simplification import simplify_stroke_mm
 from .surface_path import (
     side_surface_leg,
-    side_clearance_leg,
     continuous_side_leg,
     SplineSurfaceMove,
     split_spline_samples,
@@ -54,14 +52,13 @@ class DrawingPathNode(Node):
         self.declare_parameter("side_drawing_speed", 60.0)  # 옆면 접촉 후 그리기 mm/s
         self.declare_parameter("travel_speed", 80.0)  # mm/s (펜 올린 상태)
         self.declare_parameter("approach_height", 10.0)  # mm (펜 접근 높이)
-        self.declare_parameter("side_diameter_allowance_mm", 2.0)  # 옆면 경로 지름 보정(mm)
         self.declare_parameter("drawing_z_offset", 0.0)  # mm (표면 접촉 보정)
         self.declare_parameter("default_contact_force", 0.5)  # N
         self.declare_parameter("simplify_tolerance_mm", 0.15)
         self.declare_parameter("duplicate_tolerance_mm", 0.01)
         self.declare_parameter("side_path_error_mm", 0.1)
         self.declare_parameter("side_diagonal_mode", "spline")
-        self.declare_parameter("side_pen_vertical_deg", 17.0)
+        self.declare_parameter("side_pen_vertical_deg", 15.0)
         self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
         # TOP: 수직에서 기울어지는 각도 (0=수직, 30=30도 기울임)
         # SIDE: 법선에서 아래로 기울어지는 각도
@@ -187,13 +184,6 @@ class DrawingPathNode(Node):
                 "옆면 안쪽으로 들어가는 음수 접촉 오프셋은 허용하지 않습니다."
             )
 
-        if surface == "SIDE":
-            allowance = self._param("side_diameter_allowance_mm")
-            if not math.isfinite(allowance) or not 0 <= allowance <= 20:
-                raise ValueError("옆면 지름 보정은 0~20mm여야 합니다.")
-            cake = replace(cake, radial_offset_mm=allowance / 2.0)
-            self.get_logger().info(f"옆면 펜촉 반지름 보정: +{allowance / 2.0:.2f}mm")
-
         waypoints: list[Waypoint3DMsg] = []
         pen_states: list[bool] = []
 
@@ -307,15 +297,13 @@ class DrawingPathNode(Node):
         if mode not in ("spline", "arc_vertical"):
             raise ValueError("옆면 대각선 모드가 유효하지 않습니다.")
         diagonal = abs(end[0] - start[0]) > 1e-9 and abs(end[1] - start[1]) > 1e-9
-        if not pen_down:
-            # 획 사이에는 먼저 상면 위로 이탈한다. 미세 원호로 대각선을 만들지 않는다.
-            moves = side_clearance_leg(cake, start, end, offset)
-        elif diagonal and mode == "spline":
-            moves = continuous_side_leg(cake, start, end, offset)
-        else:
-            moves = side_surface_leg(
+        moves = (
+            continuous_side_leg(cake, start, end, offset)
+            if pen_down and diagonal and mode == "spline"
+            else side_surface_leg(
                 cake, start, end, offset, self._param("side_path_error_mm")
             )
+        )
         # 높이와 케이크 객체를 각각 전달해 새 펜 방향 계산을 사용한다.
         for move in moves:
             quat = pen_quat_side(move.arc_mm, move.end[2] - cake.cz, cake, tilt_deg=tilt, reference_quat=reference_quat)
@@ -357,7 +345,7 @@ class DrawingPathNode(Node):
         vertical_angle = self._param("side_pen_vertical_deg")
         if not math.isfinite(vertical_angle) or not 0 < vertical_angle < 90:
             raise ValueError("옆면 펜의 수직 기준 각도는 0~90도 사이여야 합니다.")
-        # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 17도면 해당 함수에는 73도.
+        # 기존 자세 함수는 수평 법선 기준이다. 수직 아래에서 15도면 해당 함수에는 75도.
         # 경사 법선은 이미 아래로 기울어져 있다. 그 각도를 빼야 PR #16의
         # 수직 기준 펜 각도가 원뿔대에서도 그대로 유지된다.
         tilt = 90.0 - vertical_angle - math.degrees(cake.slant_angle)

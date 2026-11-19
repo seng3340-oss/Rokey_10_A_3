@@ -1,6 +1,6 @@
 """알려진 상면 높이에서 수직 접촉한 펜촉의 TCP를 계산·적용한다.
 
-상면 높이를 아는 수직 접촉 자세에서 펜촉 오프셋을 추정한다. 실제 펜이 수직이고,
+한 점으로 펜 길이를 측정하는 제한적인 테스트다. 실제 펜이 수직이고,
 접촉 당시 활성 TCP의 XY가 펜촉의 XY와 같다는 가정이 필요하다.
 이 파일에는 로봇 이동이나 그리퍼 제어 명령이 없다.
 """
@@ -53,7 +53,7 @@ def estimate_contact_tcp(flange, current, top_z):
 
 
 def apply_contact_tcp(session, top_z, log_path):
-    """별도 펜촉 TCP를 등록·적용하고 현재 자세를 검증한다. 물리 이동은 없다."""
+    """별도 테스트 TCP를 등록·적용하고 현재 자세를 검증한다. 물리 이동은 없다."""
     from dsr_msgs2.srv import (
         ConfigCreateTcp, GetCurrentTcp, GetCurrentToolFlangePosx,
         GetCurrentPosj, GetRobotMode, SetCurrentTcp, SetRobotMode,
@@ -78,7 +78,7 @@ def apply_contact_tcp(session, top_z, log_path):
         assumptions="수직 펜, 활성 TCP의 XY와 실제 펜촉 XY가 동일",
         top_z_mm=top_z, previous_tcp=previous, restore_tcp=backup,
         previous_mode=int(mode), flange_pose=flange, previous_pose=current,
-        estimated_tcp=config, expected_pose=expected, configured_tcp=name,
+        estimated_tcp=config, expected_pose=expected, test_tcp=name,
         status="calculated",
     )
 
@@ -88,7 +88,7 @@ def apply_contact_tcp(session, top_z, log_path):
     save()
     print(f"펜촉 추정 위치 BASE [mm, deg]: {expected}", flush=True)
     print(f"등록할 플랜지 기준 TCP [mm, deg]: {config}", flush=True)
-    print(f"펜촉 TCP 이름: {name} / 기록: {log_path}", flush=True)
+    print(f"테스트 TCP 이름: {name} / 기록: {log_path}", flush=True)
     activation_attempted = False
     try:
         # 설정 등록을 위해 잠시 수동 모드로 전환하고 종료 시 원래 모드를 복원한다.
@@ -119,7 +119,7 @@ def apply_contact_tcp(session, top_z, log_path):
             raise RuntimeError("TCP 설정 중 관절이 움직였습니다. 수동 조작을 멈추고 다시 준비하세요.")
         selected = call(GetCurrentTcp, "tcp/get_current_tcp").info
         if selected != name:
-            raise RuntimeError(f"펜촉 TCP가 적용되지 않았습니다: {selected}")
+            raise RuntimeError(f"테스트 TCP가 적용되지 않았습니다: {selected}")
         record["status"] = "applied"
         record["actual_pose"] = actual
         save()

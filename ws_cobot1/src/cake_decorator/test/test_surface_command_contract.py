@@ -32,9 +32,6 @@ class SurfaceContractTests(unittest.TestCase):
     def setUpClass(cls):
         rclpy.init()
         cls.node = DrawingPathNode()
-        from rclpy.parameter import Parameter
-        cls.node.set_parameters([Parameter("side_pen_vertical_deg", value=30.0),
-                                 Parameter("side_diameter_allowance_mm", value=0.0)])
 
     @classmethod
     def tearDownClass(cls):

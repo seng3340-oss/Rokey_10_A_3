@@ -40,6 +40,8 @@ class PlateSequence:
         # TODO: 기준 무게 측정 기능은 주석만 유지(미구현).
         if not self._plate_joint('safe_position_1'):
             return False
+        # [변경 2026-11-19] 전용 plate_pick 대신 기존 pick()을 그대로 재사용한다.
+        # 플레이트 이동에 필요한 대기 시간만 pick()의 추가 인수로 전달한다.
         if not self._robot.pick(
             target=self._plate_opener_target(),
             approach=DsrPos(*self._param('plate_pick_opener1')),
@@ -96,7 +98,8 @@ class PlateSequence:
                 return False
         # deliver_opener_ps1/ps2는 pick_opener1/2와 동일 좌표: 공통값 재사용.
         # 기존 place()는 접근 위치로 후퇴한다(원본은 해제 직후 종료).
-        # Git RG2 서비스로 opener 해제. 향후 그리퍼 명령 교체 가능.
+        # [변경 2026-11-19] 전용 plate_place 대신 기존 place()을 그대로 재사용한다.
+        # 그리퍼는 place() 내부의 DO2 Open(기본값) 펄스로 오프너를 해제한다.
         if not self._robot.place(
             target=self._plate_opener_target(),
             approach=DsrPos(*self._param('plate_pick_opener1')),

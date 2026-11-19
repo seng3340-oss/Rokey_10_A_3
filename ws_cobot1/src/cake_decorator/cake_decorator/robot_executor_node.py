@@ -11,6 +11,7 @@ TM(task_manager)에서 ExecuteTask Goal을 보내면 전체 작업 흐름을
 
 from __future__ import annotations
 
+import time
 import traceback
 import threading
 
@@ -80,8 +81,20 @@ class RobotExecutorNode(Node):
         'pen_grip_width': 10.0,    # mm
         'pen_grip_force': 20.0,    # N
         'gripper_open_width': 100.0,  # mm
+        # [변경 2026-11-19] PM 최신 그리퍼 제어: 제어박스 DO 펄스.
+        # 기본 DO2=Open, DO1=Close, 0.5초 유지. 배선이 반대인 장비는
+        # YAML에서 두 포트 값만 교환하며 코드는 수정하지 않는다.
+        'gripper_open_do': 2,
+        'gripper_close_do': 1,
+        'gripper_pulse_sec': 0.5,
+        # 가상환경에 set_ctrl_box_digital_output 서비스가 없을 때만
+        # /onrobot/sendCommand를 대체 경로로 사용한다.
+        'gripper_virtual_fallback': True,
         'approach_height': 0.05,   # m
         'virtual_initial_approach': False,  # 실행기가 가상 모드에서만 활성화
+        # true면 웹 드로잉 전후에 _do_grasping_tool·_do_returning_tool을 호출한다.
+        # scripts/start_real_pen_cycle.sh로 실행할 때만 켜진다.
+        'pen_tool_cycle': False,
     }
 
     def __init__(self):
@@ -90,14 +103,31 @@ class RobotExecutorNode(Node):
         # 파라미터 선언
         for name, default in self._PARAM_DEFAULTS.items():
             self.declare_parameter(name, default)
+        self.declare_parameter('pen_stand_pose', [0.0]*6)
+        self.declare_parameter('pen_stand_approach_pose', [0.0]*6)
+        self.declare_parameter('pen_gripper_pose', [0.0]*6)
+        self.declare_parameter('pen_drop_approach_pose', [0.0]*6)
+        self.declare_parameter('pen_drop_pose', [0.0]*6)
+        self.declare_parameter('pen_drop_after_pose', [0.0]*6)
+        # 케이크 중심 좌표: approach는 관절 각도(deg), center는 BASE 작업 좌표(mm, deg)
+        self.declare_parameter('cake_center_approach_pose', [0.0]*6)
+        self.declare_parameter('cake_center_pose', [0.0]*6)
 
         # Doosan + 그리퍼 클라이언트
+        # 포트 검증에 실패하면 노드 생성 단계에서 ValueError로 중단된다.
+        # 아직 어떤 모터 명령도 보내지 않은 정지 상태이므로 포트 설정을
+        # 적용하기에 안전한 시점이다.
         self._robot = DoosanRobotClient(
             self,
             service_timeout=self._param('service_timeout'),
+            gripper_open_do=int(self._param('gripper_open_do')),
+            gripper_close_do=int(self._param('gripper_close_do')),
+            gripper_pulse_sec=float(self._param('gripper_pulse_sec')),
+            gripper_virtual_fallback=bool(
+                self._param('gripper_virtual_fallback')
+            ),
         )
 
-        # 기존 로봇 클라이언트를 공유하여 플레이트 시퀀스를 실행합니다.
         self._plate_sequence = PlateSequence(self._robot, self._param)
 
         # 콜백 그룹
@@ -190,10 +220,23 @@ class RobotExecutorNode(Node):
         return True
 
     def _fail(self, reason: str) -> None:
-        """FAILED 상태로 전이 + 안전 홈 복귀."""
+        """FAILED 상태로 전이 + 안전 홈 복귀.
+
+        [변경 2026-11-19] 그리퍼 DO OFF가 실패하면 출력이 켜진 채 남아 있을
+        수 있다. 이때 홈 복귀 같은 후속 자동 이동을 보내면 그리퍼가 물체를
+        놓지 않은 상태로 움직이므로, 출력 오류 플래그를 확인해 이동을 멈춘다.
+        """
         self.get_logger().error(f'작업 실패: {reason}')
         if can_transition(self._state, TaskState.FAILED):
             self._state = TaskState.FAILED
+
+        if getattr(self._robot, 'gripper_output_fault', False):
+            self.get_logger().error(
+                '그리퍼 출력 OFF 실패 상태이므로 홈 복귀 자동 이동을 중단합니다. '
+                '제어박스 출력과 장비 상태를 직접 확인하세요.'
+            )
+            return
+
         try:
             self._robot.move_home()
         except Exception:
@@ -268,7 +311,9 @@ class RobotExecutorNode(Node):
             (self._do_picking_cake,   'PICKING_CAKE_FAILED'),
             (self._do_placing_cake,   'PLACING_CAKE_FAILED'),
             (self._do_grasping_tool,  'GRASPING_TOOL_FAILED'),
+            (self._go_to_cake_center,  'MOVING_TO_CAKE_CENTER_FAILED'),
             (self._do_drawing,        'DRAWING_FAILED'),
+            (self._go_to_cake_center,  'MOVING_TO_CAKE_CENTER_FAILED'),
             (self._do_returning_tool, 'RETURNING_TOOL_FAILED'),
             (self._do_delivering,     'DELIVERING_FAILED'),
         ]
@@ -369,39 +414,39 @@ class RobotExecutorNode(Node):
         self.get_logger().info('케이크 배치 완료')
         return True
 
-    def _do_grasping_tool(self, goal_handle, task_goal) -> bool:
-        """GRASPING_TOOL: 펜/도구 집기 (TCP 전환 포함)."""
-        if not self._transition_to(TaskState.GRASPING_TOOL):
-            return False
+    # def _do_grasping_tool(self, goal_handle, task_goal) -> bool:
+    #     """GRASPING_TOOL: 펜/도구 집기 (TCP 전환 포함)."""
+    #     if not self._transition_to(TaskState.GRASPING_TOOL):
+    #         return False
 
-        self.get_logger().info(
-            f'도구 집기: {get_substeps(TaskState.GRASPING_TOOL)}'
-        )
+    #     self.get_logger().info(
+    #         f'도구 집기: {get_substeps(TaskState.GRASPING_TOOL)}'
+    #     )
 
-        if not hasattr(task_goal, 'tool_pose'):
-            self.get_logger().warn('tool_pose 없음 — 건너뜀')
-            return True
+    #     if not hasattr(task_goal, 'tool_pose'):
+    #         self.get_logger().warn('tool_pose 없음 — 건너뜀')
+    #         return True
 
-        # 1. TCP 전환
-        # TODO: DSR TCP 전환 서비스 호출
+    #     # 1. TCP 전환
+    #     # TODO: DSR TCP 전환 서비스 호출
 
-        # 2~4. 도구 접근 → 파지 → 후퇴
-        above = pose_msg_to_dsr(task_goal.tool_pose, z_offset_m=0.05)
-        target = pose_msg_to_dsr(task_goal.tool_pose)
+    #     # 2~4. 도구 접근 → 파지 → 후퇴
+    #     above = pose_msg_to_dsr(task_goal.tool_pose, z_offset_m=0.05)
+    #     target = pose_msg_to_dsr(task_goal.tool_pose)
 
-        if not self._robot.pick(
-            target=target,
-            approach=above,
-            grip_width=self._param('pen_grip_width'),
-            grip_force=self._param('pen_grip_force'),
-            open_width=self._param('gripper_open_width'),
-            speed_approach=50.0,
-        ):
-            self._fail('도구 집기 실패')
-            return False
+    #     if not self._robot.pick(
+    #         target=target,
+    #         approach=above,
+    #         grip_width=self._param('pen_grip_width'),
+    #         grip_force=self._param('pen_grip_force'),
+    #         open_width=self._param('gripper_open_width'),
+    #         speed_approach=50.0,
+    #     ):
+    #         self._fail('도구 집기 실패')
+    #         return False
 
-        self.get_logger().info('도구 집기 완료')
-        return True
+    #     self.get_logger().info('도구 집기 완료')
+    #     return True
 
     def _do_drawing(self, goal_handle, task_goal) -> bool:
         """DRAWING: 케이크 위에 레터링 드로잉."""
@@ -440,30 +485,30 @@ class RobotExecutorNode(Node):
         self.get_logger().info('드로잉 완료')
         return True
 
-    def _do_returning_tool(self, goal_handle, task_goal) -> bool:
-        """RETURNING_TOOL: 도구를 거치대에 반납."""
-        if not self._transition_to(TaskState.RETURNING_TOOL):
-            return False
+    # def _do_returning_tool(self, goal_handle, task_goal) -> bool:
+    #     """RETURNING_TOOL: 도구를 거치대에 반납."""
+    #     if not self._transition_to(TaskState.RETURNING_TOOL):
+    #         return False
 
-        self.get_logger().info(
-            f'도구 반납: {get_substeps(TaskState.RETURNING_TOOL)}'
-        )
+    #     self.get_logger().info(
+    #         f'도구 반납: {get_substeps(TaskState.RETURNING_TOOL)}'
+    #     )
 
-        if not hasattr(task_goal, 'tool_pose'):
-            self.get_logger().warn('tool_pose 없음 — 건너뜀')
-            return True
+    #     if not hasattr(task_goal, 'tool_pose'):
+    #         self.get_logger().warn('tool_pose 없음 — 건너뜀')
+    #         return True
 
-        above = pose_msg_to_dsr(task_goal.tool_pose, z_offset_m=0.05)
-        target = pose_msg_to_dsr(task_goal.tool_pose)
+    #     above = pose_msg_to_dsr(task_goal.tool_pose, z_offset_m=0.05)
+    #     target = pose_msg_to_dsr(task_goal.tool_pose)
 
-        if not self._robot.place(
-            target=target,
-            approach=above,
-            open_width=self._param('gripper_open_width'),
-            speed_approach=50.0,
-        ):
-            self._fail('도구 반납 실패')
-            return False
+    #     if not self._robot.place(
+    #         target=target,
+    #         approach=above,
+    #         open_width=self._param('gripper_open_width'),
+    #         speed_approach=50.0,
+    #     ):
+    #         self._fail('도구 반납 실패')
+    #         return False
 
         # TCP 복원
         # TODO: DSR TCP 원래 값으로 복원
@@ -616,21 +661,34 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
-        if request.drawing_surface == 'SIDE':
-            try:
-                plan.commands = self._robot.select_reachable_side_commands(
-                    plan.commands, lambda: goal_handle.is_cancel_requested,
-                )
-            except (RuntimeError, ValueError) as error:
-                self.get_logger().error(f'옆면 자세 선택 실패: {error}')
+        # 펜 순환 모드: 윗면 그림만 받고, 그리기 전에 거치대에서 펜을 집는다.
+        pen_cycle = self._param('pen_tool_cycle')
+        if pen_cycle:
+            if request.drawing_surface != 'TOP':
+                self.get_logger().error('펜 순환 모드는 윗면(TOP)만 그립니다.')
                 result.success = False
+                result.error_code = 'TOP_ONLY'
                 result.completed_strokes = 0
-                if goal_handle.is_cancel_requested:
-                    result.error_code = 'CANCELLED'
-                    goal_handle.canceled()
-                else:
-                    result.error_code = 'SIDE_POSE_UNREACHABLE'
-                    goal_handle.abort()
+                goal_handle.abort()
+                return result
+            # _do_grasping_tool은 상태 머신의 GRASPING_TOOL 단계 함수라서
+            # 바로 앞 단계(PLACING_CAKE)에서만 전이할 수 있다. 케이크 운반은 하지 않으므로
+            # 상태만 그 단계로 맞춘 뒤 호출한다.
+            self._state = TaskState.PLACING_CAKE
+            if not self._do_grasping_tool(goal_handle, request):
+                self._state = TaskState.IDLE
+                result.success = False
+                result.error_code = 'PEN_PICK_FAILED'
+                result.completed_strokes = 0
+                goal_handle.abort()
+                return result
+            # 펜을 집은 뒤 케이크 중심(상공 → 중심 → 상공)으로 이동하고 드로잉을 시작한다.
+            if not self._go_to_cake_center(goal_handle, request):
+                self._state = TaskState.IDLE
+                result.success = False
+                result.error_code = 'MOVING_TO_CAKE_CENTER_FAILED'
+                result.completed_strokes = 0
+                goal_handle.abort()
                 return result
 
         # 명령 실행
@@ -685,6 +743,22 @@ class RobotExecutorNode(Node):
                 prev_stroke_idx = cmd.stroke_idx
 
         self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
+
+        # 펜 순환 모드: 그리기가 끝나면 펜을 거치대에 반납한다.
+        # 드로잉 중 실패·취소했다면 위에서 이미 반환했으므로 반납하지 않는다(펜은 그리퍼에 남음).
+        if pen_cycle:
+            # GRASPING_TOOL → DRAWING → RETURNING_TOOL 순서로만 전이할 수 있다.
+            self._transition_to(TaskState.DRAWING)
+            returned = self._do_returning_tool(goal_handle, request)
+            # 다음 웹 주문에서 다시 PLACING_CAKE부터 시작할 수 있게 대기 상태로 돌린다.
+            self._state = TaskState.IDLE
+            if not returned:
+                result.success = False
+                result.error_code = 'PEN_RETURN_FAILED'
+                result.completed_strokes = plan.total_strokes
+                goal_handle.abort()
+                return result
+
         result.success = True
         result.completed_strokes = plan.total_strokes
         result.error_code = ''
@@ -696,74 +770,145 @@ class RobotExecutorNode(Node):
     # ==================================================================
 
     def _execute_grasp(self, goal_handle):
-        """GraspTool 액션 — 펜 집기/놓기."""
+        """GraspTool 액션 콜백 — __init__에서 등록하므로 없으면 노드가 시작되지 않는다.
+
+        GRASP는 _do_grasping_tool, RELEASE는 _do_returning_tool을 그대로 호출한다.
+        """
         request = goal_handle.request
         result = GraspTool.Result()
-
         action = request.action.upper()
-        self.get_logger().info(f'도구 {action}: {request.tool_id}')
-
-        above = pose_msg_to_dsr(
-            request.tool_pose,
-            z_offset_m=request.approach_dir.z * 0.05,
-        )
-        target = pose_msg_to_dsr(request.tool_pose)
-
-        # feedback 헬퍼
-        def _fb(phase: str, pct: float):
-            fb = GraspTool.Feedback()
-            fb.phase = phase
-            fb.progress_pct = pct
-            goal_handle.publish_feedback(fb)
-
-        # 1. 접근
-        _fb('APPROACHING', 0.0)
-        if not self._robot.move_line(above, speed_mm_s=50.0):
-            result.success = False
-            result.error_code = 'APPROACH_FAILED'
-            goal_handle.abort()
-            return result
-
-        # 2. 집기 or 놓기
-        open_w = self._param('gripper_open_width')
-
         if action == 'GRASP':
-            _fb('GRASPING', 30.0)
-            self._robot.gripper_open(open_w)
-            if not self._robot.move_line(target, speed_mm_s=30.0):
-                result.success, result.error_code = False, 'MOVE_TO_TOOL_FAILED'
-                goal_handle.abort()
-                return result
-            self._robot.gripper_close(
-                self._param('pen_grip_width'),
-                self._param('pen_grip_force'),
-            )
-
+            self._state = TaskState.PLACING_CAKE
+            ok = self._do_grasping_tool(goal_handle, request)
         elif action == 'RELEASE':
-            _fb('RELEASING', 30.0)
-            if not self._robot.move_line(target, speed_mm_s=30.0):
-                result.success, result.error_code = False, 'MOVE_TO_TOOL_FAILED'
-                goal_handle.abort()
-                return result
-            self._robot.gripper_open(open_w)
-
+            self._state = TaskState.DRAWING
+            ok = self._do_returning_tool(goal_handle, request)
         else:
-            result.success = False
-            result.error_code = f'UNKNOWN_ACTION: {action}'
+            ok = False
+        self._state = TaskState.IDLE
+        result.success = ok
+        result.error_code = '' if ok else f'{action}_FAILED'
+        if ok:
+            goal_handle.succeed()
+        else:
             goal_handle.abort()
-            return result
-
-        # 3. 후퇴
-        _fb('RETRACTING', 80.0)
-        if not self._robot.move_line(above, speed_mm_s=50.0):
-            result.success, result.error_code = False, 'RETRACT_FAILED'
-            goal_handle.abort()
-            return result
-
-        result.success = True
-        result.error_code = ''
-        goal_handle.succeed()
         return result
+
+    def _do_grasping_tool(self, goal_handle, task_goal) -> bool:
+        """펜 집기: 상공 → 펜 위치 → 그리퍼 닫기 → 수직 상공"""
+        if not self._transition_to(TaskState.GRASPING_TOOL):
+            return False
+
+        approach = self._param('pen_stand_approach_pose')
+        stand = self._param('pen_stand_pose')
+        gripper_up = self._param('pen_gripper_pose')
+
+        # 1. 펜 상공으로 이동 (관절)
+        self.get_logger().info('펜 상공 이동')
+        if not self._robot.move_joint(approach):
+            self._fail('펜 상공 이동 실패')
+            return False
+
+        # 2. 그리퍼 열기
+        time.sleep(0.5)
+        # [변경 2026-11-19] DO ON/OFF 결과를 확인한다. 실패하면 아래로
+        # 하강하지 않고 즉시 중단해 그리퍼 상태가 불명확한 채 움직이지 않는다.
+        if not self._robot.gripper_open(self._param('gripper_open_width')):
+            self._fail('펜 그리퍼 열기 실패')
+            return False
+        time.sleep(0.5)  # 대기 시간 추가
+
+        # 3. 펜 위치로 하강 (직선)
+        self.get_logger().info('펜 위치로 하강')
+        if not self._robot.move_line(DsrPos(*stand), speed_mm_s=30.0):
+            self._fail('펜 하강 실패')
+            return False
+
+        # 4. 펜 잡기
+        if not self._robot.gripper_close(
+            self._param('pen_grip_width'),
+            self._param('pen_grip_force'),
+        ):
+            self._fail('펜 그리퍼 닫기 실패')
+            return False
+
+        # 5. 수직 상공으로 올리기 (직선)
+        self.get_logger().info('펜 들어올리기')
+        if not self._robot.move_line(DsrPos(*gripper_up), speed_mm_s=30.0):
+            self._fail('펜 들어올리기 실패')
+            return False
+
+        self.get_logger().info('펜 집기 완료')
+        return True
+
+    def _go_to_cake_center(self, goal_handle, task_goal) -> bool:
+        """케이크 중심으로 이동: 상공 → 케이크 중심 → 상공"""
+        # TaskState에 MOVING_TO_CAKE_CENTER 상태가 없어 전이 검사는 하지 않는다.
+        # 펜 집기(GRASPING_TOOL) 상태를 유지한 채 이동만 수행한다.
+
+        approach = self._param('cake_center_approach_pose')
+        center = self._param('cake_center_pose')
+
+        # 1. 케이크 중심 상공으로 이동 (관절)
+        self.get_logger().info('케이크 중심 상공 이동')
+        if not self._robot.move_joint(approach):
+            self._fail('케이크 중심 상공 이동 실패')
+            return False
+
+        # 2. 케이크 중심으로 하강 (직선)
+        self.get_logger().info('케이크 중심으로 하강')
+        if not self._robot.move_line(DsrPos(*center), speed_mm_s=30.0):
+            self._fail('케이크 중심 하강 실패')
+            return False
+
+        # 3. 케이크 중심 상공으로 올리기 (관절)
+        # approach는 관절 각도라서 작업 좌표용 move_line에 넣으면 엉뚱한 위치(x=-8mm 등)로
+        # 직선 이동하게 된다. 1단계와 같이 move_joint로 복귀한다.
+        self.get_logger().info('케이크 중심 상공으로 올리기')
+        if not self._robot.move_joint(approach):
+            self._fail('케이크 중심 상공으로 올리기 실패')
+            return False
+
+        self.get_logger().info('케이크 중심 이동 완료')
+        return True
+
+    def _do_returning_tool(self, goal_handle, task_goal) -> bool:
+        """펜 반납: 상공 → 펜 놓을 위치 → 그리퍼 열기 → 상공"""
+        if not self._transition_to(TaskState.RETURNING_TOOL):
+            return False
+
+        drop_approach = self._param('pen_drop_approach_pose')
+        drop = self._param('pen_drop_pose')
+        drop_after = self._param('pen_drop_after_pose')
+
+        # 1. 놓을 위치 상공으로 이동 (관절)
+        self.get_logger().info('펜 반납 상공 이동')
+        if not self._robot.move_joint(drop_approach):
+            self._fail('펜 반납 상공 이동 실패')
+            return False
+
+        # 2. 펜 놓을 위치로 하강 (직선)
+        self.get_logger().info('펜 놓을 위치로 하강')
+        if not self._robot.move_line(DsrPos(*drop), speed_mm_s=30.0):
+            self._fail('펜 하강 실패')
+            return False
+
+        # 3. 그리퍼 열기 (펜 놓기)
+        time.sleep(0.5)
+        # [변경 2026-11-19] 열기 실패 시 후퇴 이동을 보내지 않는다.
+        if not self._robot.gripper_open(self._param('gripper_open_width')):
+            self._fail('펜 그리퍼 열기 실패')
+            return False
+        time.sleep(0.5)
+
+        # 4. 상공으로 후퇴 (직선)
+        self.get_logger().info('펜 반납 후 상공 이동')
+        if not self._robot.move_line(DsrPos(*drop_after), speed_mm_s=50.0):
+            self._fail('펜 반납 후퇴 실패')
+            return False
+
+        self.get_logger().info('펜 반납 완료')
+        return True
 
     # ==================================================================
     # PickAndPlace 액션 실행
@@ -798,7 +943,11 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
-        self._robot.gripper_open(grip_w + 20.0)
+        # [변경 2026-11-19] 그리퍼 명령 실패 시 하강·상승 등 후속 이동을 중단한다.
+        if not self._robot.gripper_open(grip_w + 20.0):
+            result.success, result.error_code = False, 'PICK_GRIPPER_OPEN_FAILED'
+            goal_handle.abort()
+            return result
 
         _fb('GRIPPING', 20.0)
         if not self._robot.move_line(pick_target, speed_mm_s=30.0):
@@ -806,7 +955,10 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
-        self._robot.gripper_close(grip_w)
+        if not self._robot.gripper_close(grip_w):
+            result.success, result.error_code = False, 'PICK_GRIPPER_CLOSE_FAILED'
+            goal_handle.abort()
+            return result
 
         _fb('LIFTING', 40.0)
         if not self._robot.move_line(pick_above, speed_mm_s=30.0):
@@ -831,7 +983,11 @@ class RobotExecutorNode(Node):
             return result
 
         _fb('RELEASING', 90.0)
-        self._robot.gripper_open(grip_w + 20.0)
+        # [변경 2026-11-19] 열기 실패 시 후퇴 이동을 보내지 않는다.
+        if not self._robot.gripper_open(grip_w + 20.0):
+            result.success, result.error_code = False, 'PLACE_GRIPPER_OPEN_FAILED'
+            goal_handle.abort()
+            return result
 
         if not self._robot.move_line(place_above, speed_mm_s=50.0):
             result.success, result.error_code = False, 'PLACE_RETRACT_FAILED'

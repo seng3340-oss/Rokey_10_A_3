@@ -27,9 +27,9 @@ from cake_decorator_interfaces.srv import GenerateTrajectory
 
 
 class Phase(str, Enum):
-    PREPARING = 'PREPARING'  # [변경 2026-11-18] 드로잉 전 플레이트 준비
+    PREPARING = 'PREPARING'
+    FINISHING = 'FINISHING'
     DRAWING = 'DRAWING'
-    FINISHING = 'FINISHING'  # [변경] 드로잉 후 회수·출고·오프너 반환
     COMPLETED = 'COMPLETED'
     FAILED = 'FAILED'
     CANCELED = 'CANCELED'
@@ -42,7 +42,7 @@ class TaskManagerNode(Node):
         super().__init__('task_manager_node')
 
         # ── 파라미터 ──
-        self.declare_parameter('plate_sequence_enabled', False)  # 기본 비활성, 명시적 검증 후 활성화
+        self.declare_parameter('plate_sequence_enabled', False)
         self.declare_parameter('drawing_speed', 30.0)     # mm/s, DP 기본값과 통일
         self.declare_parameter('contact_force', 1.0)      # N
         # DP로 넘길 작업 속도 퍼센트. 0을 그대로 보내면 DP가 1%로
