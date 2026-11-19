@@ -1,6 +1,7 @@
 """단일 주문을 CakeOrder로 전달한다. 로봇 이동과 경로 계산은 수행하지 않는다."""
 
 import argparse
+import json
 import math
 import os
 from queue import Empty, Full, Queue
@@ -11,6 +12,8 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy
+from std_msgs.msg import String
 
 from cake_decorator_interfaces.action import CakeOrder
 from cake_decorator_interfaces.msg import TaskStatus
@@ -36,6 +39,16 @@ class RosBridgeNode(Node):
         self.feedback = Queue(maxsize=1)
         self.worker = None
         self.active_order_id = None
+        self.plans = Queue(maxsize=1)
+        self.last_tm_feedback_at = None
+        self.last_command = ""
+        self.monitor_worker = None
+        self.plan_subscription = self.create_subscription(
+            String,
+            "/hmi/drawing_plan",
+            self._on_plan,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
         self.status_subscription = self.create_subscription(
             TaskStatus, "/task_status", self._on_status, 10
         )
@@ -46,9 +59,67 @@ class RosBridgeNode(Node):
             target=self._run, name="cake-bridge-http", daemon=True
         )
         self.worker.start()
+        self.monitor_worker = threading.Thread(
+            target=self._monitor_loop, name="cake-bridge-monitor", daemon=True
+        )
+        self.monitor_worker.start()
         self.get_logger().info(
             f"TM {self.action_name} 대기 중. 서버 준비 후에만 새 주문을 인수합니다."
         )
+
+    def _monitor_loop(self):
+        """주문 HTTP 대기와 독립적으로 TM 발견 여부·최근 피드백 나이를 전송한다."""
+        failed = False
+        while not self.stop_event.is_set():
+            try:
+                age = (
+                    None
+                    if self.last_tm_feedback_at is None
+                    else max(0.0, time.monotonic() - self.last_tm_feedback_at)
+                )
+                self.backend.heartbeat(
+                    self.action_client.server_is_ready(), self.active_order_id, age
+                )
+                failed = False
+            except Exception as error:
+                if not failed:
+                    self.get_logger().warning(f"HMI 연결 관측 전송 실패: {error}")
+                failed = True
+            self.stop_event.wait(2.0)
+
+    def _on_plan(self, message):
+        """ROS 콜백에서는 계획을 큐에만 넣는다. HTTP 대기는 하지 않는다."""
+        try:
+            if len(message.data) > 2 * 1024 * 1024:
+                raise ValueError("계획 메시지가 너무 큽니다.")
+            plan = json.loads(message.data)
+            if plan.get("order_id") != self.active_order_id or plan.get("version") != 1:
+                return
+            try:
+                self.plans.get_nowait()
+            except Empty:
+                pass
+            self.plans.put_nowait(plan)
+        except (ValueError, TypeError, AttributeError, Full):
+            self.get_logger().warning(
+                "HMI 계획 메시지의 주문/형식을 확인할 수 없습니다."
+            )
+
+    def _flush_plan(self, claim):
+        """표시용 계획 전송 실패는 로봇 주문의 실행 결과를 바꾸지 않는다."""
+        plans = getattr(self, "plans", None)
+        if plans is None:
+            return
+        try:
+            plan = plans.get_nowait()
+        except Empty:
+            return
+        if plan.get("order_id") != claim["order_id"]:
+            return
+        try:
+            self.backend.plan(claim, plan)
+        except Exception as error:
+            self.get_logger().warning(f"HMI 계획 전송 실패: {error}")
 
     def _wait(self, future, timeout, claim=None):
         """ROS future를 작업 스레드에서 기다린다. ROS spin을 중첩 호출하지 않는다."""
@@ -66,6 +137,7 @@ class RosBridgeNode(Node):
         """작업 상태 Topic도 활성 주문에 한해 같은 상태 기록 경로로 전달한다."""
         if status.order_id != self.active_order_id:
             return
+        self.last_command = status.current_command
         self._on_feedback(
             status.order_id,
             SimpleNamespace(
@@ -81,6 +153,7 @@ class RosBridgeNode(Node):
         """가장 최근 상태만 큐에 넣어 ROS 콜백에서 HTTP 대기를 하지 않는다."""
         if order_id != self.active_order_id:
             return
+        self.last_tm_feedback_at = time.monotonic()
         try:
             self.feedback.get_nowait()
         except Empty:
@@ -93,6 +166,7 @@ class RosBridgeNode(Node):
 
     def _flush_feedback(self, claim):
         """TM Feedback을 작업 스레드에서 백엔드에 전달한다."""
+        self._flush_plan(claim)
         try:
             order_id, feedback = self.feedback.get_nowait()
         except Empty:
@@ -103,6 +177,7 @@ class RosBridgeNode(Node):
             claim,
             "feedback",
             phase=feedback.current_phase[:128],
+            current_command=getattr(self, "last_command", "")[:128],
             progress_pct=max(0.0, min(100.0, float(feedback.progress_pct))),
             message=feedback.message[:2048],
         )
@@ -147,8 +222,13 @@ class RosBridgeNode(Node):
         self.backend.event(
             claim,
             "completed" if succeeded else "failed",
+            # 최종 결과가 직전 공정 피드백을 덮을 때 단계·문구를 비우지 않는다.
+            phase="COMPLETED" if succeeded else "FAILED",
             progress_pct=100.0 if succeeded else 0.0,
-            message=result.result.error_msg[:2048],
+            message=(
+                result.result.error_msg
+                or ("TM 작업 완료" if succeeded else "TM 작업 실패")
+            )[:2048],
             error_code=result.result.error_code[:256],
             elapsed_time_sec=elapsed,
         )
@@ -167,6 +247,8 @@ class RosBridgeNode(Node):
                 claim = self.backend.claim()
                 if claim is not None:
                     self.active_order_id = claim["order_id"]
+                    self.last_command = ""
+                    self.last_tm_feedback_at = None
                     self._dispatch(claim)
             except Exception as error:
                 self.get_logger().error(str(error))
@@ -187,6 +269,8 @@ class RosBridgeNode(Node):
         self.stop_event.set()
         if self.worker:
             self.worker.join(timeout=25.0)
+        if self.monitor_worker:
+            self.monitor_worker.join(timeout=4.0)
         self.action_client.destroy()
 
 
@@ -223,8 +307,18 @@ def main(args=None):
         "--pose-service", default="/dsr01/dsr_controller2/aux_control/get_current_posx"
     )
     parser.add_argument("--result-timeout", type=float, default=1800.0)
+    parser.add_argument(
+        "--execution-mode",
+        choices=("unknown", "real", "simulation"),
+        default="unknown",
+        help="운영자가 선택한 운전 설정. 장비 연결/안전 확인 신호가 아닙니다.",
+    )
     parsed, ros_args = parser.parse_known_args(args)
-    backend = BackendClient(parsed.backend_url, os.environ.get("CAKE_BRIDGE_TOKEN", ""))
+    backend = BackendClient(
+        parsed.backend_url,
+        os.environ.get("CAKE_BRIDGE_TOKEN", ""),
+        execution_mode=parsed.execution_mode,
+    )
     if not math.isfinite(parsed.result_timeout) or parsed.result_timeout <= 0:
         raise ValueError("최종 결과 대기 시간은 양수여야 합니다.")
     print(

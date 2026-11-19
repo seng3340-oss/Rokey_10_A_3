@@ -7,9 +7,10 @@ MoveLine, MoveJoint, 그리퍼 제어 등을 단순한 메서드로 제공한다
 
 from __future__ import annotations
 
+from threading import Event
 from typing import Optional
 
-import rclpy
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 
@@ -35,7 +36,7 @@ ASYNC = 1
 class DoosanRobotClient:
     """Doosan M0609 + RG2 ROS2 서비스 클라이언트.
 
-    모든 이동/그리퍼 명령을 동기 호출로 래핑한다.
+    노드의 executor가 응답을 처리하는 동안 호출자는 명령 완료를 기다린다.
     """
 
     # 서비스 이름 상수.
@@ -53,14 +54,16 @@ class DoosanRobotClient:
     }
 
     def __init__(self, node: Node, service_timeout: float = 5.0):
-        self._node = node
         self._timeout = service_timeout
         self._logger = node.get_logger()
 
         # 서비스 클라이언트 일괄 생성
         self._clients: dict[str, object] = {}
+        self._service_callbacks = ReentrantCallbackGroup()
         for key, (topic, srv_type) in self._SERVICES.items():
-            self._clients[key] = node.create_client(srv_type, topic)
+            self._clients[key] = node.create_client(
+                srv_type, topic, callback_group=self._service_callbacks,
+            )
 
     # ------------------------------------------------------------------
     # 서비스 호출 헬퍼
@@ -80,7 +83,12 @@ class DoosanRobotClient:
             return None
 
         future = client.call_async(request)
-        rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout)
+        # 실행 중인 액션 콜백 안에서 같은 노드를 다시 spin하면 응답 처리가 멈출 수 있다.
+        completed = Event()
+        future.add_done_callback(lambda _: completed.set())
+        if not future.done() and not completed.wait(timeout):
+            self._logger.error(f'{key} 서비스 응답 시간 초과')
+            return None
 
         if future.result() is None:
             self._logger.error(f'{key} 서비스 호출 실패')

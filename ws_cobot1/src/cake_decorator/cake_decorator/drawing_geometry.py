@@ -53,33 +53,52 @@ def pixel_to_mm_top(
     px_x: float, px_y: float,
     canvas_w: float, canvas_h: float,
     radius: float,
+    *, drawing_diameter_px: float | None = None,
 ) -> tuple[float, float]:
     """TOP 캔버스 픽셀 → mm 오프셋 (윗면 중심 기준).
 
-    Returns: (mm_x, mm_y) — 윗면 중심에서의 오프셋
+    drawing_diameter_px가 있으면 가운데 원의 지름을 기준으로 환산한다.
+    반환하는 두 값은 윗면 중심에서의 mm 오프셋이다.
     """
-    scale = (2.0 * radius) / min(canvas_w, canvas_h)
+    # 기본은 전체 캔버스를 쓰며, 웹 서비스는 점선 원의 픽셀 지름을 전달한다.
+    diameter_px = min(canvas_w, canvas_h) if drawing_diameter_px is None else drawing_diameter_px
+    scale = (2.0 * radius) / diameter_px
     mm_x = (px_x - canvas_w / 2.0) * scale
     mm_y = (canvas_h / 2.0 - px_y) * scale   # Y축 반전
     return (mm_x, mm_y)
+
+
+def side_drawing_rect(canvas_w, canvas_h, radius, height):
+    """웹과 동일한 측면 입력 띠의 (왼쪽, 위, 폭, 높이)를 원본 px로 반환한다.
+
+    1024px 중 896px를 둘레 전체에 대응시키고, 띠 높이는 실제 높이/둘레로 정한다.
+    Canvas 전체를 표면으로 쓰면 웹 미리보기와 각도·높이 축척이 달라진다.
+    """
+    if min(canvas_w, canvas_h, radius, height) <= 0:
+        raise ValueError("캔버스와 케이크 치수는 양수여야 합니다.")
+    width = canvas_w * (896.0 / 1024.0)
+    strip_height = width * height / (2.0 * math.pi * radius)
+    return ((canvas_w - width) / 2.0, (canvas_h - strip_height) / 2.0, width, strip_height)
 
 
 def pixel_to_mm_side(
     px_x: float, px_y: float,
     canvas_w: float, canvas_h: float,
     radius: float, height: float,
+    *, drawing_rect=None,
 ) -> tuple[float, float]:
-    """SIDE 캔버스 픽셀 → mm (호 길이, 높이).
+    """SIDE 픽셀을 (원주 호 길이, 바닥부터 높이) mm로 변환한다.
 
-    Returns: (arc_mm, height_mm)
-      arc_mm: 원주 방향 호 길이 (mm), 0부터 시작
-      height_mm: 바닥부터 높이 (mm), 0=바닥 ~ height=윗면
+    일반 좌표 유틸의 기본은 전체 캔버스다. 웹 요청을 처리하는 DP는 가운데
+    입력 띠를 drawing_rect로 명시하며 표면 밖의 픽셀을 거절한다.
     """
-    scale_x = (2.0 * math.pi * radius) / canvas_w
-    scale_y = height / canvas_h
-    arc_mm = px_x * scale_x
-    height_mm = (canvas_h - px_y) * scale_y   # Y축 반전
-    return (arc_mm, height_mm)
+    left, top, width, strip_height = drawing_rect or (0.0, 0.0, canvas_w, canvas_h)
+    if not (left - 1e-4 <= px_x <= left + width + 1e-4 and
+            top - 1e-4 <= px_y <= top + strip_height + 1e-4):
+        raise ValueError("획에 케이크 측면 입력 띠를 벗어난 점이 있습니다.")
+    arc_mm = (px_x - left) * (2.0 * math.pi * radius) / width
+    height_mm = (top + strip_height - px_y) * height / strip_height
+    return arc_mm, height_mm
 
 
 # =====================================================================

@@ -83,6 +83,18 @@ class TestPixelToMmTop:
         assert pytest.approx(my, abs=1e-6) == 40.0
 
 
+    def test_web_top_uses_the_visible_circle_diameter(self):
+        """점선 원의 위와 오른쪽 경계가 케이크 반지름 50 mm에 대응한다."""
+        right = pixel_to_mm_top(
+            832.0, 384.0, 1024.0, 768.0, 50.0, drawing_diameter_px=640.0,
+        )
+        top = pixel_to_mm_top(
+            512.0, 64.0, 1024.0, 768.0, 50.0, drawing_diameter_px=640.0,
+        )
+        assert right == pytest.approx((50.0, 0.0))
+        assert top == pytest.approx((0.0, 50.0))
+
+
 class TestPixelToMmSide:
     """SIDE 캔버스 픽셀 → mm (호 길이, 높이) 변환."""
 

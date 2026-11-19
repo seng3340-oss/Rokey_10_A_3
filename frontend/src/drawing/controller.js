@@ -1,3 +1,4 @@
+import { DRAFT_CHANNEL } from "../api/draftPreview";
 import { cakeView } from "./cake3d.js";
 import { submitDrawing } from "../api/drawing";
 import { DRAWING_LAYOUT } from "./cakeDimensions";
@@ -19,6 +20,31 @@ export function mountDrawing() {
   let current = null;
   let pointer = null;
   let reviewedPayload = null;
+  // 같은 출처의 HMI에만 메모리 사본을 보낸다. 서버 접수나 ROS 호출은 하지 않는다.
+  const draftChannel =
+    typeof BroadcastChannel === "undefined"
+      ? null
+      : new BroadcastChannel(DRAFT_CHANNEL);
+  function publishDraft() {
+    draftChannel?.postMessage({
+      kind: "draft-preview",
+      surface,
+      drawings: ["top", "side"].map((face) => ({
+        canvas_width: 1024,
+        canvas_height: 768,
+        drawing_surface: face,
+        strokes: drawings[face].map((points, stroke_id) => ({
+          stroke_id,
+          points,
+        })),
+      })),
+    });
+  }
+  // 늦게 열린 HMI도 현재 그림을 받는다. 채널 외에는 초안을 저장하지 않는다.
+  if (draftChannel)
+    draftChannel.onmessage = (event) => {
+      if (event.data?.kind === "request-draft") publishDraft();
+    };
   // 입력 캔버스와 별개인 텍스처를 사용해 두 면을 동시에 3D에 표시한다.
   const textures = {
     top: document.createElement("canvas"),
@@ -84,6 +110,7 @@ export function mountDrawing() {
   }
   /** 면별 필기 영역을 잘라 텍스처 크기로 옮긴 뒤 두 3D 뷰에 변경을 알린다. */
   function updateTextures() {
+    publishDraft();
     for (const name of ["top", "side"]) {
       const c = textures[name];
       const t = c.getContext("2d");
@@ -363,6 +390,7 @@ export function mountDrawing() {
     if (textureTimer !== null) clearTimeout(textureTimer);
     if (idleInterval !== null) clearInterval(idleInterval);
     document.removeEventListener("visibilitychange", onVisibility);
+    draftChannel?.close();
     live.dispose();
     review?.dispose();
   };

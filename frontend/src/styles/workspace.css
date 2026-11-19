@@ -1,0 +1,56 @@
+/* 두 화면의 스크롤을 분리해 작업 조회가 고객의 필기 위치를 바꾸지 않게 한다. */
+.operation-workspace {
+  position: fixed;
+  inset: 0;
+  background: #f5f1e9;
+  color: #51483d;
+}
+.operation-workspace > header {
+  padding: 14px 18px;
+  background: white;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.operation-workspace > header span {
+  font-size: 13px;
+}
+.operation-workspace > main {
+  height: calc(100dvh - 52px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px;
+}
+.operation-workspace section {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #d8ccbb;
+  border-radius: 12px;
+  background: white;
+}
+.operation-workspace h1 {
+  font-size: 14px;
+  margin: 0;
+  padding: 9px 14px;
+  background: #eee6d8;
+}
+.operation-workspace iframe {
+  border: 0;
+  width: 100%;
+  flex: 1;
+}
+@media (max-width: 750px) {
+  .operation-workspace {
+    overflow: auto;
+  }
+  .operation-workspace > main {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+  .operation-workspace section {
+    height: 85dvh;
+  }
+}

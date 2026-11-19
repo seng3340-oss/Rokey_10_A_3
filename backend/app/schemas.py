@@ -90,6 +90,8 @@ class OrderSummary(ContractModel):
     phase: str = ""
     progress_pct: float = 0.0
     message: str = ""
+    # 내부 토큰이나 이벤트 본문 대신 마지막 오류 코드만 공개 조회에 제공한다.
+    error_code: str = ""
 
 
 class OrderDetail(OrderSummary):

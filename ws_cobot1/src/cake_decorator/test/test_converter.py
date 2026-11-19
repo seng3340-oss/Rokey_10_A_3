@@ -135,6 +135,7 @@ def _expected_top_xy(px, py):
     """픽셀 → 윗면 중심 기준 m 좌표 (기대값 계산용)."""
     mm_x, mm_y = pixel_to_mm_top(
         px, py, CANVAS_W, CANVAS_H, RADIUS_M * 1000.0,
+        drawing_diameter_px=640.0,
     )
     return (
         (CAKE_TOP[0] * 1000.0 + mm_x) / 1000.0,
@@ -224,7 +225,7 @@ class TestMultipleStrokes:
     def test_side_surface_keeps_all_strokes(self, dp_node):
         """옆면도 여러 획을 전부 변환한다."""
         response = _convert(
-            dp_node, [STROKE_A, STROKE_B, STROKE_C], surface="SIDE",
+            dp_node, [STROKE_A, STROKE_B, [(420.0, 470.0), (460.0, 480.0), (500.0, 470.0)]], surface="SIDE",
         )
         assert response.success, response.error_msg
         assert _pen_segments(response.pen_states) == 3
@@ -276,3 +277,19 @@ class TestConversion:
         """점 하나짜리는 이동 경로가 없어 웨이포인트가 안 나온다."""
         response = _convert(dp_node, [[(500.0, 350.0)]])
         assert not response.success
+
+
+class TestWebSideStripContract:
+    """웹 띠의 경계가 케이크 전체 둘레·높이에 대응하는지 검증한다."""
+
+    def test_side_strip_corners_and_center(self):
+        from cake_decorator.drawing_geometry import side_drawing_rect, pixel_to_mm_side
+        import math
+        rect = side_drawing_rect(1024., 768., 50., 80.)
+        left, top, width, height = rect
+        assert left == 64. and width == 896.
+        assert pixel_to_mm_side(left, top, 1024., 768., 50., 80., drawing_rect=rect) == pytest.approx((0.,80.))
+        assert pixel_to_mm_side(left+width, top+height, 1024., 768., 50., 80., drawing_rect=rect) == pytest.approx((2*math.pi*50.,0.))
+        assert pixel_to_mm_side(512., 384., 1024., 768., 50., 80., drawing_rect=rect) == pytest.approx((math.pi*50.,40.))
+        with pytest.raises(ValueError):
+            pixel_to_mm_side(512., 0., 1024., 768., 50., 80., drawing_rect=rect)

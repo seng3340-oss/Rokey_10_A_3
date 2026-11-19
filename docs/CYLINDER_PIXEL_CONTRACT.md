@@ -11,7 +11,7 @@
 ```
 
 - 웹·백엔드·브릿지·TM은 원본 획 좌표와 캔버스 해상도를 보존합니다.
-- Stroke2D: uint32 stroke_id, Point32[] points. x/y는 px, z는 0입니다.
+- Stroke2D: uint32 stroke_id, Point32[] points. x/y는 원본 px이며 z는 0입니다.
 - 폐곡선 여부 필드는 없으며 입력하지 않은 끝점 연결을 하지 않습니다.
 - 원통 반지름은 하나만 사용합니다. 위·아랫면 반지름을 따로 전달하지 않습니다.
 - 케이크 위치는 BASE 기준 **윗면 중심**입니다. 바닥 중심이 아닙니다.
@@ -46,13 +46,14 @@ python3 scripts/generate_test_cake_model.py
 | cake_pose | BASE 윗면 중심(m)·케이크 프레임 방향 |
 | cake_radius | 원통 반지름(m), 기본0.05 |
 | cake_height | 원통 높이(m), 기본0.08 |
-| tool_orientation | 영점의 펜촉 TCP 방향. 케이크 프레임 방향과 별개 |
+| order_id | 요청을 보낸 주문 번호 |
+| operation_speed_percent | 기본 경로 속도 대비 백분율 |
 
 응답은 success, waypoints_3d, pen_states, estimated_duration_sec, error_msg를 유지합니다.
 `CakeOrder → DrawingPath → Stroke2D` 입력도 같은 원본 픽셀 규칙을 사용합니다.
-주문번호·속도 퍼센트·mm 스트로크를 DP 요청에 새 필수 입력으로 추가하지 않습니다.
+mm 스트로크는 이 서비스에서 사용하지 않습니다.
 
-## DP 담당자가 맞춰야 할 화면 좌표 규칙
+## 화면 좌표 규칙
 
 웹 원본 캔버스는1024×768px입니다. 실제 그림 영역은 캔버스 전체와 다릅니다.
 
@@ -67,16 +68,11 @@ python3 scripts/generate_test_cake_model.py
 
 이 규칙은 전달할 픽셀을 미리 정규화하라는 뜻이 아닙니다. 변환은 DP에서 수행합니다.
 
-## 이번 수정과 담당 범위
+## 윗면 가상 검증 범위
 
-이번에는 형상·설정·메시지 계약·브릿지 포장만 수정했습니다.
-팀원의 drawing_geometry.py와 drawing_path_node.py는 원통형·원본 픽셀 입력으로
-변경할 예정이므로 이 작업에서 계산 로직을 덮어쓰지 않았습니다.
-현재 원뿔대 DP는 mm 요청 필드를 읽으므로 해당 변경이 병합되기 전에는 새 서비스 계약과 호환되지 않습니다.
-
-빌드 목록에서 참조하던 Stroke2D를 복원하고, mm 입력 전용 PointMM/PointMM3D/StrokeMM과
-비어 있던 dsr_msgs2.srv/onrobot_rg_msgs.srv는 제거했습니다.
-기존 백엔드 주문 사본은 자동 변경하지 않습니다. 이전 경사 케이크 주문을 재실행하지 말고 새 설정으로 접수합니다.
+윗면 서비스는 1024×768px 캔버스의 가운데 640px 지름 원을 기준으로 합니다.
+펜 접촉 여부를 응답 배열과 개별 웨이포인트에 동일하게 넣습니다.
+옆면의 화면 띠와 컨트롤러 추종은 이번 윗면 실행 시험에 포함하지 않았습니다.
 
 ## 재빌드
 
@@ -88,4 +84,4 @@ source install/local_setup.bash
 ros2 interface show cake_decorator_interfaces/srv/GenerateTrajectory
 ```
 
-빌드는 타입·설치 확인입니다. DP 업데이트 후 TOP/SIDE의 실제 계산·가상 이동 통합 검증이 추가로 필요합니다.
+빌드는 타입과 설치를 확인합니다. 실제 장비의 접촉과 컨트롤러 추종은 별도 검증 범위입니다.

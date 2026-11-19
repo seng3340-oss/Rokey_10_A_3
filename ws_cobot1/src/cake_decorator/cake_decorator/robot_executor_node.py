@@ -550,9 +550,10 @@ class RobotExecutorNode(Node):
                 completed_strokes += 1
                 prev_stroke_idx = cmd.stroke_idx
 
-        self.get_logger().info(f'드로잉 완료: {completed_strokes + 1} 획')
+        # 마지막 펜 상승까지 성공하면 계획에 포함된 획 전체가 완료됐다.
+        self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
         result.success = True
-        result.completed_strokes = completed_strokes + 1
+        result.completed_strokes = plan.total_strokes
         result.error_code = ''
         goal_handle.succeed()
         return result
@@ -719,7 +720,7 @@ class RobotExecutorNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = RobotExecutorNode()
-    executor = MultiThreadedExecutor()
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:
         executor.spin()

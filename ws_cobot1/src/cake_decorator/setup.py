@@ -37,7 +37,7 @@ setup(
     zip_safe=True,
     maintainer="Cake project team",
     maintainer_email="applewlghks321@gmail.com",
-    description="케이크 주문 브릿지와 업무 노드 개발 틀. 로봇 실행은 미구현.",
+    description="케이크 주문 브릿지·작업 실행과 읽기 전용 HMI 상태 전달.",
     license="MIT",
     entry_points={
         "console_scripts": [

@@ -30,6 +30,7 @@ from .drawing_geometry import (
     pen_quat_side,
     pen_quat_top,
     pixel_to_mm_side,
+    side_drawing_rect,
     pixel_to_mm_top,
 )
 
@@ -207,42 +208,36 @@ class DrawingPathNode(Node):
         """
         quat = pen_quat_top(tilt_deg=tilt_deg)
 
-        # ── 1. 첫 점 위로 접근 (펜 들기) ──
-        mm_x, mm_y = pixel_to_mm_top(
-            pts_px[0][0], pts_px[0][1],
-            canvas_w, canvas_h, cake.radius,
-        )
-        fx, fy, fz = cake.top_to_abs(mm_x, mm_y)
-        waypoints.append(
-            self._wp(fx, fy, fz + approach_h, quat, travel_spd, force,
-                     pen_down=False),
-        )
+        # 웹의 가운데 점선 원은 1024×768 캔버스에서 지름 640px다.
+        # 입력 픽셀은 보존하고 이 단계에서만 케이크 반지름에 맞춰 환산한다.
+        diameter_px = min(canvas_w, canvas_h) * (640 / 768)
 
-        # ── 2. 펜 내리기 ──
-        waypoints.append(
-            self._wp(fx, fy, fz + z_offset, quat, draw_spd * 0.5, force,
-                     pen_down=True),
-        )
-
-        # ── 3. 획 그리기 ──
-        for px_x, px_y in pts_px[1:]:
-            mx, my = pixel_to_mm_top(px_x, px_y, canvas_w, canvas_h, cake.radius)
-            ax, ay, az = cake.top_to_abs(mx, my)
-            waypoints.append(
-                self._wp(ax, ay, az + z_offset, quat, draw_spd, force,
-                         pen_down=True),
+        def to_top(pixel):
+            """점선 원 안의 픽셀을 BASE 기준 윗면 mm 좌표로 옮긴다."""
+            x_mm, y_mm = pixel_to_mm_top(
+                *pixel, canvas_w, canvas_h, cake.radius,
+                drawing_diameter_px=diameter_px,
             )
+            if math.hypot(x_mm, y_mm) > cake.radius + 1e-6:
+                raise ValueError("획에 케이크 윗면을 벗어난 점이 있습니다.")
+            return cake.top_to_abs(x_mm, y_mm)
 
-        # ── 4. 펜 올리기 ──
-        lmx, lmy = pixel_to_mm_top(
-            pts_px[-1][0], pts_px[-1][1],
-            canvas_w, canvas_h, cake.radius,
-        )
-        lx, ly, lz = cake.top_to_abs(lmx, lmy)
-        waypoints.append(
-            self._wp(lx, ly, lz + approach_h, quat, travel_spd, force,
-                     pen_down=False),
-        )
+        fx, fy, fz = to_top(pts_px[0])
+        waypoints.append(self._wp(
+            fx, fy, fz + approach_h, quat, travel_spd, force, pen_down=False,
+        ))
+        waypoints.append(self._wp(
+            fx, fy, fz + z_offset, quat, draw_spd * 0.5, force, pen_down=True,
+        ))
+        for pixel in pts_px[1:]:
+            x, y, z = to_top(pixel)
+            waypoints.append(self._wp(
+                x, y, z + z_offset, quat, draw_spd, force, pen_down=True,
+            ))
+        lx, ly, lz = to_top(pts_px[-1])
+        waypoints.append(self._wp(
+            lx, ly, lz + approach_h, quat, travel_spd, force, pen_down=False,
+        ))
 
     # ------------------------------------------------------------------
     # SIDE 면 변환
@@ -264,6 +259,7 @@ class DrawingPathNode(Node):
         arc0, h0 = pixel_to_mm_side(
             pts_px[0][0], pts_px[0][1],
             canvas_w, canvas_h, cake.radius, cake.height,
+            drawing_rect=side_drawing_rect(canvas_w, canvas_h, cake.radius, cake.height),
         )
         quat0 = pen_quat_side(arc0, cake, tilt_deg=tilt_deg)
         ax0, ay0, az0 = cake.side_abs_with_offset(arc0, h0, approach_h)
@@ -281,6 +277,7 @@ class DrawingPathNode(Node):
         for px_x, px_y in pts_px[1:]:
             arc_i, h_i = pixel_to_mm_side(
                 px_x, px_y, canvas_w, canvas_h, cake.radius, cake.height,
+                drawing_rect=side_drawing_rect(canvas_w, canvas_h, cake.radius, cake.height),
             )
             qi = pen_quat_side(arc_i, cake, tilt_deg=tilt_deg)
             cxi, cyi, czi = cake.side_abs_with_offset(arc_i, h_i, z_offset)
@@ -292,6 +289,7 @@ class DrawingPathNode(Node):
         arcn, hn = pixel_to_mm_side(
             pts_px[-1][0], pts_px[-1][1],
             canvas_w, canvas_h, cake.radius, cake.height,
+            drawing_rect=side_drawing_rect(canvas_w, canvas_h, cake.radius, cake.height),
         )
         quatn = pen_quat_side(arcn, cake, tilt_deg=tilt_deg)
         axn, ayn, azn = cake.side_abs_with_offset(arcn, hn, approach_h)

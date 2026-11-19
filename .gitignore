@@ -17,3 +17,7 @@ frontend/dist/
 # 서버가 생성하는 주문 DB와 테스트 캐시
 /backend/data/
 .pytest_cache/
+
+# SQLite 실행 중 생성되는 보조 파일도 주문 데이터와 함께 제외한다.
+*.sqlite3-wal
+*.sqlite3-shm

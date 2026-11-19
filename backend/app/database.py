@@ -65,6 +65,18 @@ class Database:
                     result_json TEXT,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS hmi_runtime (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    report_json TEXT NOT NULL,
+                    received_at REAL NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS hmi_plans (
+                    order_id TEXT PRIMARY KEY REFERENCES orders(order_id),
+                    plan_json TEXT NOT NULL,
+                    execution_mode TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS bridge_events (
                     event_id TEXT PRIMARY KEY,
                     order_id TEXT NOT NULL,

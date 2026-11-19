@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from threading import Event
 import time
+import json
+import math
 import traceback
 from enum import Enum
 from typing import Optional
@@ -10,6 +13,9 @@ from rclpy.action import ActionServer, ActionClient, GoalResponse, CancelRespons
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy
+from std_msgs.msg import String
+from .hmi_plan import build_hmi_plan
 
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Pose, Point, Quaternion
@@ -53,7 +59,7 @@ class TaskManagerNode(Node):
         self._order_server = ActionServer(
             self,
             CakeOrder,
-            'cake_order',
+            'cake/order',
             execute_callback=self._execute_order,
             goal_callback=self._handle_goal,
             cancel_callback=self._handle_cancel,
@@ -80,7 +86,17 @@ class TaskManagerNode(Node):
         # ── 내부 상태 ──
         self._current_phase = Phase.DRAWING
         self._current_order_id: Optional[str] = None
+        self._current_progress_pct = 0.0
         self._is_busy = False
+        self._current_command = ""
+        self._last_status_message = ""
+        self._drawing_error = None
+        self._plan_pub = self.create_publisher(
+            String,
+            "/hmi/drawing_plan",
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
+        self.create_timer(1.0, self._status_heartbeat, callback_group=self._cb)
 
         self.get_logger().info('task_manager_node 시작 (드로잉 전용)')
 
@@ -104,8 +120,13 @@ class TaskManagerNode(Node):
     def _execute_order(self, goal_handle) -> CakeOrder.Result:
         """Goal 수락 후 자동 호출되는 진입점. 드로잉을 실행하고 결과를 반환."""
         request = goal_handle.request
+        self._current_phase = Phase.DRAWING
+        self._current_progress_pct = 0.0
+        self._last_status_message = "주문 준비"
         self._current_order_id = request.order_id
         self._is_busy = True
+        self._drawing_error = None
+        self._current_command = ""
         result = CakeOrder.Result()
         start_time = time.time()
 
@@ -124,8 +145,8 @@ class TaskManagerNode(Node):
 
             ok = self._execute_drawing(request, goal_handle)
             if not ok:
-                return self._fail(goal_handle, result, 'DRAWING_FAILED',
-                                  '드로잉 실패', start_time)
+                code, message = self._drawing_error or ("DRAWING_FAILED", "드로잉 실패")
+                return self._fail(goal_handle, result, code, message, start_time)
 
             # ── 완료 ──
             self._set_phase(Phase.COMPLETED, goal_handle, 100.0, '완료')
@@ -183,6 +204,10 @@ class TaskManagerNode(Node):
             # 1) GenerateTrajectory 서비스 호출
             srv_timeout = self.get_parameter('service_timeout').value
             if not self._gen_traj_client.wait_for_service(timeout_sec=srv_timeout):
+                self._drawing_error = (
+                    "PATH_SERVICE_UNAVAILABLE",
+                    "generate_trajectory 서비스 연결 실패",
+                )
                 self.get_logger().error('generate_trajectory 서비스 연결 실패')
                 return False
 
@@ -206,14 +231,22 @@ class TaskManagerNode(Node):
             traj_req.cake_height = cake.height
 
             future = self._gen_traj_client.call_async(traj_req)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=srv_timeout)
+            self._wait_for_result(future, srv_timeout)
 
             if future.result() is None:
+                self._drawing_error = (
+                    "PATH_SERVICE_TIMEOUT",
+                    f"GenerateTrajectory 응답 없음 (path={idx})",
+                )
                 self.get_logger().error(f'GenerateTrajectory 호출 실패 (path={idx})')
                 return False
 
             resp = future.result()
             if not resp.success:
+                self._drawing_error = (
+                    "PATH_GENERATION_FAILED",
+                    str(resp.error_msg)[:2048],
+                )
                 self.get_logger().error(f'궤적 생성 실패: {resp.error_msg}')
                 return False
 
@@ -229,6 +262,13 @@ class TaskManagerNode(Node):
                 f'strokes={stroke_count}'
             )
 
+            # HMI에는 실제 DP 응답의 사본만 보낸다. 표시 실패가 로봇 경로를 변경하지 않는다.
+            try:
+                plan = build_hmi_plan(request.order_id, dp, cake, resp.waypoints_3d)
+                self._plan_pub.publish(String(data=json.dumps(plan, allow_nan=False)))
+            except Exception as error:
+                self.get_logger().warning(f"HMI 계획 생성 실패: {error}")
+
             # 2) DrawOnCake 액션 호출
             draw_goal = DrawOnCake.Goal()
             draw_goal.waypoints = resp.waypoints_3d
@@ -236,7 +276,7 @@ class TaskManagerNode(Node):
             draw_goal.contact_force = contact_force
             draw_goal.speed = drawing_speed
 
-            ok = self._send_draw(draw_goal, goal_handle)
+            ok = self._send_draw(draw_goal, goal_handle, idx, total_paths)
             if not ok:
                 return False
 
@@ -249,10 +289,14 @@ class TaskManagerNode(Node):
 
     # ── DrawOnCake 액션 전송 ──
 
-    def _send_draw(self, goal, goal_handle) -> bool:
+    def _send_draw(self, goal, goal_handle, path_index=0, total_paths=1) -> bool:
         timeout = self.get_parameter('action_timeout').value
 
         if not self._draw_client.wait_for_server(timeout_sec=10.0):
+            self._drawing_error = (
+                "DRAW_SERVER_UNAVAILABLE",
+                "DrawOnCake 서버 연결 실패",
+            )
             self.get_logger().error('DrawOnCake 서버 연결 실패')
             return False
 
@@ -260,24 +304,30 @@ class TaskManagerNode(Node):
 
         send_future = self._draw_client.send_goal_async(
             goal,
-            feedback_callback=lambda fb: self._on_draw_feedback(fb, goal_handle),
+            feedback_callback=lambda fb: self._on_draw_feedback(
+                fb, goal_handle, path_index, total_paths
+            ),
         )
-        rclpy.spin_until_future_complete(self, send_future, timeout_sec=10.0)
+        self._wait_for_result(send_future, 10.0)
 
         gh = send_future.result()
         if gh is None or not gh.accepted:
+            self._drawing_error = ("DRAW_GOAL_REJECTED", "DrawOnCake Goal 거절/실패")
             self.get_logger().error('DrawOnCake Goal 거절/실패')
             return False
 
         result_future = gh.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future, timeout_sec=timeout)
+        self._wait_for_result(result_future, timeout)
 
         if result_future.result() is None:
+            self._drawing_error = ("DRAW_RESULT_TIMEOUT", "DrawOnCake 결과 수신 실패")
             self.get_logger().error('DrawOnCake 결과 수신 실패 (timeout)')
             return False
 
         action_result = result_future.result().result
         if not action_result.success:
+            code = getattr(action_result, "error_code", "") or "DRAWING_FAILED"
+            self._drawing_error = (code[:256], f"DrawOnCake 실패: {code}"[:2048])
             self.get_logger().error(
                 f'DrawOnCake 실패: {getattr(action_result, "error_code", "")}'
             )
@@ -286,12 +336,37 @@ class TaskManagerNode(Node):
         self.get_logger().info('DrawOnCake 성공')
         return True
 
-    def _on_draw_feedback(self, feedback_msg, goal_handle):
+    @staticmethod
+    def _wait_for_result(future, timeout):
+        """다른 executor 스레드가 응답을 처리하도록 콜백 안에서는 대기만 한다."""
+        completed = Event()
+        future.add_done_callback(lambda _: completed.set())
+        if not future.done() and not completed.wait(timeout):
+            return None
+        return future.result()
+
+    def _on_draw_feedback(self, feedback_msg, goal_handle, path_index=0, total_paths=1):
+        """RE의 면별 진행률을 주문 드로잉 구간으로 환산해 두 상태 채널에 전달한다.
+
+        장비 명령을 추가하지 않는다. 이 로컬 버전은 드로잉 공정만 포함하며,
+        유한하지 않은 피드백이나 다른 주문의 늦은 응답은 화면 상태에 반영하지 않는다.
+        """
+        if goal_handle.request.order_id != self._current_order_id:
+            return
         fb = feedback_msg.feedback
-        self.get_logger().debug(
-            f'DrawOnCake feedback: phase={getattr(fb, "phase", "")}, '
-            f'progress={getattr(fb, "progress_pct", 0):.1f}%'
+        progress = float(fb.progress_pct)
+        if not math.isfinite(progress) or total_paths <= 0:
+            return
+        self._current_command = fb.phase[:128]
+        drawing_limit = 100.0
+        pct = drawing_limit * (
+            path_index + max(0.0, min(100.0, progress)) / 100.0
+        ) / total_paths
+        message = (
+            f"DrawingPath[{path_index + 1}/{total_paths}] {fb.phase} · "
+            f"획 {fb.current_stroke_idx}/{fb.total_strokes}"
         )
+        self._publish_feedback(goal_handle, Phase.DRAWING, pct, message)
 
     # ── Phase / Feedback / Status ──
 
@@ -299,21 +374,27 @@ class TaskManagerNode(Node):
         self._current_phase = phase
         self.get_logger().info(f'[{phase.value}] {msg} ({pct:.0f}%)')
         self._publish_feedback(goal_handle, phase, pct, msg)
-        self._publish_status(msg)
 
     def _publish_feedback(self, goal_handle, phase, pct, msg):
+        """CakeOrder 피드백과 Topic에 같은 공정 값을 발행한다."""
+        self._current_phase = phase
+        self._current_progress_pct = float(pct)
+        self._last_status_message = msg
+        if phase != Phase.DRAWING:
+            self._current_command = ""
         fb = CakeOrder.Feedback()
         fb.current_phase = phase.value
         fb.progress_pct = float(pct)
         fb.message = msg
         goal_handle.publish_feedback(fb)
+        self._publish_status(msg)
 
     def _publish_status(self, msg):
         status = TaskStatus()
         status.order_id = self._current_order_id or ''
         status.phase = self._current_phase.value
-        status.progress_pct = 0.0
-        status.current_command = ''
+        status.progress_pct = self._current_progress_pct
+        status.current_command = getattr(self, "_current_command", "")
         status.message = msg
         now = self.get_clock().now()
         status.timestamp = TimeMsg(
@@ -321,6 +402,11 @@ class TaskManagerNode(Node):
             nanosec=now.seconds_nanoseconds()[1],
         )
         self._status_pub.publish(status)
+
+    def _status_heartbeat(self):
+        """작업 대기 중에도 마지막 TM 상태를 재발행한다. 진행률·명령을 새로 만들지 않는다."""
+        if self._current_order_id:
+            self._publish_status(self._last_status_message)
 
     # ── 취소 / 실패 ──
 
@@ -350,7 +436,7 @@ class TaskManagerNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = TaskManagerNode()
-    executor = MultiThreadedExecutor()
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:
         executor.spin()
