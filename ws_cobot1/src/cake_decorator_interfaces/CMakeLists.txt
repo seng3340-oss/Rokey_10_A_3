@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Stroke2D.msg"
   "msg/Waypoint3D.msg"
   "srv/GenerateTrajectory.srv"
+  "srv/RunPlateSequence.srv"
   "srv/SwitchTCP.srv"
   "srv/SetCompliance.srv"
   "action/CakeOrder.action"

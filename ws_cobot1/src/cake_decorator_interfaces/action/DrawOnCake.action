@@ -1,3 +1,5 @@
+# HMI 이력을 실행 주문과 연결하는 식별자. 기존 직접 호출은 빈 값 사용 가능.
+string order_id
 # Goal: 계산된 경로와 TOP/SIDE 면을 실행 노드에 전달한다.
 cake_decorator_interfaces/Waypoint3D[] waypoints
 string drawing_surface

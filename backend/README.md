@@ -5,7 +5,7 @@
 
 
 FastAPI로 PM 형식의 그림을 검증하고 SQLite에 저장합니다.
-접수 성공은 서버 저장 성공입니다. 별도 ROS 브릿지용 내부 HTTP 연결을 제공합니다. HMI API·로봇 제어는 포함하지 않습니다.
+접수 성공은 서버 저장 성공입니다. 별도 ROS 브릿지용 내부 HTTP 연결을 제공합니다. 읽기 전용 HMI API를 제공하며 로봇 제어 API는 포함하지 않습니다.
 
 ## 실행
 
@@ -60,8 +60,8 @@ FastAPI는 schemas 검증에 성공한 요청만 drawings 함수에 전달합니
 - `GET /api/orders/{order_id}`: 원본 drawing과 상세. robot_dispatched는 미전송 false / 수락 확인 true / 불명확 null입니다. 없는 주문은 404.
 - `GET /api/health`: 서버 상태. ros_connected는 false.
 
-HMI API는 없습니다. 브릿지는 토큰 인증된 `/internal/bridge` 인수·상태 기록 API를 사용합니다.
-주문 목록·상세는 향후 연결용이며 현재 정적 HMI가 사용하지 않습니다.
+`GET /api/hmi`는 실제 주문·단계·오류·연결 관측을 제공합니다. 브릿지는 토큰 인증된 `/internal/bridge` 인수·상태 기록 API를 사용합니다.
+HMI는 1초 간격으로 실제 주문과 영구 이벤트를 조회합니다.
 두 면을 한 주문으로 묶는 형식은 팀에서 확정해야 합니다.
 
 ## 저장·검증

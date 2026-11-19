@@ -72,6 +72,29 @@ class Database:
                 );
                 """
             )
+            # HMI 이력은 원본 주문·인수 잠금과 분리해 추가하며 재시작 후에도 보존한다.
+            connection.executescript("""
+                CREATE TABLE IF NOT EXISTS hmi_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL UNIQUE,
+                    order_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    stage_key TEXT NOT NULL,
+                    stage_state TEXT NOT NULL,
+                    progress_pct REAL NOT NULL,
+                    message TEXT NOT NULL,
+                    error_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS hmi_order_events ON hmi_events(order_id,id);
+                CREATE TABLE IF NOT EXISTS hmi_order_modes (
+                    order_id TEXT PRIMARY KEY, process_mode TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS hmi_runtime (
+                    id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+            """)
             # 기존 주문은 실행 이력을 알 수 없으므로 재전송하지 않고 확인 대기로 이관한다.
             connection.execute(
                 """INSERT OR IGNORE INTO order_execution

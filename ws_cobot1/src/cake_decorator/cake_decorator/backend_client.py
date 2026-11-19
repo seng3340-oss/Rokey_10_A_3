@@ -1,6 +1,7 @@
 """브릿지의 내부 HTTP 연결. DB에 직접 접근하거나 주문을 임의로 재할당하지 않는다."""
 
 import json
+import os
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
@@ -55,6 +56,17 @@ class BackendClient:
         except (URLError, TimeoutError, OSError, ValueError) as error:
             raise BackendError("백엔드 응답을 확인할 수 없습니다.") from error
 
+    def heartbeat(self, ready, order_id, **errors):
+        """서버 발견은 물리 로봇·안전 확인이 아님을 명확히 한 표시용 관측이다."""
+        mode = os.environ.get('CAKE_SYSTEM_MODE', 'unknown')
+        return self.post('/internal/bridge/heartbeat', {
+            **errors,
+            'task_server_ready': bool(ready), 'active_order_id': order_id,
+            'execution_mode': {'real':'real', 'virtual':'simulation'}.get(mode, 'unknown'),
+            'process_mode': 'full' if os.environ.get('CAKE_PLATE_SEQUENCE') == '1' else
+                            'pen' if os.environ.get('CAKE_PEN_TOOL_CYCLE') == '1' else 'drawing',
+        })
+
     def claim(self):
         """서버가 원자적으로 잠근 주문을 한 번 가져온다."""
         return self.post("/internal/bridge/claim")
@@ -66,6 +78,8 @@ class BackendClient:
             "claim_token": claim["claim_token"],
             "kind": kind,
             **details,
+            'process_mode': 'full' if os.environ.get('CAKE_PLATE_SEQUENCE') == '1' else
+                            'pen' if os.environ.get('CAKE_PEN_TOOL_CYCLE') == '1' else 'drawing',
         }
         path = f"/internal/bridge/orders/{quote(claim['order_id'], safe='')}/events"
         for attempt in range(3):

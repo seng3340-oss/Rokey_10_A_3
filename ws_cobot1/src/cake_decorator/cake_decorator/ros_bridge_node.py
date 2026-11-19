@@ -1,6 +1,11 @@
 """단일 주문을 CakeOrder로 전달한다. 로봇 이동과 경로 계산은 수행하지 않는다."""
 
 import argparse
+import json
+from std_msgs.msg import String
+from rcl_interfaces.msg import Log
+from datetime import datetime, timezone
+from .process_monitor import STAGES, stage_payload
 import math
 import os
 from queue import Empty, Full, Queue
@@ -35,6 +40,13 @@ class RosBridgeNode(Node):
         self.stop_event = threading.Event()
         self.feedback = Queue(maxsize=1)
         self.worker = None
+        self.process_events = Queue(maxsize=512)
+        self.monitor_worker = None
+        self.last_ros_error = {}
+        self.rosout_subscription = self.create_subscription(Log, '/rosout', self._on_rosout, 100)
+        self.process_subscription = self.create_subscription(
+            String, '/cake/process_events', self._on_process, 100,
+        )
         self.active_order_id = None
         self.status_subscription = self.create_subscription(
             TaskStatus, "/task_status", self._on_status, 10
@@ -46,9 +58,48 @@ class RosBridgeNode(Node):
             target=self._run, name="cake-bridge-http", daemon=True
         )
         self.worker.start()
+        self.monitor_worker = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.monitor_worker.start()
         self.get_logger().info(
             f"TM {self.action_name} 대기 중. 서버 준비 후에만 새 주문을 인수합니다."
         )
+
+    def _on_rosout(self, message):
+        """이번 작업 범위의 오류 수준 ROS 로그만 표시한다. 상태·동작은 변경하지 않는다."""
+        allowed = {'robot_executor_node', 'task_manager_node', 'drawing_path_node',
+                   'dsr_hw_interface2', 'dsr_controller2', 'dsr01.dsr_controller2',
+                   'dsr01.controller_manager'}
+        if message.level >= Log.ERROR and message.name in allowed:
+            self.last_ros_error = {
+                'last_error_message': message.msg[:2048],
+                'last_error_source': message.name[:128],
+                'last_error_at': datetime.now(timezone.utc).isoformat(),
+            }
+
+    def _monitor_loop(self):
+        """주문 작업 스레드와 분리한 heartbeat. 실패해도 주문을 재전송하지 않는다."""
+        while not self.stop_event.is_set():
+            try:
+                self.backend.heartbeat(self.action_client.server_is_ready(), self.active_order_id, **self.last_ros_error)
+            except Exception as error:
+                self.get_logger().warning(f'HMI 관측 전송 실패: {error}')
+            self.stop_event.wait(2)
+
+    def _on_process(self, message):
+        """현재 주문 ID가 일치하는 실제 단계 이벤트만 받는다. 오래된 주문은 버린다."""
+        try:
+            event = json.loads(message.data)
+            if not isinstance(event, dict):
+                return
+            if event.get('order_id') != self.active_order_id or event.get('stage_key') not in STAGES:
+                return
+            if event.get('stage_state') not in {'running', 'completed', 'failed'}:
+                return
+            # 표시용 입력 오류가 주문 실행에 영향을 주지 않게 값을 정규화한다.
+            clean = stage_payload(self.active_order_id, event['stage_key'], event['stage_state'], str(event.get('message', ''))[:2048])
+            self.process_events.put_nowait(clean)
+        except (ValueError, TypeError, Full):
+            self.get_logger().warning('HMI 공정 이벤트를 저장하지 못했습니다.')
 
     def _wait(self, future, timeout, claim=None):
         """ROS future를 작업 스레드에서 기다린다. ROS spin을 중첩 호출하지 않는다."""
@@ -93,6 +144,21 @@ class RosBridgeNode(Node):
 
     def _flush_feedback(self, claim):
         """TM Feedback을 작업 스레드에서 백엔드에 전달한다."""
+        # 시작/완료 이벤트는 최신1개 큐와 분리해 짧은 단계도 영구 이력에 남긴다.
+        while True:
+            try:
+                event = self.process_events.get_nowait()
+            except Empty:
+                break
+            if event['order_id'] == claim['order_id']:
+                try:
+                    self.backend.event(claim, 'feedback', **{
+                        key: event[key] for key in ('phase', 'progress_pct', 'message',
+                                                   'error_code', 'stage_key', 'stage_state')
+                    })
+                except Exception as error:
+                    # HMI 기록 실패는 Goal 취소·재전송이나 추가 로봇 명령을 유발하지 않는다.
+                    self.get_logger().warning(f'HMI 단계 기록 실패: {error}')
         try:
             order_id, feedback = self.feedback.get_nowait()
         except Empty:
@@ -131,7 +197,10 @@ class RosBridgeNode(Node):
             return
         self.backend.event(claim, "accepted", message="TM이 주문을 수락했습니다.")
         result = self._wait(handle.get_result_async(), self.result_timeout, claim)
-        self._flush_feedback(claim)
+        # 결과와 관측은 서로 다른 DDS 경로다. 마지막 안전 위치 완료 관측을 짧게 수집한다.
+        for _ in range(3):
+            self._flush_feedback(claim)
+            self.stop_event.wait(0.1)
         if result.status not in (
             GoalStatus.STATUS_SUCCEEDED,
             GoalStatus.STATUS_ABORTED,
@@ -187,6 +256,8 @@ class RosBridgeNode(Node):
         self.stop_event.set()
         if self.worker:
             self.worker.join(timeout=25.0)
+        if self.monitor_worker:
+            self.monitor_worker.join(timeout=5.0)
         self.action_client.destroy()
 
 

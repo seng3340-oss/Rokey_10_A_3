@@ -15,7 +15,7 @@
 - 원본 좌표·실측 치수·TCP 영점을 CakeOrder로 보내는 ROS 브릿지
 - 가상 M0609·RG2와 테이블·타공판·케이크 고정구를 RViz에 함께 표시
 
-HMI는 아직 정적 예시 화면입니다. 웹 → 백엔드 → 브릿지 → TM·DP·RE 연결 코드가 있으며,
+HMI는 실제 주문·전체 공정 단계·오류 이력을 읽기 전용으로 표시합니다. 자세한 계약은 [HMI 운용 안내](docs/HMI_OPERATION.md)를 참고하세요. 웹 → 백엔드 → 브릿지 → TM·DP·RE 연결 코드가 있으며,
 전체 실행기로 준비한 뒤 웹에서 제작 요청을 누르면 선택한 모드의 로봇이 움직입니다.
 옆면의 미세 계단과 손목 회전 한계는 추가 검증이 필요합니다.
 
@@ -36,7 +36,7 @@ bash scripts/start_real.sh     # 실제: 상면 중앙에 펜촉을 두고 YES �
 
 ```text
 ws_cobot_pjt/
-├── frontend/                  # React·TypeScript 고객 화면과 정적 HMI
+├── frontend/                  # React·TypeScript 고객 화면과 읽기 전용 실시간 HMI
 ├── backend/                   # FastAPI 그림 접수·SQLite 저장·주문 조회
 ├── ws_cobot1/
 │   ├── src/

@@ -1,219 +1,253 @@
-/* 운영 콘솔 전용 배경과 글자 색으로 고객 화면과 역할을 구분한다. */
+/* 실제 주문 모니터를 넓은 화면과 태블릿에서 읽을 수 있도록 배치한다. */
 .hmi-app {
-  background: #f1f3f5;
   min-height: 100vh;
-  color: #25313d;
-  font-size: 13px;
+  background: #f4f6fa;
+  color: #17243a;
+  font-family: system-ui, sans-serif;
 }
-/* 운영 브랜드와 고객 화면 이동 링크를 상단 양 끝에 배치한다. */
-.hmi-app > header {
-  background: white;
+.hmi-app * {
+  box-sizing: border-box;
+}
+.hmi-app header {
+  padding: 18px 28px;
+  background: #17243a;
+  color: white;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 22px 30px;
-  border-bottom: 1px solid #dce1e6;
 }
-.hmi-app > header a {
+.hmi-app header a {
+  color: inherit;
   text-decoration: none;
+  display: flex;
+  gap: 16px;
+  align-items: center;
 }
-.hmi-app > header b {
-  font-size: 19px;
+.hmi-app header span {
+  font-size: 13px;
+  opacity: 0.75;
 }
-.hmi-app > header span {
-  font-size: 12px;
-  margin-left: 14px;
-  color: #76808a;
-}
-/* 고정 폭 사이드바와 남은 폭을 사용하는 본문을 나란히 배치한다. */
-.hmi-shell {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-}
-/* 운영 위치와 선택 메뉴를 어두운 영역으로 묶는다. */
-.hmi-shell > aside {
-  background: #24303d;
-  color: #c1cbd6;
-  padding: 30px 18px;
-  min-height: calc(100vh - 69px);
-}
-.hmi-shell > aside b {
-  font-size: 11px;
-  color: #9aabbd;
-}
-.hmi-shell > aside p {
-  padding: 14px 12px;
-}
-/* 현재 메뉴를 강조한다. 정적 화면에는 메뉴 전환 동작이 없다. */
-.hmi-shell .chosen {
-  background: #36485b;
-  color: #fff;
-  border-radius: 3px;
-}
-/* 고객 화면의 공통 main 폭 제한을 풀어 콘솔이 남은 영역을 채우게 한다. */
-.hmi-shell > main {
-  width: 100%;
-  max-width: none;
-  margin: 0;
+.hmi-dashboard {
+  max-width: 1500px;
   padding: 28px;
+  margin: auto;
 }
-/* 제목과 비활성 새로고침 버튼을 같은 행에 둔다. */
 .hmi-title {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 .hmi-title h1 {
-  font-size: 26px;
-  margin: 0;
+  margin: 6px 0;
 }
 .hmi-title p {
+  color: #53657d;
+}
+.eyebrow {
   font-size: 12px;
-  color: #7b8590;
+  letter-spacing: 0.12em;
 }
-/* 버튼 외곽은 승인 디자인을 유지한다. 비활성 표시는 공통 스타일을 따른다. */
-.hmi-title button {
-  border: 1px solid #ccd4dc;
+.hmi-app button {
+  border: 1px solid #cad4e2;
   background: white;
-  color: #465563;
-  border-radius: 5px;
-  padding: 10px 18px;
+  color: #17243a;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
 }
-/* 기존 배너 모양을 재사용해 정적 예시·미연결·데이터 미확정 상태를 명시한다. */
+.hmi-app button:focus-visible {
+  outline: 3px solid #3c6dde;
+}
+.hmi-safety {
+  padding: 14px 18px;
+  background: #fff5d8;
+  border: 1px solid #e9ce83;
+  border-radius: 10px;
+  margin: 18px 0;
+  font-size: 14px;
+}
 .hmi-error {
-  background: #fff7e4;
-  border: 1px solid #ead8a9;
   padding: 14px;
-  color: #8a6b2b;
-  margin-top: 14px;
+  background: #ffe9e9;
+  border: 1px solid #eeaaaa;
+  border-radius: 8px;
+  color: #982727;
+  margin: 12px 0;
 }
-/* 네 상태 카드를 같은 폭으로 배열한다. 표시 값은 실제 조회 결과가 아니다. */
 .hmi-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin: 24px 0;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0;
 }
-/* 제목·대표 값·보충 설명을 독립 카드로 묶는다. */
-.hmi-stats > div {
+.hmi-stats > div,
+.hmi-card {
   background: white;
-  border: 1px solid #dce1e6;
+  border: 1px solid #dde4ee;
+  border-radius: 12px;
   padding: 20px;
-  border-radius: 5px;
 }
-.hmi-stats label {
-  display: block;
-  font-size: 12px;
-  color: #7c8792;
-}
-/* 대표 값을 크게 표시해 미연결 상태와 예시 건수를 쉽게 찾게 한다. */
-.hmi-stats strong {
-  display: block;
-  font-size: 23px;
-  margin: 16px 0 10px;
-}
+.hmi-stats label,
+.hmi-stats strong,
 .hmi-stats small {
-  color: #7c8792;
-  font-size: 10px;
+  display: block;
 }
-/* 예시 대기열과 로그를 나란히 배치한다. 좁은 화면에서는 한 열로 전환한다. */
-.hmi-panels {
+.hmi-stats strong {
+  font-size: 23px;
+  margin: 10px 0;
+}
+.hmi-app small {
+  color: #63738a;
+  font-size: 12px;
+}
+.hmi-grid {
   display: grid;
-  grid-template-columns: 1.1fr 1fr;
+  grid-template-columns: 1fr 1.4fr;
   gap: 18px;
+  margin-bottom: 18px;
 }
-/* 내용이 적어도 패널의 최소 높이를 유지하고 긴 내용의 폭 넘침을 막는다. */
-.hmi-panels section {
-  background: white;
-  border: 1px solid #dce1e6;
-  border-radius: 5px;
-  min-width: 0;
-  min-height: 260px;
+.hmi-card h2 {
+  font-size: 18px;
+  margin: 0 0 14px;
 }
-/* 패널 제목 행을 분리해 데이터가 예시라는 안내를 눈에 띄게 한다. */
-.hmi-panels h2 {
-  font-size: 14px;
-  padding: 18px;
-  margin: 0;
-  border-bottom: 1px solid #e7ebef;
+.table-wrap {
+  overflow: auto;
+  max-height: 500px;
 }
-/* 주문 예시가 패널 폭을 사용하도록 셀 테두리를 합친다. */
-.hmi-panels table {
+.hmi-app table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
-}
-/* 긴 주문 식별자도 셀 안에서 줄을 바꿔 다른 열을 밀어내지 않게 한다. */
-.hmi-panels th,
-.hmi-panels td {
   text-align: left;
-  padding: 14px;
-  border-bottom: 1px solid #edf0f3;
-  overflow-wrap: anywhere;
+  font-size: 13px;
 }
-.hmi-panels th {
-  background: #f9fafb;
-  color: #7c8792;
-  font-weight: 400;
+.hmi-app th,
+.hmi-app td {
+  padding: 11px 8px;
+  border-bottom: 1px solid #e7ecf3;
+  white-space: nowrap;
 }
-/* 빈 데이터 안내에 사용하는 기존 스타일을 보존한다. */
-.empty {
-  padding: 30px;
-  text-align: center;
-  color: #8b949d;
+.hmi-app th {
+  color: #617187;
+}
+.hmi-app tr.selected {
+  background: #eef4ff;
+}
+.hmi-app .order-link {
+  padding: 3px;
+  background: none;
+  border: 0;
+  font-weight: 600;
+  color: #295bc1;
+}
+.follow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  margin-bottom: 15px;
+}
+.order-state {
+  display: inline-block;
+  background: #e8effa;
+  padding: 6px 12px;
+  border-radius: 30px;
+  font-weight: 700;
+}
+.order-state.completed {
+  background: #dcf5e5;
+  color: #1d6d42;
+}
+.order-state.failed,
+.order-state.uncertain {
+  background: #ffe5e5;
+  color: #982727;
+}
+.hmi-app progress {
+  width: 100%;
+  height: 14px;
+  accent-color: #3974dc;
+}
+.process-steps {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0;
+}
+.process-steps li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #edf0f6;
+  font-size: 14px;
+}
+.process-steps b {
+  margin-left: auto;
   font-size: 12px;
+  color: #6c7b8e;
 }
-/* 시각·분류·메시지를 열로 나눠 로그를 읽는 순서를 유지한다. */
+.stage-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c8d0dc;
+}
+.running .stage-dot {
+  background: #3277e6;
+  box-shadow: 0 0 0 4px #e4eeff;
+}
+.completed .stage-dot {
+  background: #2f9960;
+}
+.failed .stage-dot {
+  background: #d34545;
+}
+.process-steps .failed {
+  color: #a72828;
+}
+.process-steps small {
+  flex-basis: 100%;
+}
 .hmi-log {
   display: grid;
-  grid-template-columns: 1fr 50px 2fr;
-  gap: 10px;
-  padding: 14px;
-  font-size: 11px;
-  border-bottom: 1px solid #edf0f3;
-  overflow-wrap: anywhere;
+  grid-template-columns: 100px 160px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #edf0f6;
+  font-size: 13px;
 }
-/* 실제 시각 요소를 사용할 때의 보조 색상이다. 현재 예시 시각은 일반 문구다. */
+.hmi-log.error {
+  color: #a72828;
+}
 .hmi-log time {
-  color: #8b949d;
+  color: #63738a;
 }
-/* 연결되지 않은 기능의 범위를 본문 아래 보충 설명으로 표시한다. */
-.hmi-shell footer {
-  font-size: 11px;
-  color: #7c8792;
-  line-height: 1.8;
-  padding-top: 20px;
+.event-list {
+  max-height: 420px;
+  overflow: auto;
 }
-/* 태블릿에서는 사이드바를 숨기고 패널은 한 열, 상태 카드는 두 열로 전환한다. */
-@media (max-width: 1000px) {
-  .hmi-shell {
-    grid-template-columns: 1fr;
-  }
-  .hmi-shell > aside {
-    display: none;
-  }
-  .hmi-panels {
-    grid-template-columns: 1fr;
-  }
+/* 좁은 화면에서는 목록과 공정을 위아래로 놓아 가로 스크롤을 줄인다. */
+@media (max-width: 900px) {
   .hmi-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, 1fr);
   }
-}
-/* 휴대폰에서는 바깥 여백과 카드 글자 크기를 줄여 내용이 잘리지 않게 한다. */
-@media (max-width: 500px) {
-  .hmi-shell > main {
+  .hmi-grid {
+    grid-template-columns: 1fr;
+  }
+  .hmi-dashboard {
     padding: 16px;
   }
-  .hmi-app > header {
-    padding: 18px;
+  .hmi-app header {
+    padding: 15px;
   }
-  .hmi-stats {
-    gap: 10px;
+  .hmi-app header span {
+    display: none;
   }
-  .hmi-stats > div {
-    padding: 14px;
+  .hmi-log {
+    grid-template-columns: 90px 1fr;
   }
-  .hmi-stats strong {
-    font-size: 19px;
+  .hmi-log span {
+    grid-column: 1/-1;
   }
 }

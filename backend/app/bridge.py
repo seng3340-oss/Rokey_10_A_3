@@ -35,6 +35,10 @@ class BridgeEvent(ContractModel):
     message: Annotated[str, Field(max_length=2048)] = ""
     error_code: Annotated[str, Field(max_length=256)] = ""
     elapsed_time_sec: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    # 세부 단계는 표시용이며 기존 상태 전이·명령 인수 계약을 바꾸지 않는다.
+    stage_key: Annotated[str, Field(max_length=64)] = ""
+    stage_state: Literal["", "running", "completed", "failed"] = ""
+    process_mode: Literal["full", "pen", "drawing", "unknown"] = "unknown"
 
 
 class ManualResolution(ContractModel):
@@ -133,6 +137,15 @@ def record_event(order_id: str, event: BridgeEvent, request: Request):
         connection.execute(
             "INSERT INTO bridge_events VALUES (?,?,?)",
             (event.event_id, order_id, digest),
+        )
+        if event.process_mode != 'unknown':
+            connection.execute("INSERT INTO hmi_order_modes VALUES (?,?) ON CONFLICT(order_id) DO UPDATE SET process_mode=excluded.process_mode", (order_id, event.process_mode))
+        # 같은 이벤트 재시도는 위 중복 검사에서 반환하므로 이력도 한 번만 저장된다.
+        # claim_token이나 원본 result_json을 공개 조회 이력에 복사하지 않는다.
+        connection.execute(
+            "INSERT INTO hmi_events(event_id,order_id,kind,phase,stage_key,stage_state,progress_pct,message,error_code,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (event.event_id, order_id, event.kind, event.phase, event.stage_key,
+             event.stage_state, event.progress_pct, event.message, event.error_code, now()),
         )
         connection.commit()
     return {"order_id": order_id, "status": state}

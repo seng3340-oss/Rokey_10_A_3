@@ -20,3 +20,6 @@ frontend/dist/
 
 # 로봇별 로컬 실측값은 형상 관리에서 제외한다.
 /config/local/
+
+# 노트북 로컬 실행 도구·인증·프로세스 기록
+.runtime/

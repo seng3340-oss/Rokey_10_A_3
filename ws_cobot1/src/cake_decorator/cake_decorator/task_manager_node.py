@@ -12,6 +12,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
+from cake_decorator_interfaces.srv import RunPlateSequence
 
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Pose, Point, Quaternion
@@ -73,9 +74,9 @@ class TaskManagerNode(Node):
 
         # [변경 2026-11-18] 기존 드로잉 액션은 유지하고 플레이트 전/후 서비스 추가.
         self._plate_prepare_client = self.create_client(
-            Trigger, 'plate_prepare', callback_group=self._cb)
+            RunPlateSequence, 'plate_prepare_monitored', callback_group=self._cb)
         self._plate_finish_client = self.create_client(
-            Trigger, 'plate_finish', callback_group=self._cb)
+            RunPlateSequence, 'plate_finish_monitored', callback_group=self._cb)
 
         # ── GenerateTrajectory 서비스 클라이언트 ──
         self._gen_traj_client = self.create_client(
@@ -185,7 +186,7 @@ class TaskManagerNode(Node):
         if not client.wait_for_service(timeout_sec=10.0):
             self.get_logger().error(f'{phase}: 서비스 연결 실패')
             return False
-        future = client.call_async(Trigger.Request())
+        future = client.call_async(RunPlateSequence.Request(order_id=self._current_order_id or ""))
         # 기존 ROS future 대기 헬퍼 재사용; 플레이트 작업은 드로잉보다 길 수 있음.
         try:
             self._wait_future(future, 300.0)
@@ -280,6 +281,7 @@ class TaskManagerNode(Node):
 
             # 2) DrawOnCake 액션 호출
             draw_goal = DrawOnCake.Goal()
+            draw_goal.order_id = request.order_id
             draw_goal.waypoints = resp.waypoints_3d
             draw_goal.drawing_surface = dp.surface
             draw_goal.contact_force = contact_force

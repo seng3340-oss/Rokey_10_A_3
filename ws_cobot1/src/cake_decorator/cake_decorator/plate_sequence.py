@@ -11,9 +11,21 @@ from .drawing_motion import DsrPos
 class PlateSequence:
     """플레이트 전용 이동 시퀀스를 관리합니다."""
 
-    def __init__(self, robot, param):
+    def __init__(self, robot, param, report=None):
         self._robot = robot
         self._param = param
+        self._report = report or (lambda key, state, message='': None)
+
+    def _stage(self, key, callback):
+        """호출 전 시작, 성공 응답 뒤 완료를 알린다. 기존 이동 순서·인수는 보존한다."""
+        self._report(key, 'running')
+        try:
+            ok = callback()
+        except Exception as error:
+            self._report(key, 'failed', str(error))
+            raise
+        self._report(key, 'completed' if ok else 'failed')
+        return ok
 
     def _plate_joint(self, name: str, relative: bool = False) -> bool:
         return self._robot.move_joint(
@@ -75,8 +87,14 @@ class PlateSequence:
         )
 
     def _plate_prepare_steps(self) -> bool:
-        if not self._plate_pick_opener():
+        if not self._stage('opener_pick', self._plate_pick_opener):
             return False
+        if not self._stage('cake_to_station', self._prepare_transport):
+            return False
+        return self._stage('opener_return_before', self._plate_place_opener)
+
+    def _prepare_transport(self):
+        """기존 스테이션 이송 명령을 같은 순서로 실행한다."""
         # opener 거치대에서 벗어나 케이크 작업대 쪽으로 진입하기 위한 이동.
         if not self._plate_line('move_cake_ps_l2'):
             return False
@@ -99,14 +117,22 @@ class PlateSequence:
                 return False
         # 드로잉 전에 그리퍼를 비워야 마커를 파지할 수 있으므로 opener를
         # 거치대에 내려놓는다. place()가 그리퍼 열기까지 처리한다.
-        return self._plate_place_opener()
+        return True
 
     def _plate_finish_steps(self) -> bool:
         # 스테이션에서 케이크를 들어 올린 뒤 출고하고 오프너를 반환한다.
         # 드로잉으로 그리퍼가 빈 상태이므로 케이크를 옮기기 전에 opener를
         # 다시 파지한다. pick()가 그리퍼 열기/닫기를 모두 처리한다.
-        if not self._plate_pick_opener():
+        if not self._stage('opener_repick', self._plate_pick_opener):
             return False
+        if not self._stage('cake_to_outlet', self._finish_transport):
+            return False
+        if not self._stage('opener_return_after', self._plate_place_opener):
+            return False
+        return self._stage('safe_position', lambda: self._plate_joint('safe_position_5'))
+
+    def _finish_transport(self):
+        """기존 반출 이송을 실행한다. 오프너 반납과 최종 안전 이동은 호출부가 알린다."""
         # 재파지 후 opener 거치대에서 벗어나기 위한 클리어런스 이동.
         if not self._plate_line('move_cake_ps_l2'):
             return False
@@ -130,8 +156,5 @@ class PlateSequence:
         # 기존 place()는 접근 위치로 후퇴한다(원본은 해제 직후 종료).
         # [변경 2026-11-19] 전용 plate_place 대신 기존 place()을 그대로 재사용한다.
         # 그리퍼는 place() 내부의 DO2 Open(기본값) 펄스로 오프너를 해제한다.
-        if not self._plate_place_opener():
-            return False
-        # 오프너 반납 후 safe position 5로 최종 이동.
-        return self._plate_joint('safe_position_5')
+        return True
 

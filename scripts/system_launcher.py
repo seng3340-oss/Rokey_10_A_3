@@ -907,6 +907,13 @@ def main():
                 command += ["-p", "plate_sequence_enabled:=true"]
             processes.start(name, command)
         session.ready_application()
+        # 선택한 로컬 시작 검증이 끝날 때까지 주문 전달만 대기한다.
+        # 드라이버·업무 노드는 살아 있어 상태 조회와 CPU/실시간 설정 검증이 가능하다.
+        # 매 실행마다 새 승인 파일을 사용하며 기본 실행에는 대기를 추가하지 않는다.
+        startup_gate = env.get("CAKE_STARTUP_GATE")
+        if startup_gate:
+            print("제어 주기 검증 완료 대기: 주문 전달은 아직 시작하지 않습니다.", flush=True)
+            processes.wait(lambda: Path(startup_gate).is_file(), 600)
         processes.start(
             "bridge",
             [

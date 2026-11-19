@@ -67,3 +67,7 @@ PDF 폴더 트리의 cake_decoration_interfaces는 참조 이름과 달라 확�
 - 브릿지는 별도 cake_decorator 패키지에 구현했습니다. TM·DP·RE와 실제 이동은 구현 전입니다.
 
 `GenerateTrajectory.cake_pose.orientation`은 영점 펜 TCP 자세입니다. 케이크 평면 회전은 별도 `cake_yaw`(rad)로 보냅니다. 해상도 서비스 필드는 float64이므로 TM은 float로 변환해 직렬화합니다.
+
+## HMI 전체 공정 관측
+
+`RunPlateSequence.srv`는 표시용 `order_id`를 받아 기존 플레이트 준비/후처리 함수를 실행합니다. TM은 `plate_prepare_monitored`와 `plate_finish_monitored`를 사용하며 기존 Trigger 엔드포인트는 유지합니다. `DrawOnCake.Goal.order_id`는 펜·드로잉 단계의 관측을 해당 주문에 연결합니다. 변경 뒤 인터페이스와 cake_decorator를 함께 다시 빌드해야 합니다.

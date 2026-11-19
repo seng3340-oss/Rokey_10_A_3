@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .database import Database
+from .monitoring import router as monitoring_router
 from .bridge import router as bridge_router
 from .drawings import router as drawing_router
 from .orders import router as order_router
@@ -93,6 +94,7 @@ def create_app(
     app.include_router(drawing_router)
     app.include_router(order_router)
     app.include_router(bridge_router)
+    app.include_router(monitoring_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):

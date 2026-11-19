@@ -12,6 +12,10 @@ TM(task_manager)에서 ExecuteTask Goal을 보내면 전체 작업 흐름을
 from __future__ import annotations
 
 import time
+import json
+from std_msgs.msg import String
+from cake_decorator_interfaces.srv import RunPlateSequence
+from .process_monitor import stage_payload
 import traceback
 import threading
 
@@ -128,7 +132,11 @@ class RobotExecutorNode(Node):
             ),
         )
 
-        self._plate_sequence = PlateSequence(self._robot, self._param)
+        self._process_pub = self.create_publisher(String, '/cake/process_events', 100)
+        self._plate_order_id = ''
+        self._drawing_order_id = ''
+        self._drawing_stage = ''
+        self._plate_sequence = PlateSequence(self._robot, self._param, self._plate_report)
 
         # 콜백 그룹
         self._cb = ReentrantCallbackGroup()
@@ -161,11 +169,35 @@ class RobotExecutorNode(Node):
             Trigger, 'plate_prepare', self._execute_plate_prepare, callback_group=self._cb)
         self._plate_finish_srv = self.create_service(
             Trigger, 'plate_finish', self._execute_plate_finish, callback_group=self._cb)
+        # 주문 ID가 있는 서비스는 동일 실행 함수를 사용하며 관측만 추가한다.
+        self._monitored_prepare = self.create_service(
+            RunPlateSequence, 'plate_prepare_monitored',
+            lambda req, res: self._plate_run(res, '드로잉 준비', self._plate_sequence._plate_prepare_steps, req.order_id),
+            callback_group=self._cb,
+        )
+        self._monitored_finish = self.create_service(
+            RunPlateSequence, 'plate_finish_monitored',
+            lambda req, res: self._plate_run(res, '드로잉 후처리', self._plate_sequence._plate_finish_steps, req.order_id),
+            callback_group=self._cb,
+        )
         self.get_logger().info(
             'robot_executor_node 시작 — 상태 머신 + 액션 서버 대기 중'
         )
 
-    def _plate_run(self, response, phase: str, callback):
+    def _report_process(self, order_id, key, state, message=''):
+        """익명 직접 호출은 다른 주문에 붙이지 않는다. 이벤트는 표시 전용 토픽이다."""
+        if order_id:
+            payload = stage_payload(order_id, key, state, message[:2048])
+            self._process_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+
+    def _plate_report(self, key, state, message=''):
+        self._report_process(self._plate_order_id, key, state, message)
+
+    def _draw_stage(self, key, state, message=''):
+        self._drawing_stage = key
+        self._report_process(self._drawing_order_id, key, state, message)
+
+    def _plate_run(self, response, phase: str, callback, order_id=''):
         if not self._param('plate_sequence_enabled'):
             response.success = False
             response.message = 'plate_sequence_enabled=false: 플레이트 시퀀스 비활성(기존 드로잉만 실행).' 
@@ -175,6 +207,7 @@ class RobotExecutorNode(Node):
             response.message = '다른 플레이트 작업 실행 중'
             return response
         try:
+            self._plate_order_id = order_id
             response.success = bool(callback())
             response.message = f'{phase} 완료' if response.success else f'{phase} 이동/그리퍼 실패, 즉시 중단'
         except Exception as exc:
@@ -182,6 +215,7 @@ class RobotExecutorNode(Node):
             response.success = False
             response.message = f'{phase} 예외: {exc}'
         finally:
+            self._plate_order_id = ''
             self._plate_lock.release()
         return response
 
@@ -467,6 +501,8 @@ class RobotExecutorNode(Node):
             self._fail(f'동작 계획 실패: {plan.error_msg}')
             return False
 
+        if not pen_cycle:
+            self._draw_stage('drawing', 'running')
         # 명령 실행
         total = len(plan.commands)
         for i, cmd in enumerate(plan.commands):
@@ -636,6 +672,23 @@ class RobotExecutorNode(Node):
     # ==================================================================
 
     def _execute_draw(self, goal_handle):
+        """기존 드로잉 실행에 주문별 단계 관측만 덧붙인다."""
+        self._drawing_order_id = getattr(goal_handle.request, 'order_id', '')
+        self._drawing_stage = ''
+        try:
+            result = self._execute_draw_steps(goal_handle)
+            if not result.success and self._drawing_stage:
+                self._draw_stage(self._drawing_stage, 'failed', result.error_code)
+            return result
+        except Exception as error:
+            if self._drawing_stage:
+                self._draw_stage(self._drawing_stage, 'failed', str(error))
+            raise
+        finally:
+            self._drawing_order_id = ''
+            self._drawing_stage = ''
+
+    def _execute_draw_steps(self, goal_handle):
         """DrawOnCake 액션 — 웨이포인트를 하나씩 MoveLine으로 실행."""
         request = goal_handle.request
         result = DrawOnCake.Result()
@@ -675,6 +728,7 @@ class RobotExecutorNode(Node):
             # 바로 앞 단계(PLACING_CAKE)에서만 전이할 수 있다. 케이크 운반은 하지 않으므로
             # 상태만 그 단계로 맞춘 뒤 호출한다.
             self._state = TaskState.PLACING_CAKE
+            self._draw_stage('pen_pick', 'running')
             if not self._do_grasping_tool(goal_handle, request):
                 self._state = TaskState.IDLE
                 result.success = False
@@ -682,6 +736,8 @@ class RobotExecutorNode(Node):
                 result.completed_strokes = 0
                 goal_handle.abort()
                 return result
+            self._draw_stage('pen_pick', 'completed')
+            self._draw_stage('drawing', 'running')
             # 펜을 집은 뒤 케이크 중심 상공 → 첫 획 시작점 상공으로 이동한다.
             # 하강과 펜 내림은 아래 드로잉 명령(접근점 → PEN_DOWN)이 수행한다.
             if not (
@@ -747,12 +803,14 @@ class RobotExecutorNode(Node):
                 prev_stroke_idx = cmd.stroke_idx
 
         self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
+        self._draw_stage('drawing', 'completed')
 
         # 펜 순환 모드: 그리기가 끝나면 펜을 거치대에 반납한다.
         # 드로잉 중 실패·취소했다면 위에서 이미 반환했으므로 반납하지 않는다(펜은 그리퍼에 남음).
         if pen_cycle:
             # GRASPING_TOOL → DRAWING → RETURNING_TOOL 순서로만 전이할 수 있다.
             self._transition_to(TaskState.DRAWING)
+            self._draw_stage('pen_return', 'running')
             returned = self._do_returning_tool(goal_handle, request)
             # 다음 웹 주문에서 다시 PLACING_CAKE부터 시작할 수 있게 대기 상태로 돌린다.
             self._state = TaskState.IDLE
@@ -762,6 +820,7 @@ class RobotExecutorNode(Node):
                 result.completed_strokes = plan.total_strokes
                 goal_handle.abort()
                 return result
+            self._draw_stage('pen_return', 'completed')
 
         result.success = True
         result.completed_strokes = plan.total_strokes

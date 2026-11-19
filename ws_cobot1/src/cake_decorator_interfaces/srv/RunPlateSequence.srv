@@ -1,0 +1,5 @@
+# 표시용 주문 ID. 로봇 좌표나 명령 종류를 변경하지 않는다.
+string order_id
+---
+bool success
+string message
