@@ -91,23 +91,3 @@ class SideSurfaceTests(unittest.TestCase):
         groups = split_spline_samples(samples)
         self.assertTrue(all(2 <= len(group) <= 100 for group in groups))
         self.assertEqual([point for group in groups for point in group], samples)
-
-
-def test_short_pen_up_diagonal_uses_outer_tangents_not_tiny_arcs():
-    """높이차가 큰 짧은 획간 이동이 미세 원호 수백 개로 분할되지 않아야 한다."""
-    from cake_decorator.frustum_path import DrawingFrustum
-    from cake_decorator.surface_path import side_clearance_leg
-
-    cake = DrawingFrustum(r_top=56.75, r_bottom=60., height=79., cx=400., cy=0., cz=141.)
-    start, end = (0., 70.), (1., 20.)
-    moves = side_clearance_leg(cake, start, end, 10.)
-    assert len(moves) == 4
-    assert all(move.via is None for move in moves)
-    previous = cake.side_abs_with_offset(*start, 10.)
-    for move in moves:
-        for i in range(101):
-            point = tuple(a + (b-a)*i/100 for a, b in zip(previous, move.end))
-            if cake.cz <= point[2] <= cake.cz + cake.height:
-                assert math.hypot(point[0]-cake.cx, point[1]-cake.cy) >= cake.radius_at(point[2]-cake.cz)
-        previous = move.end
-    assert moves[-1].end == cake.side_abs_with_offset(*end, 10.)

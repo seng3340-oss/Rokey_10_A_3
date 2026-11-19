@@ -127,7 +127,7 @@ def prepare_reference(
         return session.prepare_virtual()
     if calibrate_pen_tcp:
         print(f"펜을 수직으로 세워 상면 중앙에 닿게 두세요. 상면 BASE Z={cake_top_z_mm}mm")
-        print("YES 후 현재 TCP의 XY가 펜촉과 같다고 가정해 별도 펜촉 TCP를 등록·적용합니다.")
+        print("YES 후 현재 TCP의 XY가 펜촉과 같다고 가정해 별도 테스트 TCP를 등록·적용합니다.")
         print("설정 적용으로 좌표 표시가 바뀝니다. 실제 펜촉 고정 품질은 별도 확인이 필요합니다.")
     else:
         print("펜촉 TCP를 교정하고 케이크 상면 중앙에 가볍게 닿게 두세요.")
@@ -137,7 +137,7 @@ def prepare_reference(
         != "YES"
     ):
         raise RuntimeError("영점 확인을 취소했습니다.")
-    # TCP 추정은 명시적으로 선택한 real 실행에서만 사용한다. 이동 명령은 없다.
+    # TCP 추정은 명시적으로 선택한 real 테스트에서만 사용한다. 이동 명령은 없다.
     if calibrate_pen_tcp:
         from contact_tcp import apply_contact_tcp
 
@@ -534,17 +534,27 @@ def main():
     )
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
+        "--calibrate-pen-tcp", action="store_true",
+        help="real에서 YES 때 수직 접촉 펜촉을 추정해 테스트 TCP 등록·적용",
+    )
+    parser.add_argument(
+        "--cake-top-z-mm", type=float,
+        help="실제 케이크 상면의 BASE 기준 Z(mm). 케이크 자체 높이가 아님",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="준비 상태만 검사하고 아무것도 실행하지 않음",
     )
     parser.add_argument("--bridge-reference", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    real_config = json.loads((ROOT / "config/real_robot.json").read_text())
-    args.calibrate_pen_tcp = args.mode == "real" and real_config["configure_pen_tcp_on_yes"]
-    args.cake_top_z_mm = float(real_config["cake_top_z_mm"])
-    if not math.isfinite(args.cake_top_z_mm) or not 0 <= args.cake_top_z_mm <= 900:
-        parser.error("config/real_robot.json의 cake_top_z_mm는 BASE 기준0~900mm여야 합니다.")
+    if args.calibrate_pen_tcp:
+        if args.mode != "real" or args.cake_top_z_mm is None:
+            parser.error("펜촉 TCP 추정은 real 모드에서 --cake-top-z-mm와 함께 사용하세요.")
+        if not math.isfinite(args.cake_top_z_mm) or not 0 <= args.cake_top_z_mm <= 900:
+            parser.error("상면 BASE Z는 0~900mm의 유한한 값이어야 합니다.")
+    elif args.cake_top_z_mm is not None:
+        parser.error("--cake-top-z-mm는 --calibrate-pen-tcp와 함께 사용하세요.")
     entry_mode = os.environ.get("CAKE_SYSTEM_MODE")
     if entry_mode and args.mode != entry_mode:
         parser.error(
@@ -726,6 +736,13 @@ def main():
             )
             if name == "robot_executor_node" and args.mode == "virtual":
                 command += ["-p", "virtual_initial_approach:=true"]
+            # start_real_pen_cycle.sh로 실행한 경우에만 드로잉 전후 펜 집기·반납을 켠다.
+            # 기존 start_real.sh·start_virtual.sh의 동작은 바뀌지 않는다.
+            if (
+                name == "robot_executor_node"
+                and os.environ.get("CAKE_PEN_TOOL_CYCLE") == "1"
+            ):
+                command += ["-p", "pen_tool_cycle:=true"]
             processes.start(name, command)
         session.ready_application()
         processes.start(
