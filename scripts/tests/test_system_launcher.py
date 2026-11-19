@@ -392,7 +392,7 @@ def test_real_defaults_are_configured_without_contact_cli_flags():
     assert config["configure_pen_tcp_on_yes"] is True
     # 확인 전에 거치대 위치를 중심으로 기록하지 않도록 명시한 좌표다.
     assert config["side_cake_center_xy_mm"] == [
-        396.8743225097656, -50.559329986572266,
+        396.7743225097656, -50.75932998657227,
     ]
 
 

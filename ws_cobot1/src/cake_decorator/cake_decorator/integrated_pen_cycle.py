@@ -198,10 +198,15 @@ class IntegratedPenCycle:
         if cancelled():
             raise RuntimeError("통합 펜 순환 취소 요청")
 
-    def pick_side(self, cancelled=lambda: False, *, reuse_rack_position=False, preserve_speed=False):
+    def pick_side(self, cancelled=lambda: False, *, reuse_rack_position=False, preserve_speed=False, extra_lift_mm=0.0):
         """220mm 피벗으로 파지 후 Pen_Side_45를 선택하고 되감기 관절을 반환한다."""
         self.rack = self._rack()
         geometry = pick_geometry(self.rack)
+        if not math.isfinite(extra_lift_mm) or not 0 <= extra_lift_mm <= 50:
+            raise ValueError("추가 인출 높이는 0~50mm여야 합니다.")
+        # 기울어진 인출과 수직 복귀를 같은 높이로 올려 피벗을 유지한다.
+        for pose in geometry.flange_poses[2:]:
+            pose[2] += extra_lift_mm
         pivot = "PickPivot_" + uuid.uuid4().hex[:12]
         registered = False
         self._check_cancel(cancelled)
@@ -215,9 +220,9 @@ class IntegratedPenCycle:
             self._check_cancel(cancelled)
             skip_approach = False
             if reuse_rack_position:
-                # TOP 반납 직후라도 플랜지 실측과 설정이 다르면 원래 상공 접근을 수행한다.
+                # TOP 반납 위치를 확인한 뒤 제자리 기울임으로 이어간다. 불일치는 중단한다.
                 actual = checked_pose(self._call("current_flange", ref=0).pos)
-                expected = self.rack["pen_drop_after_pose"]
+                expected = self.rack["pen_drop_pose"]
                 angle = (
                     Rotation.from_euler("ZYZ", actual[3:], degrees=True).inv()
                     * Rotation.from_euler("ZYZ", expected[3:], degrees=True)
@@ -225,11 +230,13 @@ class IntegratedPenCycle:
                 skip_approach = (
                     math.dist(actual[:3], expected[:3]) < 0.5
                     and angle < math.radians(0.5)
-                    and actual[2] > geometry.flange_poses[0][2]
+                    and actual[2] >= geometry.flange_poses[0][2] - 0.5
                     and math.dist(actual[:2], geometry.flange_poses[0][:2]) < 1.0
                 )
+            if reuse_rack_position and not skip_approach:
+                raise RuntimeError("TOP 반납 위치 불일치: 제자리 재파지를 중단합니다.")
             if skip_approach:
-                self.robot._logger.info("TOP 반납 상공 확인: 중복 관절 상공 이동 생략")
+                self.robot._logger.info("TOP 반납 위치 확인: 상공 이동 없이 제자리 45도 재파지")
             elif not self.robot.move_joint(
                 geometry.approach_joints,
                 speed_deg_s=30.0 if preserve_speed else self.parameter("free_joint_speed_deg_s"),
@@ -244,11 +251,11 @@ class IntegratedPenCycle:
                 pose = flange_to_tcp(flange_pose, GRIP_CENTER_MM)
                 if not self.robot.move_line(
                     DsrPos(*pose),
-                    # 닫기 전의 하강·기울임만 가속한다. 파지 후 인출·복귀는 보존한다.
-                    speed_mm_s=75. if index < 2 and not preserve_speed else 50.,
-                    acc_mm_s2=150. if index < 2 and not preserve_speed else 100.,
-                    angular_speed_deg_s=30. if index < 2 and not preserve_speed else 20.,
-                    angular_acc_deg_s2=60. if index < 2 and not preserve_speed else 40.,
+                    # 펜 전용 속도를 사용한다. 실제 잉크 경로 속도는 별도다.
+                    speed_mm_s=self.parameter("pen_rack_speed_mm_s") if index == 0 else self.parameter("pen_lift_speed_mm_s"),
+                    acc_mm_s2=self.parameter("pen_motion_acc_mm_s2"),
+                    angular_speed_deg_s=45.,
+                    angular_acc_deg_s2=90.,
                 ) or not self.robot.verify_pose(pose):
                     raise RuntimeError(f"45도 펜 파지 이동/도달 실패: {index}")
                 if index == 1:

@@ -408,7 +408,7 @@ def load_config_cake_reference(
     """케이크 상면 중심을 드로잉 기준점(BASE mm·ZYZ deg 6값)으로 만든다.
 
     호출 시점: 실제 모드에서 --cake-center-from-config를 지정했을 때 YES 영점 대신 호출한다.
-    XY: real_robot.json의 side_cake_center_xy_mm.
+    XY: real_robot.json의 top_cake_center_xy_mm. 없으면 기존 side_cake_center_xy_mm를 사용한다.
     Z : workspace_config.yaml의 robot_executor_node.cake_center_pose Z.
       펜을 쥐고 케이크 중심에 펜촉을 댈 때 티칭한 TCP 높이다. 펜을 내리는 깊이를
       기존 '케이크 중심 하강'과 같게 하라는 요청에 따라 이 값을 접촉 높이로 쓴다.
@@ -420,7 +420,7 @@ def load_config_cake_reference(
     import yaml
 
     config = load_real_robot_config(config_path)
-    xy = config.get("side_cake_center_xy_mm")
+    xy = config.get("top_cake_center_xy_mm", config.get("side_cake_center_xy_mm"))
     if not isinstance(xy, (list, tuple)) or len(xy) != 2:
         raise RuntimeError("config/real_robot.json에 side_cake_center_xy_mm [x, y]가 필요합니다.")
     with open(workspace_path, encoding="utf-8") as file:
@@ -478,8 +478,8 @@ def load_runtime_parameters(args, workspace_path=WORKSPACE_CONFIG):
             raise RuntimeError("side_diameter_allowance_mm는 0 이상의 유한한 값이어야 합니다.")
     dp.update(
         side_pen_45=True,
-        side_drawing_speed=30.0,
-        travel_speed=100.0,
+        side_drawing_speed=40.0,
+        travel_speed=120.0,
         side_y_inset_mm=1.0 if args.integrated_side_cycle else args.side_y_inset_mm,
     )
     if args.integrated_side_cycle:
@@ -1125,7 +1125,7 @@ def main():
         print(f"SIDE 실측 기준점 [mm, deg]: {side_reference}", flush=True)
         dp = runtime_parameters["drawing_path_node"]["ros__parameters"]
         print(
-            "통합 공정: 펜 순환·플레이트 사용, SIDE 속도 30mm/s, 공중 100mm/s, "
+            "통합 공정: 펜 순환·플레이트 사용, SIDE 속도 40mm/s, 공중 120mm/s, "
             f"Y inset 1mm, 지름 유격 {dp['side_diameter_allowance_mm']}mm",
             flush=True,
         )

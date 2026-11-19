@@ -166,3 +166,11 @@ test("옆면 하단 금지 영역에는 획을 시작하지 않는다", async (t
   assert.equal(ui.element("#modal").open, false);
   assert.equal(ui.requests.length, 0);
 });
+
+test("윗면 바깥 5mm 띠에는 획을 시작하지 않는다", (t) => {
+  const ui = setup(t);
+  ui.draw(815, 384);
+  ui.element("#review").click();
+  assert.equal(ui.element("#modal").open, false);
+  assert.equal(ui.requests.length, 0);
+});
