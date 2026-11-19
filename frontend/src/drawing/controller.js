@@ -54,7 +54,7 @@ export function mountDrawing() {
     const side = DRAWING_LAYOUT.side;
     // 점선에서 5px 안쪽으로 제한하여 테두리에 필기가 걸치지 않게 한다.
     return surface === "top"
-      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.radius - 5
+      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.drawableRadius - 3
       : p.x >= side.x + 5 &&
           p.x <= side.x + side.width - 5 &&
           p.y >= side.y + 5 &&
@@ -110,8 +110,15 @@ export function mountDrawing() {
     if (surface === "top")
       ctx.arc(region.centerX, region.centerY, region.radius, 0, 2 * Math.PI);
     else ctx.rect(region.x, region.y, region.width, region.height);
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = surface === "top" ? "#e8e4df" : "#fff";
     ctx.fill();
+    if (surface === "top") {
+      // 외곽 5mm는 회색, 그릴 수 있는 안쪽은 흰색으로 표시한다. 그림을 축소하지 않는다.
+      ctx.beginPath();
+      ctx.arc(region.centerX, region.centerY, region.drawableRadius, 0, 2 * Math.PI);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+    }
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#d7c8b6";
     ctx.setLineDash([7, 8]);

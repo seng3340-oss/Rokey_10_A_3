@@ -56,11 +56,11 @@ class WebDrawingContractTests(unittest.TestCase):
         self.assertEqual(response.pen_states, expected)
         return response.waypoints_3d
 
-    def test_top_web_circle_edge_is_fifty_mm_from_center(self):
-        """웹 오른쪽 원 경계가 실제 반지름 50mm와 일치해야 한다."""
-        path = self.convert("TOP", [(512, 384), (832, 384)])
+    def test_top_allowed_edge_is_five_mm_inside(self):
+        """반지름50mm에서 5mm를 뺀 허용 경계까지 원래 축척으로 변환한다."""
+        path = self.convert("TOP", [(512, 384), (800, 384)])
         self.assertAlmostEqual(path[1].pose.position.x, 0.5)
-        self.assertAlmostEqual(path[2].pose.position.x, 0.55)
+        self.assertAlmostEqual(path[2].pose.position.x, 0.545)
         self.assertAlmostEqual(path[2].pose.position.z, 0.142)
         self.assertGreater(path[-1].pose.position.z, 0.142)
 

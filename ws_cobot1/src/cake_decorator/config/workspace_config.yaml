@@ -11,8 +11,8 @@ drawing_path_node:
     cake_height: 0.079
     cake_orientation: 0.0
     # 아래 접근·속도 설정은 PR #16의 실행 계약을 유지한다.
-    # 테스트2 종이 검증의 30mm/s를 기준으로 한다. 웹 비율은 이 값에 곱한다.
-    drawing_speed: 30.0
+    # 윗면 그리기 기준 속도(mm/s). 주문 속도 비율은 이 값에 곱한다.
+    drawing_speed: 40.0
     # 옆면 접촉 후의 원호·스플라인만 60mm/s로 높인다. 기울기는 아래 15도를 유지한다.
     side_drawing_speed: 60.0
     travel_speed: 80.0
@@ -24,7 +24,7 @@ drawing_path_node:
     side_diagonal_mode: spline
     side_pen_vertical_deg: 15.0
     # 실물 검증 확정: 지름 기준 유격 8.1mm, 반지름 +4.05mm.
-    side_diameter_allowance_mm: 8.1
+    side_diameter_allowance_mm: 8.0
     side_y_inset_mm: 1.0
     drawing_z_offset: 0.0
     # TOP은 YES 시점의 펜 자세를 우선 유지하고, 영점 자세가 없을 때만 수직을 쓴다.
@@ -37,6 +37,11 @@ drawing_path_node:
 robot_executor_node:
   ros__parameters:
     service_timeout: 5.0
+    # 펜 인출·케이크 공중 이동·거치대 반납 전용(mm/s, mm/s²).
+    pen_travel_speed_mm_s: 120.0
+    pen_lift_speed_mm_s: 100.0
+    pen_rack_speed_mm_s: 80.0
+    pen_motion_acc_mm_s2: 250.0
     # 케이크 운반·그리기 구간은 기존 속도 유지. 나머지 공중 이동만 1.5배.
     free_joint_speed_deg_s: 45.0
     free_joint_acc_deg_s2: 45.0
@@ -60,8 +65,8 @@ robot_executor_node:
     pen_drop_pose: [248.86, 244.77, 314.84, 40.25, 180.00, 40.02] # 펜을 놓을 위치
     pen_drop_after_pose: [248.91, 244.76, 548.06, 37.07, -179.99, 36.84] # 펜을 놓은 후 상공
     cake_center_approach_pose: [-8.65, 8.16, 63.77, 0.00, 108.71, -9.48] # 케이크 중심 상공 위치
-    # 윗면 누름을 줄이기 위해 기존 티칭 Z=510.39mm에서 총 2.9mm 올린다.
-    cake_center_pose: [401.80, -55.57, 513.29, 179.76, 179.35, 179.02] # 기본 TCP 기준 윗면 그리기 자세
+    # 윗면 누름을 줄이기 위해 기존 티칭 Z=510.39mm에서 총 3.09mm 올린다.
+    cake_center_pose: [401.80, -55.57, 513.48, 179.76, 179.35, 179.02] # 기본 TCP 기준 윗면 그리기 자세
     # [변경 2026-11-18] move cakeplate_update.txt 기준 좌표/주석 정정(기존 잘못된 매핑 수정).
     # 기존 드로잉 파라미터는 유지. 신규 시퀀스는 명시적 활성화 전 실행 금지.
     # 실물 테스트 메모: TCP/툴, 동작 경로, 충돌 가능성은 장비에서 확인.
