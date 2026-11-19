@@ -367,7 +367,8 @@ def test_top_draw_failure_does_not_return_or_release_pen(monkeypatch):
     assert not result.success
     assert result.error_code == "MOVE_FAILED_AT_0"
     assert executor._robot.tcp == ""
-    assert len([1 for kind, _ in executor._robot.events if kind == "open"]) == 1
+    # 그리퍼 움찔거림 수정으로 TOP 집기에서 열기 펄스를 보내지 않는다.
+    assert len([1 for kind, _ in executor._robot.events if kind == "open"]) == 0
     assert len([1 for kind, _ in executor._robot.events if kind == "joint"]) == 1
     executor._robot.move_home.assert_not_called()
 

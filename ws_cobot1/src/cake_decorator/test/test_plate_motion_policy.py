@@ -153,8 +153,9 @@ def test_opener_speeds_waits_and_grip_contract(phase):
     target = [426.73, 252.72, 279.41, 30.09, 179.36, 28.13]
     for (_, req), pose in zip(opener, [approach, target, approach] * 2):
         assert list(req.pos) == pytest.approx(pose)
-    assert robot.grips == [("open", 98), ("close", 12, 22), ("open", 98)]
-    assert [call.args[0] for call in sleep.call_args_list] == [0.7, 0.8, 0.9, 1.1]
+    # 움찔거림 수정으로 pick은 닫기만 하고 place에서만 열기 펄스를 보낸다.
+    assert robot.grips == [("close", 12, 22), ("open", 98)]
+    assert [call.args[0] for call in sleep.call_args_list] == [0.8, 0.9, 1.1]
     for stage in ("pick_opener", "place_opener"):
         assert any(stage in message and "120" in message and "45" in message
                    for message in robot.logs)
