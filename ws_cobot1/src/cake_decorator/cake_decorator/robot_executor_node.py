@@ -846,10 +846,16 @@ class RobotExecutorNode(Node):
                 )
             # 로컬 SIDE의 세 번째 비접촉 자세 전환과 첫 상승 접근을 보존한다.
             side_rotation = surface == 'SIDE' and i == 2 and not cmd.pen_down
-            moved = (
-                self._robot.move_task_joint(cmd.pos) if side_rotation
-                else self._execute_motion_command(cmd, i, side_45=side_45)
-            )
+            if side_rotation and side_45:
+                # 45도 펜은 원주 위치에 따라 J6가 한 바퀴 가까이 감긴다.
+                # movejx에 맡기면 첫 획이 띠 오른쪽 끝일 때 덜 감긴 J6 해를 골라
+                # 이후 공중 이동에서 J6 한계(±360)를 넘는다. 남은 경로 전체를 IK로
+                # 검사해 범위 안에 드는 J6 분기를 고른 뒤 movej로 전환한다.
+                moved = self._robot.move_side_start(plan.commands, cancelled)
+            elif side_rotation:
+                moved = self._robot.move_task_joint(cmd.pos)
+            else:
+                moved = self._execute_motion_command(cmd, i, side_45=side_45)
             if not moved:
                 self.get_logger().error(f'드로잉 이동 실패 (#{i}): {cmd.pos.to_list()}')
                 return failed(f'MOVE_FAILED_AT_{i}')

@@ -141,6 +141,11 @@ class ServiceRobot:
         self.events.append(("rotate", self.tcp))
         return self.fail != "draw"
 
+    def move_side_start(self, commands, cancelled=lambda: False):
+        """45도 펜 자세 전환점. IK 분기 계산은 side_pose_selection 시험에서 검증한다."""
+        self.events.append(("rotate", self.tcp))
+        return self.fail != "draw"
+
     def current_pose(self):
         from dsr_msgs2.srv import GetCurrentPosx
         return self._call("current_pose", GetCurrentPosx.Request()).task_pos_info[0].data

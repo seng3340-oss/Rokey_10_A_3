@@ -85,6 +85,78 @@ def sampled_command_points(commands):
     return selected
 
 
+def choose_side_start_joints(
+    commands,
+    current_joints,
+    inverse,
+    start_index=2,
+    limit_deg=360.0,
+    margin_deg=10.0,
+    cancelled=lambda: False,
+    report=lambda _: None,
+):
+    """옆면 자세 전환점의 J6 회전 분기(±360도)를 남은 경로 전체에 맞춰 고른다.
+
+    호출 시점: 45도 펜을 잡고 Pen_Side_45 TCP를 적용한 뒤, 케이크로 이동하기 전.
+    입력: 실행 명령 목록, 현재 관절각(도), 목표 TCP → 관절각6개(불가 시 None) 함수.
+    반환: (전환점에서 movej로 보낼 관절각6개, 예상 J6 최소·최대(도)).
+    부수 효과 없음. 로봇을 움직이지 않는다.
+
+    문제 배경: 같은 TCP 자세에 대해 J6는 j6와 j6±360 두 해가 모두 유효하다.
+    movejx는 제어기가 가까운 해를 고르므로, 띠 오른쪽 끝(호 ≈ 한 바퀴)에서 시작하면
+    왼쪽 끝과 거의 같은 자세로 보고 "덜 감긴" J6를 택한다. 이후 획 사이 공중 이동이
+    원주를 거꾸로 한 바퀴 돌면 J6가 같은 방향으로 360도 더 돌아 관절 한계를 넘는다.
+
+    처리 순서:
+      1. 전환점부터 끝까지 검사 표본을 뽑아 IK로 J6를 구한다.
+      2. 이웃 표본 사이의 J6 차이를 -180~180도로 감아 누적한다. 표본은 최대 약10도
+         자세 차이로 뽑히므로 movel/movesx가 실제로 따라가는 연속 J6 변화와 같다.
+      3. 시작 J6 후보(k×360 이동) 중 누적 범위 전체가 ±(limit-margin) 안에 드는 것을
+         고르고, 여러 개면 현재 J6에서 가장 덜 도는 후보를 쓴다.
+    """
+    if len(commands) <= start_index or commands[start_index].pen_down:
+        raise ValueError("옆면 초기 공중 자세 전환점이 없습니다.")
+    samples = sampled_command_points(commands[start_index:])
+
+    def solve(pose):
+        """취소를 먼저 확인하고, 도달 불가·비정상 해는 이동 전에 실패로 처리한다."""
+        if cancelled():
+            raise RuntimeError("옆면 J6 분기 검사 취소")
+        joints = inverse(pose)
+        if joints is None or len(joints) != 6 or not all(math.isfinite(v) for v in joints):
+            raise RuntimeError(f"옆면 경로 표본의 역기구학 해가 없습니다: {pose.to_list()}")
+        return list(map(float, joints))
+
+    start = solve(samples[0])
+    previous = start[5]
+    cumulative = low = high = 0.0
+    for point in samples[1:]:
+        joint6 = solve(point)[5]
+        # 같은 자세의 ±360 표현 차이를 없애고 실제 연속 회전량만 누적한다.
+        cumulative += (joint6 - previous + 180.0) % 360.0 - 180.0
+        previous = joint6
+        low, high = min(low, cumulative), max(high, cumulative)
+
+    bound = limit_deg - margin_deg
+    # IK가 돌려준 J6에서 ±2바퀴까지 후보로 본다. 실제 범위(±360)에서는 이것으로 충분하다.
+    candidates = [start[5] + 360.0 * turn for turn in range(-2, 3)]
+    valid = [
+        value for value in candidates
+        if value + low >= -bound and value + high <= bound
+    ]
+    if not valid:
+        raise RuntimeError(
+            f"옆면 경로의 J6 회전량 {high - low:.1f}도가 관절 범위 ±{bound:.0f}도에 들어가지 않습니다. "
+            "이동하지 않습니다."
+        )
+    joint6 = min(valid, key=lambda value: abs(value - float(current_joints[5])))
+    report(
+        f"옆면 J6 분기 선택: 시작 {joint6:.1f}도, "
+        f"예상 범위 {joint6 + low:.1f}~{joint6 + high:.1f}도 (IK 원래 값 {start[5]:.1f}도)"
+    )
+    return [*start[:5], joint6], (joint6 + low, joint6 + high)
+
+
 def select_side_roll(commands, current_joints, inverse, cancelled=lambda: False, report=lambda _: None):
     """현재 관절 해에서 가능한 일정한 펜축 회전을 선택한다.
 

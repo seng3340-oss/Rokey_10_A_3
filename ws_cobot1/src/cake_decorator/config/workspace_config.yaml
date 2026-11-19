@@ -26,6 +26,8 @@ drawing_path_node:
     # 실물 검증 확정: 지름 기준 유격 8.1mm, 반지름 +4.05mm.
     side_diameter_allowance_mm: 8.0
     side_y_inset_mm: 1.0
+    # 웹 띠 좌우 끝이 이어진 옆면 링은 이음매를 지나 3mm 더 겹쳐 그린다. 0이면 끈다.
+    side_seam_overlap_mm: 3.0
     drawing_z_offset: 0.0
     # TOP은 YES 시점의 펜 자세를 우선 유지하고, 영점 자세가 없을 때만 수직을 쓴다.
     # SIDE의 수직 기준 15도 설정과 별개다.
