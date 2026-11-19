@@ -120,11 +120,26 @@ def resolve_pending_orders(database, backend_port, bridge_token, answer=input):
 
 def prepare_reference(
     session, mode, answer=input, *, calibrate_pen_tcp=False,
-    cake_top_z_mm=None, calibration_log=None,
+    cake_top_z_mm=None, calibration_log=None, no_prompt=False,
 ):
-    """가상은 자동 배치, 실제는 YES 직후 조회한 현재 TCP를 영점으로 기록한다."""
+    """가상은 자동 배치, 실제는 YES 직후 조회한 현재 TCP를 영점으로 기록한다.
+
+    no_prompt=True는 주문을 넣지 않는 미리보기 전용이다. YES 입력 없이 현재
+    TCP를 그대로 기록하므로 이 기준점으로 실제 주문을 실행하면 안 된다.
+    """
     if mode == "virtual":
         return session.prepare_virtual()
+    if no_prompt:
+        print(
+            "[경고] 미리보기 모드: 주문을 보내지 않습니다. "
+            "YES 확인 없이 현재 TCP를 기준점으로 기록합니다.",
+            flush=True,
+        )
+        print(
+            "이 기준점은 케이크 상면 중앙이 아닐 수 있으므로 실제 주문에 사용하지 마세요.",
+            flush=True,
+        )
+        return session.pose()
     if calibrate_pen_tcp:
         print(f"펜을 수직으로 세워 상면 중앙에 닿게 두세요. 상면 BASE Z={cake_top_z_mm}mm")
         print("YES 후 현재 TCP의 XY가 펜촉과 같다고 가정해 별도 테스트 TCP를 등록·적용합니다.")
@@ -542,6 +557,14 @@ def main():
         help="실제 케이크 상면의 BASE 기준 Z(mm). 케이크 자체 높이가 아님",
     )
     parser.add_argument(
+        "--preview-no-order",
+        action="store_true",
+        help=(
+            "real 미리보기: YES 확인 없이 현재 TCP를 기록하고 주문 없이 전체 화면만 띄움. "
+            "이 기준점으로 실제 주문을 실행하지 말 것"
+        ),
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="준비 상태만 검사하고 아무것도 실행하지 않음",
@@ -555,6 +578,13 @@ def main():
             parser.error("상면 BASE Z는 0~900mm의 유한한 값이어야 합니다.")
     elif args.cake_top_z_mm is not None:
         parser.error("--cake-top-z-mm는 --calibrate-pen-tcp와 함께 사용하세요.")
+    if args.preview_no_order:
+        if args.mode != "real":
+            parser.error("--preview-no-order는 real 모드에서만 사용하세요.")
+        if args.calibrate_pen_tcp:
+            parser.error(
+                "--preview-no-order와 --calibrate-pen-tcp는 함께 사용할 수 없습니다."
+            )
     entry_mode = os.environ.get("CAKE_SYSTEM_MODE")
     if entry_mode and args.mode != entry_mode:
         parser.error(
@@ -722,6 +752,7 @@ def main():
             calibrate_pen_tcp=args.calibrate_pen_tcp,
             cake_top_z_mm=args.cake_top_z_mm,
             calibration_log=folder / "contact_tcp.json",
+            no_prompt=args.preview_no_order,
         )
         print(f"상면 중심 TCP [mm, deg]: {reference}", flush=True)
         reference_file = folder / "reference.json"
