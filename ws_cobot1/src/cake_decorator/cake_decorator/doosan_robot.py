@@ -66,6 +66,7 @@ DIGITAL_OUTPUT_MIN_PORT = 1
 DIGITAL_OUTPUT_MAX_PORT = 16
 
 
+
 def validate_gripper_settings(
     open_do: int,
     close_do: int,
@@ -643,6 +644,29 @@ class DoosanRobotClient:
         )
         return None
 
+    # def set_digital_output(self, index: int, value: int) -> bool:
+    #     """제어박스 디지털 출력(DO) 상태를 설정한다.
+
+    #     Parameters
+    #     ----------
+    #     index : 제어박스 DO 포트 번호 (1~16)
+    #     value : 출력 값 (1=ON, 0=OFF)
+
+    #     Returns
+    #     -------
+    #     서비스 호출 성공 여부. 범위를 벗어난 포트/값은 호출하지 않고 실패한다.
+    #     """
+    #     if not DIGITAL_OUTPUT_MIN_PORT <= index <= DIGITAL_OUTPUT_MAX_PORT:
+    #         self._logger.error(f"유효하지 않은 DO 포트입니다: {index}")
+    #         return False
+    #     if value not in (0, 1):
+    #         self._logger.error(f"유효하지 않은 DO 출력값입니다: {value}")
+    #         return False
+
+    #     req = SetCtrlBoxDigitalOutput.Request()
+    #     req.index = index
+    #     req.value = value
+    #     return self._call_checked("set_digital_output", req)
     def set_digital_output(self, index: int, value: int) -> bool:
         """제어박스 디지털 출력(DO) 상태를 설정한다.
 
@@ -653,15 +677,8 @@ class DoosanRobotClient:
 
         Returns
         -------
-        서비스 호출 성공 여부. 범위를 벗어난 포트/값은 호출하지 않고 실패한다.
+        서비스 호출 성공 여부
         """
-        if not DIGITAL_OUTPUT_MIN_PORT <= index <= DIGITAL_OUTPUT_MAX_PORT:
-            self._logger.error(f"유효하지 않은 DO 포트입니다: {index}")
-            return False
-        if value not in (0, 1):
-            self._logger.error(f"유효하지 않은 DO 출력값입니다: {value}")
-            return False
-
         req = SetCtrlBoxDigitalOutput.Request()
         req.index = index
         req.value = value
@@ -698,46 +715,77 @@ class DoosanRobotClient:
 
         return True
 
-    def gripper_open(self, width_mm: float = 100.0) -> bool:
-        """그리퍼 열기.
+    # def gripper_open(self, width_mm: float = 100.0) -> bool:
+    #     """그리퍼 열기.
 
-        기본은 설정된 Open DO 포트를 0.5초 펄스로 출력하는 PM 최신 방식이다.
-        가상환경 대체 백엔드에서는 width_mm를 기존 RG2 open 명령으로 전달한다.
+    #     기본은 설정된 Open DO 포트를 0.5초 펄스로 출력하는 PM 최신 방식이다.
+    #     가상환경 대체 백엔드에서는 width_mm를 기존 RG2 open 명령으로 전달한다.
+    #     """
+    #     backend = self._ensure_gripper_backend()
+    #     if backend is None:
+    #         return False
+    #     if backend == "virtual":
+    #         return self._gripper_command(f"open({width_mm})")
+    #     return self._gripper_pulse(self._gripper_open_do, "열기")
+
+    # def gripper_close(self, width_mm: float = 10.0, force_n: float = 20.0) -> bool:
+    #     """그리퍼 닫기.
+
+    #     기본은 설정된 Close DO 포트를 0.5초 펄스로 출력하는 PM 최신 방식이다.
+    #     width_mm/force_n은 기존 호출부와 가상 RG2 대체 백엔드 호환을 위해 유지한다.
+    #     """
+    #     backend = self._ensure_gripper_backend()
+    #     if backend is None:
+    #         return False
+    #     if backend == "virtual":
+    #         return self._gripper_command(f"close({width_mm},{force_n})")
+    #     return self._gripper_pulse(self._gripper_close_do, "닫기")
+
+    # def _gripper_command(self, command: str) -> bool:
+    #     """가상환경 전용 OnRobot RG2 SetCommand 서비스 호출.
+
+    #     실제 장비의 기본 제어 경로가 아니며, DO 서비스가 없는 가상환경에서만
+    #     사용한다. 실패해도 DO 포트로 자동 전환하지 않는다.
+    #     """
+    #     req = SetCommand.Request()
+    #     req.command = command
+    #     result = self._call("gripper", req)
+    #     if result is None:
+    #         return False
+    #     if not result.success:
+    #         self._logger.warn(f"가상 그리퍼 명령 실패: {command} → {result.message}")
+    #     return result.success
+
+    def gripper_open(self, width_mm: float = 100.0) -> bool:
+        """그리퍼 열기 (제어박스 DO 1번 펄스 출력).
+
+        Parameters
+        ----------
+        width_mm : 기존 호출부 호환을 위한 열림 폭 인자 (DO 제어에서는 미사용)
         """
-        backend = self._ensure_gripper_backend()
-        if backend is None:
+        del width_mm
+        # 1번 포트를 0.5초간 ON 후 OFF 하여 열림 신호를 전달한다.
+        time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
+        if not self.set_digital_output(2, 1):
             return False
-        if backend == "virtual":
-            return self._gripper_command(f"open({width_mm})")
-        return self._gripper_pulse(self._gripper_open_do, "열기")
+        time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
+        return self.set_digital_output(2, 0)
 
     def gripper_close(self, width_mm: float = 10.0, force_n: float = 20.0) -> bool:
-        """그리퍼 닫기.
+        """그리퍼 닫기 (제어박스 DO 2번 펄스 출력).
 
-        기본은 설정된 Close DO 포트를 0.5초 펄스로 출력하는 PM 최신 방식이다.
-        width_mm/force_n은 기존 호출부와 가상 RG2 대체 백엔드 호환을 위해 유지한다.
+        Parameters
+        ----------
+        width_mm : 기존 호출부 호환을 위한 파지 폭 인자 (DO 제어에서는 미사용)
+        force_n : 기존 호출부 호환을 위한 파지 힘 인자 (DO 제어에서는 미사용)
         """
-        backend = self._ensure_gripper_backend()
-        if backend is None:
+        del width_mm, force_n
+        # 2번 포트를 0.5초간 ON 후 OFF 하여 닫힘 신호를 전달한다.
+        time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
+        if not self.set_digital_output(1, 1):
             return False
-        if backend == "virtual":
-            return self._gripper_command(f"close({width_mm},{force_n})")
-        return self._gripper_pulse(self._gripper_close_do, "닫기")
-
-    def _gripper_command(self, command: str) -> bool:
-        """가상환경 전용 OnRobot RG2 SetCommand 서비스 호출.
-
-        실제 장비의 기본 제어 경로가 아니며, DO 서비스가 없는 가상환경에서만
-        사용한다. 실패해도 DO 포트로 자동 전환하지 않는다.
-        """
-        req = SetCommand.Request()
-        req.command = command
-        result = self._call("gripper", req)
-        if result is None:
-            return False
-        if not result.success:
-            self._logger.warn(f"가상 그리퍼 명령 실패: {command} → {result.message}")
-        return result.success
+        time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
+        return self.set_digital_output(1, 0)
 
     # ------------------------------------------------------------------
     # 상태 확인
@@ -800,9 +848,9 @@ class DoosanRobotClient:
         if not self.move_line(approach, speed_mm_s=speed_approach):
             return False
         # 그리퍼 명령 실패(특히 OFF 실패) 뒤에는 절대 다음 이동을 보내지 않는다.
-        if not self.gripper_open(open_width):
-            return False
-        time.sleep(max(0.0, pre_open_wait_sec))
+        # if not self.gripper_open(open_width):
+        #     return False
+        # time.sleep(max(0.0, pre_open_wait_sec))
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
         if not self.gripper_close(grip_width, grip_force):
