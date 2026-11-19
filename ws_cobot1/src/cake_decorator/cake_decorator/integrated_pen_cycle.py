@@ -136,7 +136,12 @@ class IntegratedPenCycle:
 
         # 통합 모드는 실물에서 검증한 ZYZ 플랜지 기준을 사용한다.
         # TOP/플레이트 티칭에 named nonzero TCP가 섞이지 않게 항상 수치 검증한다.
-        reset_default_tcp(call, stop_running=stop_running)
+        outcome = reset_default_tcp(call, stop_running=stop_running)
+        self.robot._logger.info(
+            "기본 TCP 이미 적용됨: 정지·플랜지 일치 확인 완료"
+            if outcome == "already_default"
+            else "기본 TCP 선택 해제 및 플랜지 일치 확인 완료"
+        )
 
     def _configure(self, operation):
         """정지 상태의 TCP 변경을 수동 모드에서 하고 원래 모드를 복원한다."""

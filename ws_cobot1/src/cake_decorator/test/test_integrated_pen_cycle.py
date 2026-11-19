@@ -413,6 +413,8 @@ def test_plate_resets_tcp_before_callback_and_rejects_reset_failure(monkeypatch)
     result = executor._plate_run(SimpleNamespace(success=False), "준비", callback)
     assert result.success
     callback.assert_called_once()
+    # 기본 TCP면 재설정을 생략하므로, 실패 시험은 실제로 복원이 필요한 상태로 만든다.
+    executor._robot.tcp = "Pen_Side_45"
     executor._robot.fail = "set_tcp"
     callback.reset_mock()
     result = executor._plate_run(SimpleNamespace(success=False), "준비", callback)

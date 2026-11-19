@@ -60,7 +60,7 @@ def test_interrupted_work_stops_before_resetting_tcp():
     call, state, events = make_services(moving=True)
     reset_default_tcp(call, stop_running=True)
     names = [path.rsplit("/", 1)[-1] for path, _ in events]
-    assert names.index("move_stop") < names.index("check_motion") < names.index("set_current_tcp")
+    assert names.index("check_motion") < names.index("move_stop") < names.index("set_current_tcp")
     assert state["tcp"] == ""
 
 
@@ -181,3 +181,53 @@ def test_tilted_monitoring_flange_angles_are_zyx():
         return response
 
     reset_default_tcp(call, flange_euler="ZYX")
+
+
+def test_already_stopped_zero_tcp_does_not_send_redundant_stop_or_mode():
+    """실패 정리라도 이미 기본 TCP와 정지가 확인되면 정지 명령 거부를 피한다."""
+    from cake_decorator.tcp_scope import reset_default_tcp
+
+    original, state, events = make_services()
+    state['tcp'] = ''
+
+    def call(kind, path, request, **kwargs):
+        assert not path.endswith(('move_stop', 'set_robot_mode', 'set_current_tcp'))
+        return original(kind, path, request, **kwargs)
+
+    assert reset_default_tcp(call, stop_running=True) == 'already_default'
+    assert state['tcp'] == ''
+
+
+def test_stop_failure_can_proceed_only_when_motion_is_independently_idle():
+    """정지 응답이 실패해도 이후 IDLE 조회가 확인된 경우만 TCP를 복원한다."""
+    from cake_decorator.tcp_scope import reset_default_tcp
+
+    original, state, events = make_services(moving=True)
+
+    def call(kind, path, request, **kwargs):
+        if path.endswith('move_stop'):
+            # 다른 정지 원인과 겹쳐 stop 응답은 실패했지만 로봇은 이미 멈춘 경우.
+            state['moving'] = False
+            return SimpleNamespace(success=False)
+        return original(kind, path, request, **kwargs)
+
+    assert reset_default_tcp(call, stop_running=True) == 'restored'
+    assert state['tcp'] == ''
+
+
+def test_stop_failure_with_busy_robot_never_changes_tcp(monkeypatch):
+    """정지 명령 거부 후 계속 BUSY라면 이름이 무엇이든 TCP를 변경하지 않는다."""
+    from cake_decorator.tcp_scope import reset_default_tcp
+
+    original, state, events = make_services(moving=True)
+
+    def call(kind, path, request, **kwargs):
+        if path.endswith('move_stop'):
+            return SimpleNamespace(success=False)
+        return original(kind, path, request, **kwargs)
+
+    monkeypatch.setattr('cake_decorator.tcp_scope.time.monotonic', Mock(side_effect=[0., 6.]))
+    with pytest.raises(RuntimeError, match='TCP 변경 안 함'):
+        reset_default_tcp(call, stop_running=True)
+    assert state['tcp'] == 'Pen_Side_45'
+    assert not any(path.endswith('set_current_tcp') for path, _ in events)
