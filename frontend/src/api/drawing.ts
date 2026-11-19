@@ -1,4 +1,4 @@
-/** 한 요청이 담을 수 있는 케이크의 면이다. 두 면을 합쳐 전송하지 않는다. */
+/** 한 요청이 담을 수 있는 케이크의 면이다. 두 면은 한 주문에 포함할 수 있다. */
 export type Surface = "top" | "side";
 /** 화면 표시 크기가 아닌 원본 캔버스 기준 좌표다. x는 오른쪽, y는 아래로 증가한다. */
 export interface Point2D {
@@ -11,12 +11,17 @@ export interface Stroke {
   points: Point2D[];
 }
 /** 선택 면의 원본 크기와 모든 유효 입력 점을 담는 기존 드로잉 요청 형식이다. */
-export interface DrawingPayload {
+export interface DrawingPathPayload {
   canvas_width: number;
   canvas_height: number;
   drawing_surface: Surface;
   strokes: Stroke[];
 }
+/** TOP의 기존 필드와 독립된 SIDE를 한 주문으로 함께 보낸다. */
+export interface DrawingPayload extends DrawingPathPayload {
+  additional_paths?: DrawingPathPayload[];
+}
+
 // 응답 필드는 PM 원문에 없으므로 백엔드와 합의할 제안 계약이다.
 /** 제작 완료가 아닌 서버의 주문 접수 확인만 나타낸다. HMI 상태와는 별개다. */
 export interface DrawingReceipt {

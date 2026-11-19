@@ -64,6 +64,7 @@ class DrawingPathNode(Node):
         self.declare_parameter("side_pen_vertical_deg", 17.0)
         # 양수이면 BASE +Y/-Y 가장자리를 각각 같은 거리만큼 안으로 줄인다.
         self.declare_parameter("side_y_inset_mm", 0.0)
+        self.declare_parameter("integrated_side_cycle", False)
         self.declare_parameter("side_pen_45", False)  # 45도 실물 파지 웹 검증 모드
         self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
         # TOP: 수직에서 기울어지는 각도 (0=수직, 30=30도 기울임)
@@ -279,9 +280,11 @@ class DrawingPathNode(Node):
         waypoint_states = [waypoint.pen_down for waypoint in waypoints]
         if pen_states != waypoint_states:
             raise ValueError("웨이포인트와 펜 상태 배열이 일치하지 않습니다.")
-        if self._param("side_pen_45"):
-            if surface != "SIDE":
-                raise ValueError("45도 파지 검증에서는 웹의 옆면을 선택하세요.")
+        # 이미 기울어진 펜을 잡고 시작하는 독립 시험은 TOP을 허용하지 않는다.
+        if self._param("side_pen_45") and surface == "TOP" and not self._param("integrated_side_cycle"):
+            raise ValueError("독립 45도 파지 시험에서는 옆면만 그릴 수 있습니다.")
+        # TOP은 기존 수직 펜 경로를 유지하며 SIDE에만 검증된 45도 자세를 적용한다.
+        if self._param("side_pen_45") and surface == "SIDE":
             from .bent_pen import apply_side_gripper_orientations
 
             apply_side_gripper_orientations(waypoints, cake.cx / 1000., cake.cy / 1000.)

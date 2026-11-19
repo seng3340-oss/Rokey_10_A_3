@@ -48,6 +48,9 @@ setup(
             "robot_executor_node = cake_decorator.robot_executor_node:main",
             # CakeOrder 액션 서버. DP·RE를 순서대로 호출하는 오케스트레이터.
             "task_manager_node = cake_decorator.task_manager_node:main",
+            "test_gripper = cake_decorator.test_gripper:main",
+            "test = cake_decorator.test:main",
+            "test_interfaces = cake_decorator.test_interfaces:main",
         ],
     },
 )

@@ -120,6 +120,7 @@ def test_action_resets_after_motion_and_before_success(successful):
     robot.reset_default_tcp.side_effect = lambda **kwargs: events.append("reset")
     handle = Mock()
     handle.request.drawing_surface = "SIDE"
+    handle.is_cancel_requested = False
     handle.succeed.side_effect = lambda: events.append("success")
 
     def motion(goal):
@@ -127,7 +128,8 @@ def test_action_resets_after_motion_and_before_success(successful):
         return result
 
     executor = SimpleNamespace(
-        _param=lambda key: True,
+        # 독립 SIDE 시험만 활성화한다. 새 통합 옵션까지 임의로 True로 만들지 않는다.
+        _param=lambda key: key == "side_pen_45",
         _robot=robot,
         _execute_draw_motion=motion,
         get_logger=Mock(),
@@ -137,6 +139,7 @@ def test_action_resets_after_motion_and_before_success(successful):
     assert events[:2] == ["motion_and_return", "reset"]
     assert ("success" in events) == successful
     assert executor._side_pen_returned
+    robot.reset_default_tcp.assert_called_once_with(stop_running=not successful)
 
 
 def test_action_cannot_succeed_if_tcp_reset_fails():
@@ -147,18 +150,20 @@ def test_action_cannot_succeed_if_tcp_reset_fails():
     robot.reset_default_tcp.side_effect = RuntimeError("초기화 실패")
     result = SimpleNamespace(success=True, error_code="")
     executor = SimpleNamespace(
-        _param=lambda key: True,
+        _param=lambda key: key == "side_pen_45",
         _robot=robot,
         _execute_draw_motion=lambda _: result,
         get_logger=Mock(),
     )
     handle = Mock()
     handle.request.drawing_surface = "SIDE"
+    handle.is_cancel_requested = False
     actual = RobotExecutorNode._execute_draw(executor, handle)
     assert not actual.success
     assert actual.error_code == "TCP_RESET_FAILED"
     handle.succeed.assert_not_called()
     handle.abort.assert_called_once()
+    robot.reset_default_tcp.assert_called_once_with(stop_running=False)
 
 
 def test_tilted_monitoring_flange_angles_are_zyx():

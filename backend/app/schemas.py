@@ -30,8 +30,8 @@ class Stroke(ContractModel):
     points: Annotated[list[Point2D], Field(min_length=2, max_length=5000)]
 
 
-class DrawingRequest(ContractModel):
-    """태블릿의 POST /api/drawing 본문. 한 요청은 한 면만 포함한다."""
+class DrawingPathRequest(ContractModel):
+    """한 면의 픽셀 경로. 추가 면에도 같은 좌표 검증을 적용한다."""
 
     canvas_width: CanvasSize
     canvas_height: CanvasSize
@@ -55,6 +55,30 @@ class DrawingRequest(ContractModel):
                     raise ValueError("좌표점이 캔버스 경계를 벗어났습니다.")
 
         # 원형 윗면/옆면의 실제 유효 작업 영역과 mm 변환은 ROS 통합 단계에서 검사한다.
+        return self
+
+
+class DrawingRequest(DrawingPathRequest):
+    """기존 한 면 요청을 유지하며 TOP 주문에 SIDE 하나를 추가할 수 있다."""
+
+    # 비어 있을 때 직렬화에서 제외해 기존 주문 저장 형식과 요청 해시를 유지한다.
+    additional_paths: Annotated[list[DrawingPathRequest], Field(max_length=1)] = Field(
+        default_factory=list, exclude_if=lambda value: not value,
+    )
+
+    @model_validator(mode="after")
+    def validate_order_paths(self):
+        """두 면은 TOP+SIDE만 허용하고 전체 점·획 제한을 공유한다."""
+        if self.additional_paths and (
+            self.drawing_surface != "top"
+            or self.additional_paths[0].drawing_surface != "side"
+        ):
+            raise ValueError("두 면 주문은 TOP 다음 SIDE 하나여야 합니다.")
+        paths = [self, *self.additional_paths]
+        if sum(len(path.strokes) for path in paths) > 100:
+            raise ValueError("주문 전체 획은 100개 이하여야 합니다.")
+        if sum(len(stroke.points) for path in paths for stroke in path.strokes) > 20000:
+            raise ValueError("주문 전체 좌표점은 20,000개 이하여야 합니다.")
         return self
 
 

@@ -11,8 +11,21 @@ from .bent_pen import SIDE_TCP_OFFSET_MM, VERTICAL_GRIPPER_ZYZ
 from .drawing_motion import DsrPos
 
 
-def return_pen(robot, initial_joints, cancelled=lambda: False):
-    """케이크 위로 이탈 → 높은 경유 자세 → J6 되감기 → 기울여 반납을 수행한다."""
+def return_pen(
+    robot,
+    initial_joints,
+    cancelled=lambda: False,
+    *,
+    rack=None,
+    open_gripper=None,
+    reset_tcp=None,
+):
+    """이탈 → J6 되감기 → 기울여 반납한다.
+
+    독립 시험의 기본 티칭/서비스는 유지한다. 통합 실행기는 현재 YAML과
+    DO 열기, 해제 후 TCP 초기화 콜백을 전달한다. 초기화 뒤의 인출 목표는
+    Pen_Side_45 펜촉 좌표가 아니라 같은 물리 위치의 플랜지 좌표를 쓴다.
+    """
     from dsr_msgs2.srv import GetCurrentPosj, GetCurrentPosx
     from onrobot_rg_msgs.srv import SetCommand
 
@@ -39,7 +52,10 @@ def return_pen(robot, initial_joints, cancelled=lambda: False):
 
     def line(pose, label):
         check_cancel()
-        require(robot.move_line(DsrPos(*pose),speed_mm_s=60.,acc_mm_s2=200.,angular_speed_deg_s=30.,angular_acc_deg_s2=60.),label)
+        require(robot.move_line(
+            DsrPos(*pose), speed_mm_s=60., acc_mm_s2=200.,
+            angular_speed_deg_s=30., angular_acc_deg_s2=60.,
+        ), label)
         require(robot.verify_pose(pose),label+" 도달")
 
     current = robot._call("current_pose", GetCurrentPosx.Request(ref=0))
@@ -54,17 +70,40 @@ def return_pen(robot, initial_joints, cancelled=lambda: False):
     movej(staging,"되감기 상공 이동")
     staging[5] = float(initial_joints[5])
     movej(staging,"J6 집기 완료 각도로 되감기")
-    movej([43.58,.53,69.85,.09,109.63,43.31],"펜 거치대 상공")
+    drop_approach = (
+        list(rack['pen_drop_approach_pose']) if rack is not None
+        else [43.58, .53, 69.85, .09, 109.63, 43.31]
+    )
+    movej(drop_approach, "펜 거치대 상공")
 
     # 펜은 RG2에 +Y 기울임 상태로 물려 있다. 원래 파지와 같은 45도 기울임을
     # 재현하면 펜 자체가 수직으로 돌아온다. 반납 중심은 DRL의 티칭값을 쓴다.
-    original = Rotation.from_euler("ZYZ",VERTICAL_GRIPPER_ZYZ,degrees=True)
+    original_angles = (
+        rack['pen_stand_pose'][3:] if rack is not None
+        else VERTICAL_GRIPPER_ZYZ
+    )
+    drop_pose = (
+        list(rack['pen_drop_pose']) if rack is not None
+        else [248.86, 244.77, 314.84, 40.25, 180., 40.02]
+    )
+    after_pose = (
+        list(rack['pen_drop_after_pose']) if rack is not None
+        else [248.91, 244.76, 548.06, 37.07, -179.99, 36.84]
+    )
+    clearance = after_pose[2] - drop_pose[2]
+    require(clearance > 0., "반납 후 인출 높이 설정")
+    original = Rotation.from_euler("ZYZ", original_angles, degrees=True)
     axis = np.array([0.,math.sqrt(.5),-math.sqrt(.5)])
     turn_axis = np.cross(original.apply([0.,0.,1.]),axis)
     turn_axis /= np.linalg.norm(turn_axis)
-    tilted = Rotation.from_rotvec(turn_axis*math.pi/4) * original
-    drop_rotation = Rotation.from_euler("ZYZ",[40.25,180.,40.02],degrees=True)
-    center = np.array([248.86,244.77,314.84]) + drop_rotation.apply([0.,0.,220.])
+    # 파지 때와 같은 목표축까지의 정확한 회전각을 써 티칭 미세 오차도 보존한다.
+    angle = math.atan2(
+        float(np.linalg.norm(np.cross(original.apply([0., 0., 1.]), axis))),
+        float(original.apply([0., 0., 1.]) @ axis),
+    )
+    tilted = Rotation.from_rotvec(turn_axis * angle) * original
+    drop_rotation = Rotation.from_euler("ZYZ", drop_pose[3:], degrees=True)
+    center = np.array(drop_pose[:3]) + drop_rotation.apply([0., 0., 220.])
     flange_position = center - tilted.apply([0.,0.,220.])
     # 활성 Pen_Side_45 TCP는 플랜지 대비 회전값이 0이다.
     with warnings.catch_warnings():
@@ -72,12 +111,20 @@ def return_pen(robot, initial_joints, cancelled=lambda: False):
         angles = tilted.as_euler("ZYZ",degrees=True)
     drop = [*(flange_position+tilted.apply(SIDE_TCP_OFFSET_MM)),*angles]
     above = list(drop)
-    above[2] += 548.06-314.84
+    above[2] += clearance
     line(above,"펜을 수직으로 맞추는 기울임 자세 상공")
     line(list(drop),"거치대 반납 위치로 하강")
     check_cancel()
-    response = robot._call("gripper",SetCommand.Request(command="o"))
-    require(response is not None and response.success,"RG2 열기")
+    if open_gripper is None:
+        response = robot._call("gripper", SetCommand.Request(command="o"))
+        require(response is not None and response.success, "RG2 열기")
+    else:
+        require(open_gripper(), "그리퍼 DO 열기")
     time.sleep(1.)
+    if reset_tcp is not None:
+        # 해제 직후 TCP를 영점으로 돌린다. 반납 인출도 그 기준으로 변환한다.
+        reset_tcp()
+        above = [*flange_position, *angles]
+        above[2] += clearance
     line(above,"반납 후 수직 인출")
     robot._logger.info("J6 되감기와 펜 반납 완료")

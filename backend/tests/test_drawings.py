@@ -186,3 +186,102 @@ def test_hmi_and_bridge_apis_are_not_created(client):
     assert client.get("/api/hmi/state").status_code == 404
     assert client.get("/api/bridge").status_code == 404
     assert client.get("/api/health").json()["ros_connected"] is False
+
+
+def combined_drawing(drawing):
+    """기존 TOP 필드에 독립된 SIDE 원본 하나를 추가하는 공개 계약을 만든다."""
+    side = deepcopy(drawing)
+    side["drawing_surface"] = "side"
+    side["canvas_width"] = 800
+    side["strokes"][0]["points"][0]["x"] = 123.25
+    return {**deepcopy(drawing), "additional_paths": [side]}
+
+
+def test_combined_order_is_stored_retried_and_claimed_once(client, drawing):
+    """두 면이 주문 하나로 저장되고 같은 요청 키와 브릿지 인수를 공유한다."""
+    payload = combined_drawing(drawing)
+    request_headers = {"Idempotency-Key": "top-side-cycle"}
+    response = client.post("/api/drawing", json=payload, headers=request_headers)
+    assert response.status_code == 201
+    order_id = response.json()["order_id"]
+    assert client.post(
+        "/api/drawing", json=payload, headers=request_headers
+    ).json() == response.json()
+    detail = client.get(f"/api/orders/{order_id}").json()
+    assert detail["drawing"] == payload
+    assert detail["drawing_surface"] == "top"
+    assert client.get("/api/orders").json()["total"] == 1
+
+    changed = deepcopy(payload)
+    changed["additional_paths"][0]["strokes"][0]["points"][0]["x"] += 1
+    assert client.post(
+        "/api/drawing", json=changed, headers=request_headers
+    ).status_code == 409
+
+    bridge_headers = {"Authorization": "Bearer test-secret"}
+    claim = client.post("/internal/bridge/claim", headers=bridge_headers)
+    assert claim.status_code == 200
+    assert claim.json()["order_id"] == order_id
+    assert claim.json()["drawing"] == payload
+    assert client.post(
+        "/internal/bridge/claim", headers=bridge_headers
+    ).status_code == 204
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"drawing_surface": "top"},
+        {"canvas_width": True},
+        {"strokes": []},
+        {"strokes": [{"stroke_id": 1, "points": [{"x": 1, "y": 1}] * 2}]},
+        {"strokes": [{"stroke_id": 0, "points": [{"x": 801, "y": 1}] * 2}]},
+        {"additional_paths": []},
+    ],
+)
+def test_combined_order_validates_side_before_saving(client, drawing, change):
+    """SIDE도 기존 면별 검증을 거치며 중첩된 추가 경로는 받지 않는다."""
+    payload = combined_drawing(drawing)
+    payload["additional_paths"][0].update(change)
+    assert client.post("/api/drawing", json=payload).status_code == 422
+    assert client.get("/api/orders").json()["total"] == 0
+
+
+@pytest.mark.parametrize("invalid_shape", ["reversed", "duplicate", "null"])
+def test_combined_order_rejects_ambiguous_surfaces(client, drawing, invalid_shape):
+    """두 면 주문은 TOP + SIDE 하나로만 표현해 중복 실행을 막는다."""
+    payload = combined_drawing(drawing)
+    if invalid_shape == "reversed":
+        payload["drawing_surface"] = "side"
+        payload["additional_paths"][0]["drawing_surface"] = "top"
+    elif invalid_shape == "duplicate":
+        payload["additional_paths"] *= 2
+    else:
+        payload["additional_paths"] = None
+    assert client.post("/api/drawing", json=payload).status_code == 422
+    assert client.get("/api/orders").json()["total"] == 0
+
+
+@pytest.mark.parametrize("limit", ["points", "strokes"])
+def test_combined_order_shares_total_limits(client, drawing, limit):
+    """각 면은 유효해도 주문 전체의 점·획 한도를 나눠 우회할 수 없다."""
+    payload = combined_drawing(drawing)
+    count, points = (3, 4000) if limit == "points" else (51, 2)
+    for path in (payload, payload["additional_paths"][0]):
+        path["strokes"] = [
+            {"stroke_id": index, "points": [{"x": 1.0, "y": 1.0}] * points}
+            for index in range(count)
+        ]
+    assert client.post("/api/drawing", json=payload).status_code == 422
+    assert client.get("/api/orders").json()["total"] == 0
+
+
+def test_combined_order_survives_restart(database_path, drawing):
+    """再起動後も既存 SQLite の JSON 列から両面の原本を復元する。"""
+    payload = combined_drawing(drawing)
+    with TestClient(create_app(database_path)) as first:
+        response = first.post("/api/drawing", json=payload)
+        assert response.status_code == 201
+        order_id = response.json()["order_id"]
+    with TestClient(create_app(database_path)) as restarted:
+        assert restarted.get(f"/api/orders/{order_id}").json()["drawing"] == payload

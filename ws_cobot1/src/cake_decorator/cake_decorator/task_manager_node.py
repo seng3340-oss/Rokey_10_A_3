@@ -11,6 +11,7 @@ from rclpy.action import ActionServer, ActionClient, GoalResponse, CancelRespons
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from std_srvs.srv import Trigger
 
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Pose, Point, Quaternion
@@ -26,10 +27,36 @@ from cake_decorator_interfaces.srv import GenerateTrajectory
 
 
 class Phase(str, Enum):
+    PREPARING = 'PREPARING'
+    FINISHING = 'FINISHING'
     DRAWING = 'DRAWING'
     COMPLETED = 'COMPLETED'
     FAILED = 'FAILED'
     CANCELED = 'CANCELED'
+
+
+def order_surfaces(paths):
+    """같은 면의 순서는 보존하면서 윗면 후 옆면을 실행한다."""
+    if any(path.surface not in ('TOP', 'SIDE') for path in paths):
+        raise ValueError('지원하지 않는 그리기 면입니다.')
+    return sorted(paths, key=lambda path: path.surface == 'SIDE')
+
+
+def side_reference_pose(values):
+    """플랜지 기준 TOP 좌표와 혼용하지 않도록 SIDE 펜촉 기준 BASE 자세를 만든다."""
+    import math
+    from scipy.spatial.transform import Rotation
+    from geometry_msgs.msg import Point, Quaternion
+
+    if len(values) != 6 or not all(math.isfinite(v) for v in values):
+        raise ValueError('옆면 기준점은 유한한 mm/deg 6값이어야 합니다.')
+    if not 0 < values[2] < 900:
+        raise ValueError('옆면 상면 BASE 높이는 0~900mm 안이어야 합니다.')
+    quat = Rotation.from_euler('ZYZ', values[3:], degrees=True).as_quat()
+    return Pose(
+        position=Point(x=values[0] / 1000., y=values[1] / 1000., z=values[2] / 1000.),
+        orientation=Quaternion(**dict(zip(('x', 'y', 'z', 'w'), map(float, quat)))),
+    )
 
 
 class TaskManagerNode(Node):
@@ -39,6 +66,10 @@ class TaskManagerNode(Node):
         super().__init__('task_manager_node')
 
         # ── 파라미터 ──
+        self.declare_parameter('plate_sequence_enabled', False)
+        # TOP은 기존 기본 TCP 티칭값, SIDE는 교정된 펜촉 TCP 기준을 사용한다.
+        self.declare_parameter('integrated_side_cycle', False)
+        self.declare_parameter('side_reference_pose', [0.0] * 6)
         self.declare_parameter('drawing_speed', 30.0)     # mm/s, DP 기본값과 통일
         self.declare_parameter('contact_force', 1.0)      # N
         # DP로 넘길 작업 속도 퍼센트. 0을 그대로 보내면 DP가 1%로
@@ -67,6 +98,12 @@ class TaskManagerNode(Node):
             callback_group=self._cb,
         )
 
+        # [변경 2026-11-18] 기존 드로잉 액션은 유지하고 플레이트 전/후 서비스 추가.
+        self._plate_prepare_client = self.create_client(
+            Trigger, 'plate_prepare', callback_group=self._cb)
+        self._plate_finish_client = self.create_client(
+            Trigger, 'plate_finish', callback_group=self._cb)
+
         # ── GenerateTrajectory 서비스 클라이언트 ──
         self._gen_traj_client = self.create_client(
             GenerateTrajectory, 'generate_trajectory',
@@ -88,7 +125,7 @@ class TaskManagerNode(Node):
     # ── Goal 콜백 ──
 
     def _handle_goal(self, goal_request) -> GoalResponse:
-        if self._is_busy:
+        if self._is_busy or getattr(self, '_child_unresolved', False):
             self.get_logger().warn(
                 f'주문 거절: 작업 진행 중 (order={self._current_order_id})'
             )
@@ -98,6 +135,9 @@ class TaskManagerNode(Node):
 
     def _handle_cancel(self, goal_handle) -> CancelResponse:
         self.get_logger().info(f'취소 요청: order_id={self._current_order_id}')
+        # Trigger 운반은 취소 계약이 없다. 중단된 것처럼 응답하지 않는다.
+        if self._current_phase in (Phase.PREPARING, Phase.FINISHING):
+            return CancelResponse.REJECT
         return CancelResponse.ACCEPT
 
     # ── 메인 실행 (액션 서버 execute_callback) ──
@@ -121,12 +161,40 @@ class TaskManagerNode(Node):
             if self._check_cancel(goal_handle):
                 return self._cancel(goal_handle, result, start_time)
 
+            # 잘못된 면·미설정 SIDE 기준점은 케이크를 옮기기 전에 차단한다.
+            if self.get_parameter('integrated_side_cycle').value:
+                order_surfaces(request.drawing_paths)
+                if any(path.surface == 'SIDE' and path.strokes for path in request.drawing_paths):
+                    side_reference_pose(self.get_parameter('side_reference_pose').value)
+
+            # [변경 2026-11-18] 원본 plate 시퀀스를 드로잉 앞/뒤로 분리.
+            if self.get_parameter('plate_sequence_enabled').value:
+                self._set_phase(Phase.PREPARING, goal_handle, 0.0, '플레이트 준비')
+                if not self._run_plate_service(self._plate_prepare_client, '드로잉 준비'):
+                    return self._fail(goal_handle, result, 'PLATE_PREPARE_FAILED',
+                                      '플레이트 준비 실패', start_time)
+                if self._check_cancel(goal_handle):
+                    return self._cancel(goal_handle, result, start_time)
+
             self._set_phase(Phase.DRAWING, goal_handle, 0.0, '드로잉 시작')
 
             ok = self._execute_drawing(request, goal_handle)
             if not ok:
+                if self._check_cancel(goal_handle):
+                    return self._cancel(goal_handle, result, start_time)
                 return self._fail(goal_handle, result, 'DRAWING_FAILED',
                                   '드로잉 실패', start_time)
+
+            if self.get_parameter('plate_sequence_enabled').value:
+                if self._check_cancel(goal_handle):
+                    return self._cancel(goal_handle, result, start_time)
+                self._set_phase(Phase.FINISHING, goal_handle, 90.0, '플레이트 회수 및 출고')
+                if not self._run_plate_service(self._plate_finish_client, '드로잉 후처리'):
+                    return self._fail(goal_handle, result, 'PLATE_FINISH_FAILED',
+                                      '플레이트 후처리 실패', start_time)
+
+            if self._check_cancel(goal_handle):
+                return self._cancel(goal_handle, result, start_time)
 
             # ── 완료 ──
             self._set_phase(Phase.COMPLETED, goal_handle, 100.0, '완료')
@@ -153,6 +221,24 @@ class TaskManagerNode(Node):
             self._is_busy = False
             self._current_order_id = None
 
+    def _run_plate_service(self, client, phase: str) -> bool:
+        """[변경 2026-11-18] Robot Executor에 작업 단위 요청. TM은 좌표를 다루지 않는다."""
+        if not client.wait_for_service(timeout_sec=10.0):
+            self.get_logger().error(f'{phase}: 서비스 연결 실패')
+            return False
+        future = client.call_async(Trigger.Request())
+        # 기존 ROS future 대기 헬퍼 재사용; 플레이트 작업은 드로잉보다 길 수 있음.
+        try:
+            self._wait_future(future, 300.0)
+            result = future.result()
+            if result is None or not result.success:
+                self.get_logger().error(f'{phase}: {getattr(result, "message", "응답 없음")}')
+                return False
+            return True
+        except Exception as exc:
+            self.get_logger().error(f'{phase}: {exc}')
+            return False
+
     # ── 드로잉 실행 (GenerateTrajectory → DrawOnCake) ──
 
     @staticmethod
@@ -164,11 +250,16 @@ class TaskManagerNode(Node):
         cake = request.cake_params
         cake_pose = self._reference_pose(cake)
 
-        total_paths = len(request.drawing_paths)
+        paths = list(request.drawing_paths)
+        integrated = self.get_parameter('integrated_side_cycle').value
+        if integrated:
+            # 웹 전송 순서와 관계없이 TOP → SIDE. 잘못된 면은 이동 전에 거부한다.
+            paths = order_surfaces(paths)
+        total_paths = len(paths)
         drawing_speed = self.get_parameter('drawing_speed').value
         contact_force = self.get_parameter('contact_force').value
 
-        for idx, dp in enumerate(request.drawing_paths):
+        for idx, dp in enumerate(paths):
             if not dp.strokes:
                 self.get_logger().info(f'DrawingPath[{idx}] strokes 비어 있음 — 건너뜀')
                 continue
@@ -202,7 +293,11 @@ class TaskManagerNode(Node):
             # 원본 픽셀 획을 순서·점 개수 그대로 넘긴다. DP에서 변환을 수행한다.
             traj_req.strokes_2d = dp.strokes
             traj_req.surface_type = dp.surface
-            traj_req.cake_pose = cake_pose
+            traj_req.cake_pose = (
+                side_reference_pose(self.get_parameter('side_reference_pose').value)
+                if integrated and dp.surface == 'SIDE'
+                else cake_pose
+            )
             # 펜 자세는 cake_pose에 보존하고 케이크 평면 회전은 별도로 보낸다.
             traj_req.cake_yaw = cake.orientation
             traj_req.cake_radius = cake.radius
@@ -284,7 +379,22 @@ class TaskManagerNode(Node):
             return False
 
         result_future = gh.get_result_async()
-        self._wait_future(result_future, timeout)
+        # 부모 주문 취소를 자식 Action에 한 번 전달하고 종료·TCP 정리 결과를 기다린다.
+        deadline = time.monotonic() + timeout
+        cancel_sent = False
+        while not result_future.done():
+            if self._check_cancel(goal_handle) or time.monotonic() >= deadline:
+                if not cancel_sent:
+                    gh.cancel_goal_async()
+                    cancel_sent = True
+                    deadline = time.monotonic() + 30.0
+                elif time.monotonic() >= deadline:
+                    # 자식이 살아 있을 수 있으므로 새 주문으로 중첩 실행하지 않는다.
+                    self._child_unresolved = True
+                    raise TimeoutError('그리기 중단 결과 미확정: 로봇 상태 확인 후 실행기를 재시작하세요.')
+            time.sleep(0.05)
+        if cancel_sent:
+            return False
 
         if result_future.result() is None:
             self.get_logger().error('DrawOnCake 결과 수신 실패 (timeout)')

@@ -1,7 +1,9 @@
-"""Doosan M0609 + OnRobot RG2 제어 래퍼.
+"""Doosan M0609 + 디지털 출력 그리퍼 제어 래퍼.
 
 DSR(Doosan Service Robot) ROS2 서비스 클라이언트를 감싸서
 MoveLine, MoveJoint, 그리퍼 제어 등을 단순한 메서드로 제공한다.
+그리퍼는 PM 최신 방식인 제어박스 DO 펄스를 기본으로 사용하고,
+DO 서비스가 없는 가상환경에서만 기존 /onrobot/sendCommand로 대체한다.
 이 모듈은 rclpy에 의존한다.
 """
 
@@ -10,6 +12,7 @@ from __future__ import annotations
 from typing import Optional
 
 import threading
+import json
 import math
 import time
 import xml.etree.ElementTree as ET
@@ -38,6 +41,7 @@ from dsr_msgs2.srv import (
     MoveStop,
     SetCurrentTcp,
     SetRobotMode,
+    SetCtrlBoxDigitalOutput,
 )
 from rcl_interfaces.srv import GetParameters
 from onrobot_rg_msgs.srv import SetCommand
@@ -58,15 +62,78 @@ DR_MV_MOD_REL = 1
 SYNC = 0
 ASYNC = 1
 
+# ── 그리퍼 디지털 출력 기본값 ──
+# PM 최신 디지털 출력 제어 방식: Open=DO2, Close=DO1, 0.5초 펄스.
+# 실제 배선이 반대이거나 다른 포트를 쓰는 경우 코드를 고치지 않고
+# ROS2 파라미터(gripper_open_do / gripper_close_do / gripper_pulse_sec)만 바꾼다.
+# 기본값은 기존 PM 설정을 그대로 유지하기 위한 것이며, 자동으로 다른 포트를
+# 시도하지 않는다. 서비스 호출이 실패하면 그 명령은 실패로 끝난다.
+GRIPPER_OPEN_DO_DEFAULT = 2
+GRIPPER_CLOSE_DO_DEFAULT = 1
+GRIPPER_PULSE_SEC_DEFAULT = 0.5
+DIGITAL_OUTPUT_MIN_PORT = 1
+DIGITAL_OUTPUT_MAX_PORT = 16
+
+
+def validate_gripper_settings(
+    open_do: int,
+    close_do: int,
+    pulse_sec: float,
+) -> tuple[int, int, float]:
+    """그리퍼 DO 포트 번호와 펄스 유지 시간을 검사한다.
+
+    Parameters
+    ----------
+    open_do : Open 신호를 보낼 제어박스 DO 포트 (1~16)
+    close_do : Close 신호를 보낼 제어박스 DO 포트 (1~16)
+    pulse_sec : ON 상태를 유지할 시간(초). 0보다 커야 한다.
+
+    Returns
+    -------
+    검사·정규화된 (open_do, close_do, pulse_sec)
+
+    Raises
+    ------
+    ValueError
+        포트 범위를 벗어나거나, Open/Close가 같은 포트이거나,
+        펄스 시간이 유한한 양수가 아닐 때. 잘못된 설정으로 로봇을
+        움직이지 않도록 노드 시작 단계에서 즉시 실패시킨다.
+    """
+    for label, value in (("gripper_open_do", open_do), ("gripper_close_do", close_do)):
+        # bool은 int의 하위 타입이므로 True/False가 1/0 포트로 해석되지 않게 막는다.
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{label}는 정수여야 합니다: {value!r}")
+        if not DIGITAL_OUTPUT_MIN_PORT <= value <= DIGITAL_OUTPUT_MAX_PORT:
+            raise ValueError(
+                f"{label}는 DO {DIGITAL_OUTPUT_MIN_PORT}~"
+                f"{DIGITAL_OUTPUT_MAX_PORT} 범위여야 합니다: {value}"
+            )
+
+    if open_do == close_do:
+        # 같은 포트를 쓰면 Open/Close를 구분할 수 없어 장비 상태가 불명확해진다.
+        raise ValueError(
+            f"gripper_open_do와 gripper_close_do가 같습니다: DO{open_do}"
+        )
+
+    try:
+        pulse = float(pulse_sec)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"gripper_pulse_sec는 숫자여야 합니다: {pulse_sec!r}") from exc
+    if not math.isfinite(pulse) or pulse <= 0.0:
+        raise ValueError(f"gripper_pulse_sec는 0보다 큰 유한값이어야 합니다: {pulse_sec!r}")
+
+    return open_do, close_do, pulse
+
 
 class DoosanRobotClient:
-    """Doosan M0609 + RG2 ROS2 서비스 클라이언트.
+    """Doosan M0609 + 디지털 출력 그리퍼 ROS2 서비스 클라이언트.
 
-    모든 이동/그리퍼 명령을 동기 호출로 래핑한다.
+    모든 이동/그리퍼 명령을 동기 호출로 래핑한다. 그리퍼 기본 백엔드는
+    제어박스 DO이며, 가상환경에 DO 서비스가 없을 때만 RG2 서비스로 대체한다.
     """
 
     # 서비스 이름 상수.
-    # 도선 모션 서비스는 /dsr01 네임스페이스의 dsr_controller2 컨트롤러 노드
+    # 두산 모션 서비스는 /dsr01 네임스페이스의 dsr_controller2 컨트롤러 노드
     # 아래에 등록되므로 실제 경로는 '/dsr01/dsr_controller2/motion/...'이다
     # (가상 에뮬레이터에서 ros2 service list로 확인). '/dsr01/motion/...'으로
     # 두면 클라이언트가 서비스를 찾지 못해 모션이 한 번도 실행되지 않는다.
@@ -97,6 +164,10 @@ class DoosanRobotClient:
             "/dsr01/dsr_controller2/motion/move_spline_task",
             MoveSplineTask,
         ),
+        "set_digital_output": (
+            "/dsr01/dsr_controller2/io/set_ctrl_box_digital_output",
+            SetCtrlBoxDigitalOutput,
+        ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
         "check_motion": ("/dsr01/dsr_controller2/motion/check_motion", CheckMotion),
         "move_stop": ("/dsr01/dsr_controller2/motion/move_stop", MoveStop),
@@ -106,7 +177,16 @@ class DoosanRobotClient:
         "set_mode": ("/dsr01/dsr_controller2/system/set_robot_mode", SetRobotMode),
     }
 
-    def __init__(self, node: Node, service_timeout: float = 5.0):
+    def __init__(
+        self,
+        node: Node,
+        service_timeout: float = 5.0,
+        *,
+        gripper_open_do: int = GRIPPER_OPEN_DO_DEFAULT,
+        gripper_close_do: int = GRIPPER_CLOSE_DO_DEFAULT,
+        gripper_pulse_sec: float = GRIPPER_PULSE_SEC_DEFAULT,
+        gripper_virtual_fallback: bool = True,
+    ):
         self._node = node
         self._timeout = service_timeout
         self._logger = node.get_logger()
@@ -119,6 +199,27 @@ class DoosanRobotClient:
             self._clients[key] = node.create_client(
                 srv_type, topic, callback_group=self._service_group
             )
+
+        # 그리퍼 백엔드는 첫 그리퍼 명령 때 한 번만 결정한다.
+        # 'digital'이면 제어박스 DO, 'virtual'이면 /onrobot/sendCommand를 쓴다.
+        self._gripper_backend: Optional[str] = None
+        self._gripper_virtual_fallback = bool(gripper_virtual_fallback)
+        self._gripper_open_do = GRIPPER_OPEN_DO_DEFAULT
+        self._gripper_close_do = GRIPPER_CLOSE_DO_DEFAULT
+        self._gripper_pulse_sec = GRIPPER_PULSE_SEC_DEFAULT
+        # OFF 실패 시 출력이 남아 있을 수 있다. 이 플래그가 켜지면 실행 노드는
+        # 안전을 위해 후속 자동 홈 복귀도 하지 않는다.
+        self.gripper_output_fault = False
+
+        # 노드 생성 시점은 아직 어떤 모터 명령도 보내지 않은 정지 상태다.
+        # 이후 운용 중 설정을 바꾸려면 configure_gripper(robot_stopped=True)를
+        # 명시해야 하며, 그렇지 않으면 기존 설정을 유지한다.
+        self.configure_gripper(
+            gripper_open_do,
+            gripper_close_do,
+            gripper_pulse_sec,
+            robot_stopped=True,
+        )
 
     # ------------------------------------------------------------------
     # 서비스 호출 헬퍼
@@ -331,6 +432,65 @@ class DoosanRobotClient:
                 return False
             time.sleep(0.05)
 
+    def current_pose(self) -> Optional[list[float]]:
+        """현재 활성 TCP를 BASE 기준 [x, y, z, rz1, ry, rz2](mm, ZYZ°)로 읽는다.
+
+        이동 명령은 보내지 않는다. 조회에 실패하면 None을 반환하므로
+        호출부는 None일 때 이동을 진행하지 않아야 한다.
+        """
+        result = self._call("current_pose", GetCurrentPosx.Request(ref=DR_BASE))
+        if result is None or not result.success or not result.task_pos_info:
+            return None
+        return [float(value) for value in result.task_pos_info[0].data[:6]]
+
+    def move_task_joint(self, target: DsrPos) -> bool:
+        """옆면 케이크 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
+        joints = self._call("current_joints", GetCurrentPosj.Request())
+        if joints is None or not joints.success:
+            return False
+        solution = self._call(
+            "solution", GetSolutionSpace.Request(pos=list(joints.pos))
+        )
+        if solution is None or not solution.success:
+            return False
+        # 실물 연결 중 인터넷을 쓸 수 없는 환경에서도 원인을 분석할 수 있게
+        # 현재 관절값·TCP·목표를 기존 실행기 로그에 함께 남긴다.
+        pose = self._call("current_pose", GetCurrentPosx.Request(ref=DR_BASE))
+        current = (
+            list(pose.task_pos_info[0].data[:6])
+            if pose and pose.success and pose.task_pos_info else None
+        )
+        diagnostic = dict(
+            current_joints_deg=list(joints.pos),
+            current_tcp=current,
+            target_tcp=target.to_list(),
+            solution_space=int(solution.sol_space),
+        )
+        self._logger.info("SIDE_APPROACH_DIAGNOSTIC " + json.dumps(diagnostic))
+        self._logger.info(
+            f"옆면 자세 전환: 현재 팔꿈치 해 {solution.sol_space} 유지, "
+            f"목표 TCP={target.to_list()}"
+        )
+        request = MoveJointx.Request(
+            pos=target.to_list(),
+            vel=10.0,
+            acc=20.0,
+            sol=solution.sol_space,
+            ref=DR_BASE,
+            mode=DR_MV_MOD_ABS,
+            sync_type=SYNC,
+        )
+        moved = self._call_checked("move_jointx", request) and self.verify_pose(
+            target.to_list()
+        )
+        if not moved:
+            # 자동으로 다른 해를 선택하거나 관절 회전을 재시도하지 않는다.
+            after = self._call("current_joints", GetCurrentPosj.Request())
+            if after and after.success:
+                diagnostic["after_joints_deg"] = list(after.pos)
+            self._logger.error("SIDE_APPROACH_FAILED " + json.dumps(diagnostic))
+        return moved
+
     def select_reachable_side_commands(self, commands, cancelled):
         """이동 전에 제어기의 IK/FK를 조회해 현재 관절 해에서 가능한 펜 자세를 찾는다."""
         import numpy as np
@@ -396,37 +556,6 @@ class DoosanRobotClient:
         self._side_validated_solution = int(solution.sol_space)
         return selected
 
-    def move_task_joint(self, target: DsrPos) -> bool:
-        """옆면 케이크 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
-        joints = self._call("current_joints", GetCurrentPosj.Request())
-        if joints is None or not joints.success:
-            return False
-        solution = self._call(
-            "solution", GetSolutionSpace.Request(pos=list(joints.pos))
-        )
-        if solution is None or not solution.success:
-            return False
-        validated = getattr(self, "_side_validated_solution", None)
-        if validated is not None and int(solution.sol_space) != validated:
-            self._logger.error("검사한 관절 해와 현재 해가 달라 자세 전환을 중단합니다.")
-            return False
-        self._logger.info(
-            f"옆면 자세 전환: 현재 팔꿈치 해 {solution.sol_space} 유지, "
-            f"목표 TCP={target.to_list()}"
-        )
-        request = MoveJointx.Request(
-            pos=target.to_list(),
-            vel=10.0,
-            acc=20.0,
-            sol=solution.sol_space,
-            ref=DR_BASE,
-            mode=DR_MV_MOD_ABS,
-            sync_type=SYNC,
-        )
-        moved = self._call_checked("move_jointx", request) and self.verify_pose(
-            target.to_list()
-        )
-        return moved
 
     def execute_drawing_command(self, command) -> bool:
         """이동 종류만 분기한다. 액션 반복·획 완료 판단은 RE에 그대로 둔다."""
@@ -461,6 +590,7 @@ class DoosanRobotClient:
         speed_deg_s: float = 30.0,
         acc_deg_s2: float = 30.0,
         sync: bool = True,
+        mode: int = DR_MV_MOD_ABS,
     ) -> bool:
         """관절 이동 (MoveJoint).
 
@@ -476,7 +606,7 @@ class DoosanRobotClient:
         req.acc = acc_deg_s2
         req.time = 0.0
         req.radius = 0.0
-        req.mode = DR_MV_MOD_ABS
+        req.mode = mode
         req.blend_type = 0
         req.sync_type = SYNC if sync else ASYNC
         return self._call_checked("move_joint", req)
@@ -522,26 +652,175 @@ class DoosanRobotClient:
         return self._call_checked("move_spline", req)
 
     # ------------------------------------------------------------------
-    # 그리퍼 제어
+    # 그리퍼 제어 (제어박스 Digital Output)
     # ------------------------------------------------------------------
 
+    def configure_gripper(
+        self,
+        open_do: int,
+        close_do: int,
+        pulse_sec: float,
+        *,
+        robot_stopped: bool = False,
+    ) -> bool:
+        """그리퍼 Open/Close DO 포트와 펄스 시간을 적용한다.
+
+        실제 장비의 배선이 반대이거나 다른 포트를 쓰는 경우 코드 수정 없이
+        ROS2 파라미터만 바꿔 대응하기 위한 진입점이다. 설정 변경 중 로봇이
+        움직이면 잘못된 출력으로 사고가 날 수 있으므로, 호출자는 로봇이
+        정지한 안전한 상태임을 robot_stopped=True로 명시해야 한다.
+
+        Returns
+        -------
+        설정 적용 여부. 검증 실패 시 ValueError를 올려 노드 시작을 중단한다.
+        """
+        if not robot_stopped:
+            self._logger.error(
+                "그리퍼 포트 설정은 로봇이 정지한 안전한 상태에서만 변경할 수 있습니다."
+            )
+            return False
+
+        open_do, close_do, pulse_sec = validate_gripper_settings(
+            open_do, close_do, pulse_sec
+        )
+        self._gripper_open_do = open_do
+        self._gripper_close_do = close_do
+        self._gripper_pulse_sec = pulse_sec
+        # 설정이 바뀌면 다음 그리퍼 명령에서 백엔드 가용성을 다시 확인한다.
+        self._gripper_backend = None
+        self._logger.info(
+            f"그리퍼 설정 적용: Open=DO{open_do}, Close=DO{close_do}, "
+            f"펄스={pulse_sec:.2f}s"
+        )
+        return True
+
+    def _ensure_gripper_backend(self) -> Optional[str]:
+        """사용할 그리퍼 백엔드를 한 번만 결정한다.
+
+        DO 서비스가 있으면 항상 DO를 사용한다. 가상환경처럼 DO 서비스가
+        없을 때만 설정에 따라 /onrobot/sendCommand로 대체한다. 이미 선택한
+        백엔드의 호출이 실패해도 다른 포트나 백엔드로 자동 전환하지 않는다.
+        """
+        if self._gripper_backend is not None:
+            return self._gripper_backend
+
+        digital = self._clients.get("set_digital_output")
+        if digital is not None and digital.wait_for_service(timeout_sec=self._timeout):
+            self._gripper_backend = "digital"
+            return self._gripper_backend
+
+        if self._gripper_virtual_fallback:
+            virtual = self._clients.get("gripper")
+            if virtual is not None and virtual.wait_for_service(
+                timeout_sec=self._timeout
+            ):
+                self._gripper_backend = "virtual"
+                self._logger.warn(
+                    "제어박스 DO 서비스를 찾지 못해 가상 그리퍼"
+                    "(/onrobot/sendCommand)로 대체합니다."
+                )
+                return self._gripper_backend
+
+        self._logger.error(
+            "그리퍼 제어 서비스를 찾지 못했습니다. "
+            "set_ctrl_box_digital_output 또는 /onrobot/sendCommand를 확인하세요."
+        )
+        return None
+
+    def set_digital_output(self, index: int, value: int) -> bool:
+        """제어박스 디지털 출력(DO) 상태를 설정한다.
+
+        Parameters
+        ----------
+        index : 제어박스 DO 포트 번호 (1~16)
+        value : 출력 값 (1=ON, 0=OFF)
+
+        Returns
+        -------
+        서비스 호출 성공 여부. 범위를 벗어난 포트/값은 호출하지 않고 실패한다.
+        """
+        if not DIGITAL_OUTPUT_MIN_PORT <= index <= DIGITAL_OUTPUT_MAX_PORT:
+            self._logger.error(f"유효하지 않은 DO 포트입니다: {index}")
+            return False
+        if value not in (0, 1):
+            self._logger.error(f"유효하지 않은 DO 출력값입니다: {value}")
+            return False
+
+        req = SetCtrlBoxDigitalOutput.Request()
+        req.index = index
+        req.value = value
+        return self._call_checked("set_digital_output", req)
+
+    def _gripper_pulse(self, port: int, action: str) -> bool:
+        """지정 포트를 pulse_sec 동안 ON 했다가 OFF 한다.
+
+        ON/OFF 각각의 서비스 결과를 확인한다. OFF에 실패하면 출력이 남아
+        있을 수 있으므로 gripper_output_fault를 세우고 False를 반환한다.
+        호출부는 이 False를 받으면 이후 자동 이동을 진행하지 않는다.
+        """
+        # 새 명령을 시작할 때 이전 실패 플래그를 지운다. 이번 명령이 끝까지
+        # 성공해야만 플래그가 꺼진 상태로 남는다.
+        self.gripper_output_fault = False
+
+        if not self.set_digital_output(port, 1):
+            self.gripper_output_fault = True
+            self._logger.error(
+                f"그리퍼 {action} 실패: DO{port} ON 명령 실패. "
+                "다른 포트로 자동 전환하지 않고 후속 이동을 중단합니다."
+            )
+            return False
+
+        time.sleep(self._gripper_pulse_sec)
+
+        if not self.set_digital_output(port, 0):
+            self.gripper_output_fault = True
+            self._logger.error(
+                f"그리퍼 {action} 실패: DO{port} OFF 실패. 출력이 남아 있을 수 "
+                "있으므로 후속 자동 이동을 중단합니다."
+            )
+            return False
+
+        return True
+
     def gripper_open(self, width_mm: float = 100.0) -> bool:
-        """그리퍼 열기. RG2 최대 110mm."""
-        return self._gripper_command(f"open({width_mm})")
+        """그리퍼 열기.
+
+        기본은 설정된 Open DO 포트를 0.5초 펄스로 출력하는 PM 최신 방식이다.
+        가상환경 대체 백엔드에서는 width_mm를 기존 RG2 open 명령으로 전달한다.
+        """
+        backend = self._ensure_gripper_backend()
+        if backend is None:
+            return False
+        if backend == "virtual":
+            return self._gripper_command(f"open({width_mm})")
+        return self._gripper_pulse(self._gripper_open_do, "열기")
 
     def gripper_close(self, width_mm: float = 10.0, force_n: float = 20.0) -> bool:
-        """그리퍼 닫기. RG2 범위: 3~40N."""
-        return self._gripper_command(f"close({width_mm},{force_n})")
+        """그리퍼 닫기.
+
+        기본은 설정된 Close DO 포트를 0.5초 펄스로 출력하는 PM 최신 방식이다.
+        width_mm/force_n은 기존 호출부와 가상 RG2 대체 백엔드 호환을 위해 유지한다.
+        """
+        backend = self._ensure_gripper_backend()
+        if backend is None:
+            return False
+        if backend == "virtual":
+            return self._gripper_command(f"close({width_mm},{force_n})")
+        return self._gripper_pulse(self._gripper_close_do, "닫기")
 
     def _gripper_command(self, command: str) -> bool:
-        """OnRobot RG2 SetCommand 서비스 호출."""
+        """가상환경 전용 OnRobot RG2 SetCommand 서비스 호출.
+
+        실제 장비의 기본 제어 경로가 아니며, DO 서비스가 없는 가상환경에서만
+        사용한다. 실패해도 DO 포트로 자동 전환하지 않는다.
+        """
         req = SetCommand.Request()
         req.command = command
         result = self._call("gripper", req)
         if result is None:
             return False
         if not result.success:
-            self._logger.warn(f"그리퍼 명령 실패: {command} → {result.message}")
+            self._logger.warn(f"가상 그리퍼 명령 실패: {command} → {result.message}")
         return result.success
 
     # ------------------------------------------------------------------
@@ -555,12 +834,18 @@ class DoosanRobotClient:
         -------
         모든 서비스 연결 성공 여부
         """
-        required = ["move_line", "move_joint", "gripper"]
+        required = ["move_line", "move_joint"]
         for key in required:
             if not self._clients[key].wait_for_service(timeout_sec=timeout):
                 self._logger.error(f"{key} 서비스를 찾을 수 없습니다.")
                 return False
             self._logger.info(f"{key} 서비스 연결 완료")
+
+        # 그리퍼는 DO 또는 가상 대체 중 사용 가능한 백엔드를 확인한다.
+        # 둘 다 없으면 실제 이동 전에 실패시켜 그리퍼 없는 작업을 막는다.
+        if self._ensure_gripper_backend() is None:
+            return False
+        self._logger.info(f"그리퍼 백엔드: {self._gripper_backend}")
         return True
 
     # ------------------------------------------------------------------
@@ -576,23 +861,38 @@ class DoosanRobotClient:
         open_width: float = 100.0,
         speed_approach: float = 80.0,
         speed_slow: float = 30.0,
+        close_wait_sec: float = 0.0,
+        close_settle_sec: float = 0.0,
+        pre_open_wait_sec: float = 0.0,
     ) -> bool:
         """접근 → 그리퍼 열기 → 하강 → 그리퍼 닫기 → 들어올리기.
+
+        플레이트 오프너도 이 함수를 그대로 재사용한다. 전용 plate_pick을
+        두지 않고 대기 시간만 인수로 확장해 기존 호출과 호환한다.
 
         Parameters
         ----------
         target : 목표 위치 (물체 파지 높이)
         approach : 접근 위치 (목표 위 높이)
-        grip_width : 파지 폭 (mm)
-        grip_force : 파지 힘 (N)
-        open_width : 그리퍼 열림 폭 (mm)
+        grip_width : 파지 폭 (mm). DO 방식에서는 호환용이며 가상 RG2에서 사용
+        grip_force : 파지 힘 (N). DO 방식에서는 호환용이며 가상 RG2에서 사용
+        open_width : 그리퍼 열림 폭 (mm). 위와 동일
+        close_wait_sec : 닫힘 명령 후 추가 대기(초)
+        close_settle_sec : 닫힘 안정화 대기(초)
+        pre_open_wait_sec : 접근 후 열림 완료를 기다리는 시간(초)
         """
         if not self.move_line(approach, speed_mm_s=speed_approach):
             return False
-        self.gripper_open(open_width)
+        # 그리퍼 명령 실패(특히 OFF 실패) 뒤에는 절대 다음 이동을 보내지 않는다.
+        if not self.gripper_open(open_width):
+            return False
+        time.sleep(max(0.0, pre_open_wait_sec))
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
-        self.gripper_close(grip_width, grip_force)
+        if not self.gripper_close(grip_width, grip_force):
+            return False
+        time.sleep(max(0.0, close_wait_sec))
+        time.sleep(max(0.0, close_settle_sec))
         if not self.move_line(approach, speed_mm_s=speed_slow):
             return False
         return True
@@ -605,19 +905,27 @@ class DoosanRobotClient:
         speed_approach: float = 80.0,
         speed_slow: float = 30.0,
         speed_retract: float = 50.0,
+        open_wait_sec: float = 0.0,
     ) -> bool:
         """접근 → 하강 → 그리퍼 열기 → 후퇴.
+
+        플레이트 오프너 반환도 이 함수를 그대로 재사용한다. 전용 plate_place를
+        두지 않고 열림 대기 시간만 인수로 확장해 기존 호출과 호환한다.
 
         Parameters
         ----------
         target : 배치 위치
         approach : 접근/후퇴 위치
+        open_wait_sec : 열림 명령 후 추가 대기(초)
         """
         if not self.move_line(approach, speed_mm_s=speed_approach):
             return False
         if not self.move_line(target, speed_mm_s=speed_slow):
             return False
-        self.gripper_open(open_width)
+        # 열기 실패 시 후퇴 이동을 보내지 않는다.
+        if not self.gripper_open(open_width):
+            return False
+        time.sleep(max(0.0, open_wait_sec))
         if not self.move_line(approach, speed_mm_s=speed_retract):
             return False
         return True
