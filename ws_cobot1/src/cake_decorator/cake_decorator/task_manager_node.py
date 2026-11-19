@@ -351,6 +351,8 @@ class TaskManagerNode(Node):
             draw_goal.drawing_surface = dp.surface
             draw_goal.contact_force = contact_force
             draw_goal.speed = drawing_speed
+            # 첫 펜 파지부터 주문 마지막 획 이탈까지는 기존 이동 속도를 유지한다.
+            draw_goal.has_more_surfaces = any(path.strokes for path in paths[idx + 1:])
 
             ok = self._send_draw(draw_goal, goal_handle)
             if not ok:

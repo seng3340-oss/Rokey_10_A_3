@@ -93,7 +93,7 @@ class SideSurfaceTests(unittest.TestCase):
         self.assertEqual([point for group in groups for point in group], samples)
 
 
-def test_short_pen_up_diagonal_uses_outer_tangents_not_tiny_arcs():
+def test_pen_up_curve_stays_outside_without_rising_above_cake():
     """높이차가 큰 짧은 획간 이동이 미세 원호 수백 개로 분할되지 않아야 한다."""
     from cake_decorator.frustum_path import DrawingFrustum
     from cake_decorator.surface_path import side_clearance_leg
@@ -101,8 +101,13 @@ def test_short_pen_up_diagonal_uses_outer_tangents_not_tiny_arcs():
     cake = DrawingFrustum(r_top=56.75, r_bottom=60., height=79., cx=400., cy=0., cz=141.)
     start, end = (0., 70.), (1., 20.)
     moves = side_clearance_leg(cake, start, end, 10.)
-    assert len(moves) == 4
+    assert len(moves) == 3
     assert all(move.via is None for move in moves)
+    samples = [point for move in moves for point in getattr(move, 'samples', (move.end,))]
+    z0 = cake.side_abs_with_offset(*start, 10.)[2]
+    z1 = cake.side_abs_with_offset(*end, 10.)[2]
+    assert max(point[2] for point in samples) <= max(z0, z1) + 1e-9
+    assert min(point[2] for point in samples) >= min(z0, z1) - 1e-9
     previous = cake.side_abs_with_offset(*start, 10.)
     for move in moves:
         for i in range(101):
@@ -135,3 +140,21 @@ def test_y_inset_moves_both_sides_without_changing_x_or_z():
             clear_before = original.side_abs_with_offset(arc, height, 10.)
             clear_after = corrected.side_abs_with_offset(arc, height, 10.)
             assert abs(clear_after[1] - clear_before[1] + math.sin(angle)) < 1e-9
+
+
+def test_long_reverse_pen_up_curve_keeps_clearance_and_height():
+    """큰 역방향 원주 이동도 현으로 케이크를 통과하지 않고 다음 높이로 이어진다."""
+    from cake_decorator.frustum_path import DrawingFrustum
+    from cake_decorator.surface_path import side_clearance_leg
+
+    cake = DrawingFrustum(r_top=56.75, r_bottom=60., height=79., cx=400., cy=-50., cz=143., radial_offset_mm=4.05, side_y_inset_mm=1.)
+    start, end = (math.pi * cake.radius, 65.), (-math.pi * cake.radius / 2, 15.)
+    previous = cake.side_abs_with_offset(*start, 10.)
+    for move in side_clearance_leg(cake, start, end, 10.):
+        for target in getattr(move, 'samples', (move.end,)):
+            for i in range(11):
+                x, y, z = [a + (b - a) * i / 10 for a, b in zip(previous, target)]
+                assert 158. <= z <= 209.
+                assert math.hypot(x - cake.cx, y - cake.cy) > cake.radius_at(z - cake.cz) + 9.
+            previous = target
+    assert previous == cake.side_abs_with_offset(*end, 10.)

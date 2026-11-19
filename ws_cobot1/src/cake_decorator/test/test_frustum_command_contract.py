@@ -91,10 +91,10 @@ def test_two_letters_travel_outside_frustum(node):
     """글자 사이 이동도 원호를 유지하고 접근 거리10mm만큼 표면 밖이어야 한다."""
     _, plan = convert(node, [[(64,384),(288,384)],[(736,384),(960,384)]])
     assert plan.total_strokes == 2
-    clear = [c for c in plan.commands if c.motion_type == MotionType.MOVE_CIRCLE and not c.pen_down]
+    clear = [c for c in plan.commands if c.motion_type == MotionType.MOVE_SPLINE and not c.pen_down]
     assert clear
     for command in clear:
-        for p in (command.pos, command.via):
+        for p in command.spline:
             # 원뿔대 법선 거리: (radial-r(z))/sqrt(1+slope²).
             radius = math.hypot(p.x - 400, p.y)
             radius_at_z = 60 - 3.25 * (p.z - 71) / 79

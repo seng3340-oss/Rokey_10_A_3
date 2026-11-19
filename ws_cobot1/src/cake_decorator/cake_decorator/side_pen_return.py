@@ -46,15 +46,15 @@ def return_pen(
     def movej(target, label):
         """절대 관절값으로 이동해 회전수가 남은 상태를 그대로 되감는다."""
         check_cancel()
-        require(robot.move_joint(target, speed_deg_s=30., acc_deg_s2=60.), label)
+        require(robot.move_joint(target, speed_deg_s=45., acc_deg_s2=90.), label)
         actual = joints()
         require(max(abs(a-b) for a,b in zip(target,actual)) < .5, label+" 도달")
 
     def line(pose, label):
         check_cancel()
         require(robot.move_line(
-            DsrPos(*pose), speed_mm_s=60., acc_mm_s2=200.,
-            angular_speed_deg_s=30., angular_acc_deg_s2=60.,
+            DsrPos(*pose), speed_mm_s=90., acc_mm_s2=300.,
+            angular_speed_deg_s=45., angular_acc_deg_s2=90.,
         ), label)
         require(robot.verify_pose(pose),label+" 도달")
 

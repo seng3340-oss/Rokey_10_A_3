@@ -338,7 +338,7 @@ class DrawingPathNode(Node):
             raise ValueError("옆면 대각선 모드가 유효하지 않습니다.")
         diagonal = abs(end[0] - start[0]) > 1e-9 and abs(end[1] - start[1]) > 1e-9
         if not pen_down:
-            # 획 사이에는 먼저 상면 위로 이탈한다. 미세 원호로 대각선을 만들지 않는다.
+            # 획 사이에는 현재 높이에서 케이크 바깥으로 빠져 다음 획 높이까지 곡선 이동한다.
             moves = side_clearance_leg(cake, start, end, offset)
         elif diagonal and mode == "spline":
             moves = continuous_side_leg(cake, start, end, offset)

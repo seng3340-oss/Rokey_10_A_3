@@ -420,3 +420,58 @@ def test_plate_resets_tcp_before_callback_and_rejects_reset_failure(monkeypatch)
     result = executor._plate_run(SimpleNamespace(success=False), "준비", callback)
     assert not result.success
     callback.assert_not_called()
+
+
+def test_top_return_position_skips_only_redundant_side_joint_approach():
+    """TOP 반납 상공이 실측으로 확인된 경우에만 중복 관절 자세를 생략한다."""
+    from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
+    rack = rack_parameters()
+    robot = ServiceRobot()
+    robot.flange = list(rack['pen_drop_after_pose'])
+    cycle = IntegratedPenCycle(robot, rack.__getitem__)
+    cycle.pick_side(reuse_rack_position=True)
+    assert not any(kind == 'joint' for kind, _ in robot.events)
+    lines = [value for kind, value in robot.events if kind == 'line']
+    assert len(lines) == 4  # 하강·기울임·인출·수직 복귀는 보존한다.
+
+
+def test_moved_rack_position_keeps_original_side_joint_approach():
+    """반납 후 위치가 달라졌으면 원래 상공 경유를 유지한다."""
+    from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
+    rack = rack_parameters()
+    robot = ServiceRobot()
+    robot.flange = list(rack['pen_drop_after_pose'])
+    robot.flange[0] += 10.
+    cycle = IntegratedPenCycle(robot, rack.__getitem__)
+    cycle.pick_side(reuse_rack_position=True)
+    assert any(kind == 'joint' for kind, _ in robot.events)
+
+
+@pytest.mark.parametrize('continuing', [False, True])
+def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
+    """TOP 이후 재파지는 기존 속도, 최초 SIDE 파지만 닫기 전 구간을 가속한다."""
+    from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
+    rack = rack_parameters()
+    robot = ServiceRobot()
+    robot.move_line = Mock(wraps=robot.move_line)
+    cycle = IntegratedPenCycle(robot, rack.__getitem__)
+    cycle.pick_side(preserve_speed=continuing)
+    speeds = [call.kwargs['speed_mm_s'] for call in robot.move_line.call_args_list]
+    assert speeds == ([50., 50., 50., 50.] if continuing else [75., 75., 50., 50.])
+
+
+@pytest.mark.parametrize('has_more', [False, True])
+def test_top_intermediate_return_keeps_speed_and_final_return_is_faster(monkeypatch, has_more):
+    """마지막 획 전 중간 반납과 주문 최종 반납의 속도를 구분한다."""
+    from cake_decorator.drawing_motion import TaskState
+    executor = make_executor(monkeypatch, integrated_side_cycle=True)
+    executor._state = TaskState.DRAWING
+    executor._robot.move_joint = Mock(wraps=executor._robot.move_joint)
+    executor._robot.move_line = Mock(wraps=executor._robot.move_line)
+    handle = draw_handle('TOP')
+    handle.request.has_more_surfaces = has_more
+    assert executor._do_returning_tool(handle, handle.request)
+    assert executor._robot.move_joint.call_args.kwargs['speed_deg_s'] == (30. if has_more else 45.)
+    assert [call.kwargs['speed_mm_s'] for call in executor._robot.move_line.call_args_list] == (
+        [30., 50.] if has_more else [45., 75.]
+    )

@@ -279,11 +279,15 @@ class PlateSequenceReuseTests(unittest.TestCase):
             self.place_kwargs = {}
             self.pick_result = pick_result
 
-        def move_joint(self, joints, mode=None):
+        def move_joint(
+            self, joints, speed_deg_s=30.0, acc_deg_s2=30.0, mode=None,
+        ):
             self.calls.append("move_joint")
             return True
 
-        def move_line(self, pos, ref=None, mode=None):
+        def move_line(
+            self, pos, speed_mm_s=50.0, acc_mm_s2=100.0, ref=None, mode=None,
+        ):
             self.calls.append("move_line")
             return True
 
@@ -310,6 +314,15 @@ class PlateSequenceReuseTests(unittest.TestCase):
                 "opener_close_settle_sec": 0.5,
                 "opener_open_wait_sec": 1.0,
                 "opener_pre_open_wait_sec": 1.0,
+                # 실제 노드가 선언하는 플레이트 속도 파라미터도 제공한다.
+                "free_joint_speed_deg_s": 45.0,
+                "free_joint_acc_deg_s2": 45.0,
+                "free_line_speed_mm_s": 75.0,
+                "free_line_acc_mm_s2": 150.0,
+                "cake_lift_speed_mm_s": 25.0,
+                "cake_lift_acc_mm_s2": 50.0,
+                "cake_seat_joint_speed_deg_s": 15.0,
+                "cake_seat_joint_acc_deg_s2": 15.0,
             }
         )
         return params

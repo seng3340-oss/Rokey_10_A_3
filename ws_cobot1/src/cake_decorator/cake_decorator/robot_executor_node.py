@@ -100,6 +100,15 @@ class RobotExecutorNode(Node):
         'pen_tool_cycle': False,
         # 주문별 SIDE 집기·펜촉 TCP·반납. TOP/플레이트는 영점 TCP를 유지한다.
         'integrated_side_cycle': False,
+        # 빈손·도구만 들고 움직이는 구간은 1.5배, 케이크 상하 동작은 감속한다.
+        'free_joint_speed_deg_s': 45.0,
+        'free_joint_acc_deg_s2': 45.0,
+        'free_line_speed_mm_s': 75.0,
+        'free_line_acc_mm_s2': 150.0,
+        'cake_lift_speed_mm_s': 25.0,
+        'cake_lift_acc_mm_s2': 50.0,
+        'cake_seat_joint_speed_deg_s': 15.0,
+        'cake_seat_joint_acc_deg_s2': 15.0,
     }
 
     def __init__(self):
@@ -769,9 +778,15 @@ class RobotExecutorNode(Node):
                 return failed('SIDE_POSE_UNREACHABLE')
 
         initial_joints = None
+        rack_ready = getattr(self, '_top_pen_rack_ready', False)
+        self._top_pen_rack_ready = False
         if integrated:
             try:
-                initial_joints = self._pen_cycle.pick_side(cancelled)
+                initial_joints = self._pen_cycle.pick_side(
+                    cancelled,
+                    reuse_rack_position=rack_ready,
+                    preserve_speed=rack_ready,
+                )
             except (RuntimeError, ValueError) as error:
                 self.get_logger().error(f'45도 펜 파지 실패: {error}')
                 return failed('PEN_PICK_FAILED')
@@ -851,6 +866,7 @@ class RobotExecutorNode(Node):
             self._transition_to(TaskState.DRAWING)
             if not self._do_returning_tool(goal_handle, request):
                 return failed('PEN_RETURN_FAILED')
+            self._top_pen_rack_ready = True
 
         result.success = True
         result.error_code = ''
@@ -922,7 +938,11 @@ class RobotExecutorNode(Node):
 
         # 1. 펜 상공으로 이동 (관절)
         self.get_logger().info('펜 상공 이동')
-        if not self._robot.move_joint(approach):
+        if not self._robot.move_joint(
+            approach,
+            speed_deg_s=self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=self._param('free_joint_acc_deg_s2'),
+        ):
             self._fail('펜 상공 이동 실패')
             return False
 
@@ -941,7 +961,9 @@ class RobotExecutorNode(Node):
         if self._check_cancel(goal_handle):
             return False
         self.get_logger().info('펜 위치로 하강')
-        if not self._robot.move_line(DsrPos(*stand), speed_mm_s=30.0):
+        if not self._robot.move_line(
+            DsrPos(*stand), speed_mm_s=45.0, acc_mm_s2=150.0,
+        ):
             self._fail('펜 하강 실패')
             return False
 
@@ -1029,10 +1051,16 @@ class RobotExecutorNode(Node):
         drop_approach = self._param('pen_drop_approach_pose')
         drop = self._param('pen_drop_pose')
         drop_after = self._param('pen_drop_after_pose')
+        # TOP 후 SIDE가 남으면 중간 반납도 보호 구간이다. 마지막 반납만 가속한다.
+        more_surfaces = bool(getattr(task_goal, 'has_more_surfaces', False))
 
         # 1. 놓을 위치 상공으로 이동 (관절)
         self.get_logger().info('펜 반납 상공 이동')
-        if not self._robot.move_joint(drop_approach):
+        if not self._robot.move_joint(
+            drop_approach,
+            speed_deg_s=30.0 if more_surfaces else self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=30.0 if more_surfaces else self._param('free_joint_acc_deg_s2'),
+        ):
             self._fail('펜 반납 상공 이동 실패')
             return False
 
@@ -1040,7 +1068,10 @@ class RobotExecutorNode(Node):
         if self._check_cancel(goal_handle):
             return False
         self.get_logger().info('펜 놓을 위치로 하강')
-        if not self._robot.move_line(DsrPos(*drop), speed_mm_s=30.0):
+        if not self._robot.move_line(
+            DsrPos(*drop), speed_mm_s=30.0 if more_surfaces else 45.0,
+            acc_mm_s2=100.0 if more_surfaces else 150.0,
+        ):
             self._fail('펜 하강 실패')
             return False
 
@@ -1058,7 +1089,11 @@ class RobotExecutorNode(Node):
         if self._check_cancel(goal_handle):
             return False
         self.get_logger().info('펜 반납 후 상공 이동')
-        if not self._robot.move_line(DsrPos(*drop_after), speed_mm_s=50.0):
+        if not self._robot.move_line(
+            DsrPos(*drop_after),
+            speed_mm_s=50.0 if more_surfaces else self._param('free_line_speed_mm_s'),
+            acc_mm_s2=100.0 if more_surfaces else self._param('free_line_acc_mm_s2'),
+        ):
             self._fail('펜 반납 후퇴 실패')
             return False
 

@@ -41,7 +41,7 @@ def test_combined_order_prepares_once_draws_top_then_side_finishes_once():
     rclpy.init()
     tm, dp = TaskManagerNode(), DrawingPathNode()
     original_client = tm._gen_traj_client
-    events, heights = [], []
+    events, heights, remaining = [], [], []
     try:
         tm.set_parameters([
             Parameter('plate_sequence_enabled', value=True),
@@ -76,12 +76,13 @@ def test_combined_order_prepares_once_draws_top_then_side_finishes_once():
         tm._gen_traj_client = SimpleNamespace(wait_for_service=lambda **_: True, call_async=convert)
         tm._wait_future = lambda *_: None
         tm._run_plate_service = lambda client, phase: events.append('PREPARE' if client is tm._plate_prepare_client else 'FINISH') or True
-        tm._send_draw = lambda goal, _: events.append(goal.drawing_surface) or True
+        tm._send_draw = lambda goal, _: remaining.append(goal.has_more_surfaces) or events.append(goal.drawing_surface) or True
         goal = Mock(request=request, is_cancel_requested=False)
         result = tm._execute_order(goal)
         assert result.success
         goal.succeed.assert_called_once()
         assert events == ['PREPARE', 'TOP', 'SIDE', 'FINISH']
+        assert remaining == [True, False]
         assert heights == [('TOP', .51039), ('SIDE', .222)]
     finally:
         tm._gen_traj_client = original_client
