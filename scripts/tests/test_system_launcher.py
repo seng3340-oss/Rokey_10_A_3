@@ -382,3 +382,58 @@ def test_pending_order_reset_uses_authenticated_resolution_api(tmp_path, monkeyp
     assert requests[0].full_url.endswith("/orders/ORD-TEST/resolve")
     assert requests[0].get_header("Authorization") == "Bearer test-token"
     assert json.loads(requests[0].data)["confirmed_not_running"] is True
+
+
+
+def _write_cake_files(tmp_path, real_config):
+    """기준점 테스트용 real_robot.json과 최소 workspace_config.yaml을 만든다."""
+    import json
+
+    real = tmp_path / "real_robot.json"
+    real.write_text(json.dumps(real_config), encoding="utf-8")
+    workspace = tmp_path / "workspace_config.yaml"
+    workspace.write_text(
+        "robot_executor_node:\n"
+        "  ros__parameters:\n"
+        "    cake_center_pose: [401.8, -55.57, 510.39, 179.76, 179.35, 179.02]\n",
+        encoding="utf-8",
+    )
+    return real, workspace
+
+
+def test_config_cake_reference_uses_json_xy_and_taught_contact_pose(tmp_path):
+    """XY는 real_robot.json, 접촉 Z·자세는 기존 케이크 중심 하강 자세에서 가져온다."""
+    real, workspace = _write_cake_files(tmp_path, {
+        "cake_top_z_mm": 222.0,
+        "configure_pen_tcp_on_yes": True,
+        "side_cake_center_xy_mm": [396.37, -50.56],
+    })
+    assert launcher.load_config_cake_reference(real, workspace) == [
+        396.37, -50.56, 510.39, 179.76, 179.35, 179.02,
+    ]
+
+
+def test_config_cake_reference_requires_center_xy(tmp_path):
+    """XY가 없는 단위 테스트용 설정으로 전체 공정을 시작하지 않는다."""
+    import pytest
+
+    real, workspace = _write_cake_files(tmp_path, {
+        "cake_top_z_mm": 222.0, "configure_pen_tcp_on_yes": True,
+    })
+    with pytest.raises(RuntimeError, match="side_cake_center_xy_mm"):
+        launcher.load_config_cake_reference(real, workspace)
+
+
+def test_real_robot_config_rejects_out_of_range_top_z(tmp_path):
+    """상면 높이 오타(예: 2220)는 로봇을 움직이기 전에 거부한다."""
+    import pytest
+
+    real, _ = _write_cake_files(tmp_path, {"cake_top_z_mm": 2220.0})
+    with pytest.raises(RuntimeError, match="cake_top_z_mm"):
+        launcher.load_real_robot_config(real)
+
+
+def test_repository_real_robot_config_builds_reference():
+    """저장소의 실제 real_robot.json으로 기준점을 만들 수 있어야 한다."""
+    reference = launcher.load_config_cake_reference()
+    assert len(reference) == 6

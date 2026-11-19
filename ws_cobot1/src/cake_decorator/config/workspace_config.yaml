@@ -90,17 +90,17 @@ robot_executor_node:
     # 작업 시작 전 오프너 파지 구역으로 이동하기 위한 초기 안전 자세
     plate_safe_position_1: [35.00, 40.00, 35.00, -20.00, 120.00, 120.00]
 
-    # pick_opener1 | line, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # pick_opener1 | line, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 오프너가 놓인 위치의 상단으로 TCP를 직선 이동
-    plate_pick_opener1: [426.73, 252.72, 379.41, 30.09, 179.36, 28.13]
+    plate_pick_opener1: [426.73, 252.72, 379.41, 97.11, -180.00, 97.02]
 
-    # pick_opener2 | line, relative | [2026-11-18 갱신: move cakeplate_update.txt]
-    # 오프너 상단에서 베이스 Z축 방향으로 100mm 하강
+    # pick_opener2 | line, relative | [2026-11-19 갱신: m0609_test_so1v2]
+    # 오프너 상단에서 베이스 Z축 방향으로 93mm 하강
     # 그리퍼가 오프너의 손잡이를 파지할 수 있는 위치로 접근
-    plate_pick_opener2: [0.00, 0.00, -100.00, 0.00, 0.00, 0.00]
+    plate_pick_opener2: [0.00, 0.00, -93.00, 0.00, 0.00, 0.00]
 
     # move_cake_ps_L | line, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
-    # 오프너를 파지한 상태에서 기존 접근 위치로 100mm 상승
+    # 오프너를 파지한 상태에서 기존 접근 위치로 93mm 상승
     # 오프너를 보관 위치에서 들어 올려 주변 구조물과 분리
     plate_move_cake_ps_l: [426.73, 252.72, 379.41, 30.09, 179.36, 28.13]
 
@@ -109,10 +109,10 @@ robot_executor_node:
     # 케이크 받침판을 들어 올리기 위한 작업 구역으로 접근
     plate_move_cake_ps_l2: [606.73, 252.72, 379.41, 30.09, 179.36, 28.13]
 
-    # move_cake_plate_ps1 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # move_cake_plate_ps1 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 케이크 받침판을 들어 올리기 위한 초기 관절 자세로 변경
     # 오프너 끝단을 케이크 받침판의 걸림 위치에 맞추는 단계
-    plate_move_cake_plate_ps1: [-0.12, 38.25, 45.36, 0.15, 96.65, -0.02]
+    plate_move_cake_plate_ps1: [-0.09, 37.66, 45.13, 0.15, 96.70, -0.02]
 
     # move_cake_plate_ps2 | joint, relative | [2026-11-18 갱신: move cakeplate_update.txt]
     # 5번 관절을 현재 각도에서 -7도 회전
@@ -133,17 +133,17 @@ robot_executor_node:
     # 받침판을 들어 올린 후 드로잉 스테이션으로 이동하기 위한 안전 자세
     plate_safe_position_2: [35.00, 40.00, 35.00, -20.00, 120.00, 120.00]
 
-    # cake_station_ps1 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # cake_station_ps1 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 오프너의 위치와 기울기를 조정하여 받침판 안착 지점인 스테이션 상단으로 접근
-    plate_cake_station_ps1: [6.75, 25.95, 57.94, -7.64, 109.05, 140.45]
+    plate_cake_station_ps1: [6.94, 26.30, 57.63, -7.22, 109.37, 138.20]
 
-    # cake_station_ps2 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # cake_station_ps2 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 케이크 받침판을 스테이션에 넣기 위한 위치와 기울기, 높이 조정하여 지정 위치에 안착시키는 단계
-    plate_cake_station_ps2: [6.76, 26.11, 62.27, -7.39, 105.25, 140.45]
+    plate_cake_station_ps2: [6.94, 26.03, 61.94, -7.47, 105.39, 139.67]
 
-    # cake_station_ps3 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # cake_station_ps3 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 케이크 받침판을 스테이션에 넣은 후 각도 조정으로 오프너에서 케이크 받침판을 분리하는 단계
-    plate_cake_station_ps3: [8.14, 23.79, 66.06, -5.00, 97.29, 145.51]
+    plate_cake_station_ps3: [8.14, 23.81, 64.47, -5.02, 98.85, 145.37]
 
     # cake_station_ps4 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
     # 케이크 드로잉 작업 구역에서 로봇을 이탈시키는 동작
@@ -158,18 +158,18 @@ robot_executor_node:
     # 오프너를 받침판 회수 작업 위치에 맞추는 동작
     plate_pickup_cake_station_ps1: [13.26, 24.26, 62.83, -3.12, 93.19, 138.85]
 
-    # pickup_cake_station_ps2 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # pickup_cake_station_ps2 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 기존 배치 경로의 cake_station_ps3 자세로 되돌아감
     # 받침판을 스테이션에서 분리하기 위한 회수 방향으로 각도와 자세 변경
-    plate_pickup_cake_station_ps2: [8.14, 23.79, 66.06, -5.00, 97.29, 145.51]
+    plate_pickup_cake_station_ps2: [8.14, 23.81, 64.47, -5.02, 98.85, 145.37]
 
-    # pickup_cake_station_ps3 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # pickup_cake_station_ps3 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 오프너에 걸린 받침판을 스테이션의 고정 위치에서 빼내는 과정
-    plate_pickup_cake_station_ps3: [10.23, 28.30, 60.43, -11.81, 107.74, 145.51]
+    plate_pickup_cake_station_ps3: [6.94, 26.03, 61.94, -7.47, 105.39, 139.67]
 
-    # pickup_cake_station_ps4 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # pickup_cake_station_ps4 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 받침판을 출고 지점으로 이송하기 위해 스테이션 상단으로 이동
-    plate_pickup_cake_station_ps4: [10.08, 25.88, 55.17, -12.15, 111.92, 145.51]
+    plate_pickup_cake_station_ps4: [6.94, 26.30, 57.63, -7.22, 109.37, 138.20]
 
     # safe position 4 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
     # 케이크 회수 경로 수행 후 지정된 안전 대기 자세로 이동
@@ -183,9 +183,9 @@ robot_executor_node:
     # 케이크 받침판을 출고 위치에 놓기 위해 각도와 자세 조정 단계
     plate_deliver_cake_station_ps2: [0.50, 33.55, 47.47, -1.71, 87.35, 1.79]
 
-    # deliver_cake_station_ps3 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # deliver_cake_station_ps3 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 오프너에 걸린 케이크 받침판의 위치와 기울기 미세 조정으로 오프너와 케이크 받침판 결속 해제
-    plate_deliver_cake_station_ps3: [0.86, 36.47, 48.75, -2.00, 86.71, -0.01]
+    plate_deliver_cake_station_ps3: [1.05, 36.52, 47.50, -2.00, 88.40, -0.08]
 
     # deliver_cake_station_ps4 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
     # 관절 자세를 변경하여 케이크 받침판의 최종 출고 동작 수행
@@ -202,15 +202,15 @@ robot_executor_node:
     # 오프너를 원래 보관 위치에 반납하기 위한 이동 준비
     plate_safe_position_5: [35.00, 40.00, 35.00, -20.00, 120.00, 120.00]
 
-    # deliver_opener_ps1 | line, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
+    # deliver_opener_ps1 | line, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 오프너를 최초 파지했던 위치의 상단으로 직선 이동
     # 오프너를 원래 보관 위치에 반납하기 위한 접근 단계
-    plate_deliver_opener_ps1: [426.73, 252.72, 379.41, 30.09, 179.36, 28.13]
+    plate_deliver_opener_ps1: [426.73, 252.72, 379.41, 97.11, -180.00, 97.02]
 
-    # deliver_opener_ps2 | line, relative | [2026-11-18 갱신: move cakeplate_update.txt]
-    # 베이스 Z축 -100mm 방향으로 수직 하강
+    # deliver_opener_ps2 | line, relative | [2026-11-19 갱신: m0609_test_so1v2]
+    # 베이스 Z축 -93mm 방향으로 수직 하강
     # 오프너를 최초 파지했던 높이에 다시 위치시킴
-    plate_deliver_opener_ps2: [0.00, 0.00, -100.00, 0.00, 0.00, 0.00]
+    plate_deliver_opener_ps2: [0.00, 0.00, -93.00, 0.00, 0.00, 0.00]
 
 
 task_manager_node:

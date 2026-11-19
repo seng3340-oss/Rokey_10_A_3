@@ -275,7 +275,8 @@ class PlateSequenceReuseTests(unittest.TestCase):
     class PlateRobot:
         def __init__(self, pick_result=True):
             self.calls = []
-            self.kwargs = {}
+            self.pick_kwargs = {}
+            self.place_kwargs = {}
             self.pick_result = pick_result
 
         def move_joint(self, joints, mode=None):
@@ -288,12 +289,12 @@ class PlateSequenceReuseTests(unittest.TestCase):
 
         def pick(self, **kwargs):
             self.calls.append("pick")
-            self.kwargs = kwargs
+            self.pick_kwargs = kwargs
             return self.pick_result
 
         def place(self, **kwargs):
             self.calls.append("place")
-            self.kwargs = kwargs
+            self.place_kwargs = kwargs
             return True
 
     def _params(self):
@@ -324,17 +325,22 @@ class PlateSequenceReuseTests(unittest.TestCase):
         sequence = PlateSequence(robot, params.__getitem__)
         self.assertTrue(sequence._plate_prepare_steps())
         self.assertIn("pick", robot.calls)
+        # 드로잉 전 그리퍼를 비우기 위해 prepare 마지막에서 place를 호출한다.
+        self.assertIn("place", robot.calls)
         # 플레이트 전용 함수가 아니라 기존 pick의 확장 인수를 사용한다.
-        self.assertIn("close_wait_sec", robot.kwargs)
-        self.assertIn("pre_open_wait_sec", robot.kwargs)
+        self.assertIn("close_wait_sec", robot.pick_kwargs)
+        self.assertIn("pre_open_wait_sec", robot.pick_kwargs)
+        self.assertIn("open_wait_sec", robot.place_kwargs)
 
     def test_finish_uses_existing_place(self):
         params = self._params()
         robot = self.PlateRobot()
         sequence = PlateSequence(robot, params.__getitem__)
         self.assertTrue(sequence._plate_finish_steps())
+        # 드로잉 후 케이크를 옮기기 전에 opener를 다시 파지한다.
+        self.assertIn("pick", robot.calls)
         self.assertIn("place", robot.calls)
-        self.assertIn("open_wait_sec", robot.kwargs)
+        self.assertIn("open_wait_sec", robot.place_kwargs)
 
     def test_pick_failure_stops_remaining_plate_moves(self):
         params = self._params()
