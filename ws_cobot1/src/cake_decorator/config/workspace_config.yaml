@@ -39,6 +39,9 @@ robot_executor_node:
     pen_grip_width: 10.0
     pen_grip_force: 20.0
     gripper_open_width: 100.0
+    # 펜 파지 전후 같은 포지션에서 하중 변화를 측정하면 파지 성공 여부를
+    # 추정할 수 있음. 현재는 주석만 남기며 Drawing에 Safe Position이나
+    # 실제 하중 검사 동작을 추가하지 않음(팀 담당 모듈과 별도 협의).
     # 펜 거치대 좌표
     pen_stand_pose: [248.86, 244.77, 312.99, 123.66, 180.00, 123.43] # 펜을 잡을 위치
     pen_stand_approach_pose: [43.61, -1.88, 99.63, 0.09, 82.26, 43.29] # 펜이 있는 위치의 상공
@@ -56,6 +59,11 @@ robot_executor_node:
     # 원본 속도: velj=60, accj=100, velx=[250,80.625], accx=[1000,322.5].
     # [요청] 위 원본 속도는 적용하지 않음. Git 함수의 기본값을 사용.
     # 작업 취소/비상정지 메모: ROS2 작업 취소 처리와 장비 물리적 비상정지는 별개.
+    plate_weight_check_enabled: false  # 실제 하중 테스트 전까지 OFF
+    plate_opener_weight_kg: 0.05  # 예시값, 실측 후 변경
+    plate_cake_weight_kg: 0.20    # 예시값, 실측 후 변경
+    plate_weight_tolerance_percent: 10.0
+    plate_weight_wait_sec: 3.0
     plate_sequence_enabled: false
     # [변경 2026-11-19] 그리퍼 최신 PM 방식: 제어박스 디지털 출력(DO) 펄스.
     # 기본 DO2=Open, DO1=Close, 0.5초 유지. 실제 배선이 반대이면 아래 두

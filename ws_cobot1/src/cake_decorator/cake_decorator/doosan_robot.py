@@ -20,6 +20,7 @@ import xml.etree.ElementTree as ET
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
 from dsr_msgs2.srv import (
@@ -32,10 +33,11 @@ from dsr_msgs2.srv import (
     GetCurrentPosx,
     GetCurrentPosj,
     GetSolutionSpace,
+    GetWorkpieceWeight,
     SetCtrlBoxDigitalOutput,
 )
 from rcl_interfaces.srv import GetParameters
-from onrobot_rg_msgs.srv import SetCommand
+from onrobot_rg_msgs.srv import GripperPose, SetCommand
 
 from .drawing_motion import (
     DEFAULT_ACC_ANGULAR,
@@ -157,7 +159,11 @@ class DoosanRobotClient:
             "/dsr01/dsr_controller2/io/set_ctrl_box_digital_output",
             SetCtrlBoxDigitalOutput,
         ),
+        "get_workpiece_weight": (
+            "/dsr01/dsr_controller2/force/get_workpiece_weight", GetWorkpieceWeight,
+        ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
+        "gripper_pose": ("/onrobot/pose", GripperPose),
     }
 
     def __init__(
@@ -202,6 +208,18 @@ class DoosanRobotClient:
             gripper_close_do,
             gripper_pulse_sec,
             robot_stopped=True,
+        )
+
+        # 그리퍼 현재 조인트 각도(rad). OnRobot 드라이버가 발행하는
+        # /onrobot_joint_states의 finger_joint 값을 저장한다.
+        # 아직 수신 전이면 None이며, 가상 모드처럼 토픽이 없으면 계속 None이다.
+        self._gripper_joint_angle_rad: Optional[float] = None
+        self._gripper_joint_sub = node.create_subscription(
+            JointState,
+            "/onrobot_joint_states",
+            self._on_gripper_joint_state,
+            10,
+            callback_group=self._service_group,
         )
 
     # ------------------------------------------------------------------
@@ -528,6 +546,20 @@ class DoosanRobotClient:
         req.sync_type = SYNC if sync else ASYNC
         return self._call_checked("move_joint", req)
 
+    def get_workpiece_weight(self) -> float | None:
+        """작업물 추정 하중을 읽습니다. 실패하면 None을 반환합니다.
+
+        서비스의 실제 단위와 저중량 측정 가능 범위는 실물 장비에서 확인해야 합니다.
+        """
+        response = self._call('get_workpiece_weight', GetWorkpieceWeight.Request(), timeout=10.0)
+        if response is None:
+            return None
+        weight = float(response.weight)
+        if not math.isfinite(weight) or weight < 0.0:
+            self._logger.error(f'하중 측정 오류: {weight}')
+            return None
+        return weight
+
     def move_home(self) -> bool:
         """홈 위치로 이동."""
         return self._call_checked("move_home", MoveHome.Request())
@@ -786,6 +818,68 @@ class DoosanRobotClient:
             return False
         time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
         return self.set_digital_output(1, 0)
+
+    # ------------------------------------------------------------------
+    # 그리퍼 상태 읽기 (OnRobot RG2)
+    # 가벼운 물품의 안전예외를 확인하기 위해 사용한다.
+    # 무게가 아니라 그리퍼가 물품을 물고 있는지(개폐 상태)를 판단한다.
+    # ------------------------------------------------------------------
+
+    def _on_gripper_joint_state(self, msg: JointState) -> None:
+        """OnRobot 조인트 상태에서 finger_joint 각도를 저장한다.
+
+        /onrobot_joint_states에는 finger_joint가 포함된다. 이름이 없으면
+        첫 번째 position을 사용하고, 비정상 값은 무시한다.
+        """
+        index = 0
+        if "finger_joint" in msg.name:
+            index = msg.name.index("finger_joint")
+        if index >= len(msg.position):
+            return
+        value = float(msg.position[index])
+        if math.isfinite(value):
+            self._gripper_joint_angle_rad = value
+
+    def get_gripper_angle(self) -> Optional[float]:
+        """현재 그리퍼 조인트 각도(rad). 수신 전이면 None.
+
+        가벼운 물품의 안전예외를 확인하기 위해 사용한다. 각도 자체는
+        그리퍼 개폐 상태를 나타내며 무게나 파지력을 의미하지 않는다.
+        """
+        return self._gripper_joint_angle_rad
+
+    def get_gripper_angle_deg(self) -> Optional[float]:
+        """현재 그리퍼 조인트 각도(deg). 수신 전이면 None."""
+        angle = self.get_gripper_angle()
+        return None if angle is None else math.degrees(angle)
+
+    def gripper_width_from_angle(self, angle_rad: float) -> Optional[float]:
+        """조인트 각도(rad)로 그리퍼 폭(m)을 계산한다.
+
+        가벼운 물품의 안전예외를 확인하기 위해 사용한다. /onrobot/pose는
+        알려진 인수 하나로 전체 pose를 계산하는 서비스다. 현재 조인트 각도를
+        known.theta로 넣고 pose.x(폭)를 읽는다. 서비스가 없거나 응답이
+        비정상이면 None을 반환한다.
+        """
+        if not math.isfinite(angle_rad):
+            return None
+        request = GripperPose.Request()
+        request.known.theta = float(angle_rad)
+        response = self._call("gripper_pose", request, timeout=self._timeout)
+        if response is None:
+            return None
+        width = float(response.pose.x)
+        if not math.isfinite(width) or width < 0.0:
+            self._logger.error(f"그리퍼 폭 계산 오류: {width}")
+            return None
+        return width
+
+    def get_gripper_width(self) -> Optional[float]:
+        """현재 그리퍼 폭(m). 각도 수신 전이면 None."""
+        angle = self.get_gripper_angle()
+        if angle is None:
+            return None
+        return self.gripper_width_from_angle(angle)
 
     # ------------------------------------------------------------------
     # 상태 확인
