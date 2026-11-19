@@ -26,7 +26,7 @@ from geometry_msgs.msg import Point, Pose, Quaternion
 import rclpy
 from rclpy.node import Node
 
-from .frustum_path import DrawingFrustum, pixel_to_path_mm
+from .frustum_path import DrawingFrustum, overlap_side_seam, pixel_to_path_mm
 from .path_simplification import simplify_stroke_mm
 from .surface_path import (
     side_surface_leg,
@@ -64,6 +64,9 @@ class DrawingPathNode(Node):
         self.declare_parameter("side_pen_vertical_deg", 17.0)
         # 양수이면 BASE +Y/-Y 가장자리를 각각 같은 거리만큼 안으로 줄인다.
         self.declare_parameter("side_y_inset_mm", 0.0)
+        # 웹 띠 좌우 끝이 이어진 옆면 링에서 이음매를 지나 더 그리는 길이(mm).
+        # 펜 접촉 시작·종료점의 잉크 부족으로 이음매가 비어 보이지 않게 한다. 0이면 끈다.
+        self.declare_parameter("side_seam_overlap_mm", 3.0)
         self.declare_parameter("integrated_side_cycle", False)
         self.declare_parameter("side_pen_45", False)  # 45도 실물 파지 웹 검증 모드
         self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
@@ -209,7 +212,9 @@ class DrawingPathNode(Node):
         waypoints: list[Waypoint3DMsg] = []
         pen_states: list[bool] = []
 
-        previous_side_end = None
+        # 1단계: 모든 획을 검증·mm 변환·단순화한다.
+        # 옆면 이음매 겹침은 다른 획의 끝점까지 봐야 하므로 명령 생성 전에 전체를 먼저 모은다.
+        selected_strokes = []
         total_input = total_selected = 0
         for stroke in request.strokes_2d:
             pts_px = [(pt.x, pt.y) for pt in stroke.points]
@@ -244,9 +249,23 @@ class DrawingPathNode(Node):
             )
             total_input += len(raw_mm)
             total_selected += len(selected.points)
+            selected_strokes.append(selected.points)
+
+        if surface == "SIDE":
+            # 웹 띠의 좌우 끝(호 0과 한 바퀴)이 이어진 링이면 이음매를 지나 조금 더 그린다.
+            # 경로 호 길이는 평균 반지름 기준이므로 한 바퀴는 2π × cake.radius(mm)다.
+            selected_strokes = overlap_side_seam(
+                selected_strokes,
+                2.0 * math.pi * cake.radius,
+                self._param("side_seam_overlap_mm"),
+            )
+
+        # 2단계: 단순화된 mm 획을 순서대로 로봇 명령으로 바꾼다.
+        previous_side_end = None
+        for points in selected_strokes:
             if surface == "TOP":
                 self._convert_top_mm(
-                    selected.points,
+                    points,
                     cake,
                     approach_h,
                     z_offset,
@@ -260,7 +279,7 @@ class DrawingPathNode(Node):
                 )
             else:
                 previous_side_end = self._convert_side_mm(
-                    selected.points,
+                    points,
                     previous_side_end,
                     cake,
                     approach_h,
