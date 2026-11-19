@@ -523,3 +523,12 @@ def align_pen_axis_from_reference(direction, reference_quat=None):
         d*z + a*y - b*x + c*w,
         d*w - a*x - b*y - c*z,
     )
+
+
+SIDE_BOTTOM_CLEARANCE_MM = 10.0
+
+
+def validate_side_drawing_height(points):
+    """바닥 10mm 안의 원본 좌표가 있으면 경로 전체를 거부한다. 임의 보간·절단은 하지 않는다."""
+    if any(height < SIDE_BOTTOM_CLEARANCE_MM - 1e-4 for _, height in points):
+        raise ValueError("스테이지 충돌 방지를 위해 옆면 하단 10mm에는 그릴 수 없습니다.")

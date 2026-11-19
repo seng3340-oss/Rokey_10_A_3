@@ -226,8 +226,11 @@ class TestMultipleStrokes:
 
     def test_side_surface_keeps_all_strokes(self, dp_node):
         """옆면도 여러 획을 전부 변환한다."""
+        # 80mm 높이의 원통에서도 바닥 10mm 위에 모든 시험 획을 배치한다.
+        strip_height = 896.0 * HEIGHT_M / (2 * math.pi * RADIUS_M)
+        max_side_y = CANVAS_CY + strip_height * (0.5 - 0.010 / HEIGHT_M) - 1.0
         side_strokes = [
-            [(x, min(y, 490.0)) for x, y in stroke]
+            [(x, min(y, max_side_y)) for x, y in stroke]
             for stroke in (STROKE_A, STROKE_B, STROKE_C)
         ]
         response = _convert(
@@ -255,7 +258,7 @@ class TestMultipleStrokes:
         request = _request(
             [[
                 (288.0, strip_top),
-                (288.0, strip_top + strip_height),
+                (288.0, strip_top + strip_height * (1 - 10 / cake_height)),
             ]],
             surface="SIDE",
         )
@@ -284,15 +287,15 @@ class TestMultipleStrokes:
             abs=3e-5,
         )
         assert contact_points[1].pose.position.x == pytest.approx(
-            CAKE_TOP[0] + 0.06175 * math.cos(math.pi / 2.0),
+            CAKE_TOP[0] + ((60.0 - 3.25 * 10 / cake_height + 1.75) / 1000) * math.cos(math.pi / 2.0),
             abs=3e-5,
         )
         assert contact_points[1].pose.position.y == pytest.approx(
-            CAKE_TOP[1] + 0.06175,
+            CAKE_TOP[1] + ((60.0 - 3.25 * 10 / cake_height + 1.75) / 1000),
             abs=3e-5,
         )
         assert contact_points[1].pose.position.z == pytest.approx(
-            CAKE_TOP[2] - cake_height / 1000.0,
+            CAKE_TOP[2] - (cake_height - 10) / 1000.0,
             abs=3e-5,
         )
 

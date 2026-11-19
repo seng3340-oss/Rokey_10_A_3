@@ -167,6 +167,23 @@ class TaskManagerNode(Node):
                 if any(path.surface == 'SIDE' and path.strokes for path in request.drawing_paths):
                     side_reference_pose(self.get_parameter('side_reference_pose').value)
 
+            # 금지 높이가 포함된 기존 주문은 케이크를 운반하기 전에 거부한다.
+            from .drawing_geometry import FrustumCake, pixel_to_mm_side, validate_side_drawing_height
+
+            cake = request.cake_params
+            shape = FrustumCake(
+                r_top=cake.radius * 1000., r_bottom=cake.bottom_radius * 1000.,
+                height=cake.height * 1000., cx=0., cy=0., cz=0.,
+            )
+            for path in request.drawing_paths:
+                if path.surface != 'SIDE':
+                    continue
+                for stroke in path.strokes:
+                    validate_side_drawing_height([
+                        pixel_to_mm_side(point.x, point.y, path.canvas_width, path.canvas_height, shape)
+                        for point in stroke.points
+                    ])
+
             # [변경 2026-11-18] 원본 plate 시퀀스를 드로잉 앞/뒤로 분리.
             if self.get_parameter('plate_sequence_enabled').value:
                 self._set_phase(Phase.PREPARING, goal_handle, 0.0, '플레이트 준비')

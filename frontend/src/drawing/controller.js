@@ -58,7 +58,7 @@ export function mountDrawing() {
       : p.x >= side.x + 5 &&
           p.x <= side.x + side.width - 5 &&
           p.y >= side.y + 5 &&
-          p.y <= side.y + side.height - 5;
+          p.y <= side.drawableBottomY - 5;
   }
   /** 화면 크기와 무관하게 포인터 위치를 원본 1024×768 캔버스 좌표로 환산한다. */
   function point(e) {
@@ -117,6 +117,16 @@ export function mountDrawing() {
     ctx.setLineDash([7, 8]);
     ctx.stroke();
     ctx.setLineDash([]);
+    if (surface === "side") {
+      // 케이크 전체 비율을 유지하면서 하단 금지 띠를 눈에 보이게 구분한다.
+      const blockedHeight = region.y + region.height - region.drawableBottomY;
+      ctx.fillStyle = "#e8e4df";
+      ctx.fillRect(region.x, region.drawableBottomY, region.width, blockedHeight);
+      ctx.fillStyle = "#746d65";
+      ctx.font = "13px sans-serif";
+      ctx.fillText("하단 1cm · 그릴 수 없는 영역", region.x + 14, region.drawableBottomY + blockedHeight / 2 + 4);
+      // fillRect는 경로를 바꾸지 않으므로 아래 clip은 원래 케이크 외곽을 쓴다.
+    }
     // 점선 내부로 필기 표시를 제한하고, 이후 렌더링에는 클리핑을 남기지 않는다.
     ctx.save();
     ctx.clip();

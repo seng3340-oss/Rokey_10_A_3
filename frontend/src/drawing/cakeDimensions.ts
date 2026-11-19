@@ -5,6 +5,8 @@ export const CAKE_DIMENSIONS = Object.freeze({
   topDiameterMm: measuredCake.top_diameter_mm,
   bottomDiameterMm: measuredCake.bottom_diameter_mm,
   heightMm: measuredCake.height_mm,
+  // 스테이지와 굵은 펜 몸체의 간섭 때문에 옆면 바닥 10mm는 사용하지 않는다.
+  sideBottomClearanceMm: 10,
   boardWidthMm: measuredCake.board_width_mm,
   boardDepthMm: measuredCake.board_depth_mm,
   boardThicknessMm: measuredCake.board_thickness_mm,
@@ -43,6 +45,10 @@ export const DRAWING_LAYOUT = Object.freeze({
     y: (canvasHeight - sideHeight) / 2,
     width: sideWidth,
     height: sideHeight,
+    // 전체 케이크를 계속 표시하고 입력 하한만 올린다. 그림을 위로 압축하지 않는다.
+    drawableBottomY:
+      (canvasHeight - sideHeight) / 2 +
+      sideHeight * (1 - CAKE_DIMENSIONS.sideBottomClearanceMm / CAKE_DIMENSIONS.heightMm),
   },
 });
 

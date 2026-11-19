@@ -156,3 +156,13 @@ test("확인한 양면 사본은 확인 창 이후 편집해도 바뀌지 않는
   await ui.element("#confirm").click();
   assert.equal(ui.requests[0].body.additional_paths[0].strokes.length, 1);
 });
+
+test("옆면 하단 금지 영역에는 획을 시작하지 않는다", async (t) => {
+  const ui = setup(t);
+  ui.side.click();
+  // 현재 케이크 편집 띠의 아래 경계 바로 위는 하단 10mm 금지 구역이다.
+  ui.draw(300, 475);
+  ui.element("#review").click();
+  assert.equal(ui.element("#modal").open, false);
+  assert.equal(ui.requests.length, 0);
+});

@@ -233,6 +233,10 @@ class DrawingPathNode(Node):
                 math.hypot(x, y) > cake.r_top + 1e-4 for x, y in raw_mm
             ):
                 raise ValueError("점이 윗면 원형 영역 밖입니다.")
+            if surface == "SIDE":
+                from .drawing_geometry import validate_side_drawing_height
+
+                validate_side_drawing_height(raw_mm)
             selected = simplify_stroke_mm(
                 raw_mm,
                 self._param("simplify_tolerance_mm"),
