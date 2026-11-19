@@ -1,0 +1,73 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Status1
+      Splitter Ratio: 0.56
+    Tree Height: 510
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Enabled: true
+  Global Options:
+    Fixed Frame: base_link
+    Background Color: 35; 40; 50
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/RobotModel
+      Name: M0609 RobotModel
+      Enabled: true
+      Value: true
+      Visual Enabled: true
+      Collision Enabled: false
+      Description Source: Topic
+      Description Topic:
+        Value: /dsr01/robot_description
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Cake Lettering
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /cake_lettering_preview/markers
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.43
+      Focal Point:
+        X: 0.30
+        Y: 0.0
+        Z: 0.26
+      Pitch: 0.62
+      Yaw: 4.0
+      Target Frame: <Fixed Frame>
+    Saved:
+      - Class: rviz_default_plugins/Orbit
+        Name: Cake detail
+        Distance: 0.34
+        Focal Point:
+          X: 0.50
+          Y: 0.0
+          Z: 0.14
+        Pitch: 0.95
+        Yaw: 4.20
+        Target Frame: <Fixed Frame>
+Window Geometry:
+  Width: 1380
+  Height: 900
+  X: 12
+  Y: 45
+  Views:
+    collapsed: true

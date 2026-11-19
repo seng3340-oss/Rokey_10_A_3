@@ -19,7 +19,7 @@ class BackendError(RuntimeError):
 class BackendClient:
     """백엔드와 같은 호스트에서 인증된 내부 API를 호출한다."""
 
-    def __init__(self, base_url, token, timeout=3.0):
+    def __init__(self, base_url, token, timeout=3.0, execution_mode="unknown"):
         parsed = urlparse(base_url)
         if (
             parsed.scheme not in ("http", "https")
@@ -33,6 +33,9 @@ class BackendClient:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        if execution_mode not in ("unknown", "real", "simulation"):
+            raise ValueError("운전 모드 설정을 확인하세요.")
+        self.execution_mode = execution_mode
 
     def post(self, path, body=None):
         """204는 인수할 주문이 없다는 뜻이다. 실패한 claim은 자동 재시도하지 않는다."""
@@ -59,12 +62,36 @@ class BackendClient:
         """서버가 원자적으로 잠근 주문을 한 번 가져온다."""
         return self.post("/internal/bridge/claim")
 
+    def heartbeat(self, task_server_ready, active_order_id, task_feedback_age_sec):
+        """TM 관측 정보만 전송하며 주문 인수나 로봇 명령을 실행하지 않는다."""
+        return self.post(
+            "/internal/bridge/heartbeat",
+            {
+                "execution_mode": self.execution_mode,
+                "task_server_ready": bool(task_server_ready),
+                "active_order_id": active_order_id,
+                "task_feedback_age_sec": task_feedback_age_sec,
+            },
+        )
+
+    def plan(self, claim, plan):
+        """TM이 만든 계획을 인수한 주문에만 연결한다. 경로를 재계산하지 않는다."""
+        return self.post(
+            f"/internal/bridge/orders/{quote(claim['order_id'], safe='')}/plan",
+            {
+                "claim_token": claim["claim_token"],
+                "execution_mode": self.execution_mode,
+                "plan": plan,
+            },
+        )
+
     def event(self, claim, kind, **details):
         """상태 기록은 같은 이벤트 ID로만 재시도한다. Goal을 다시 보내지는 않는다."""
         body = {
             "event_id": str(uuid4()),
             "claim_token": claim["claim_token"],
             "kind": kind,
+            "execution_mode": self.execution_mode,
             **details,
         }
         path = f"/internal/bridge/orders/{quote(claim['order_id'], safe='')}/events"

@@ -1,219 +1,460 @@
-/* 운영 콘솔 전용 배경과 글자 색으로 고객 화면과 역할을 구분한다. */
+/* 고객 화면의 베이지·화이트 분위기를 유지하고 HMI 내부에만 스타일을 한정한다. */
 .hmi-app {
-  background: #f1f3f5;
+  --ink: #51483d;
+  --line: #e7dfd3;
+  background: #f8f5ef;
+  color: var(--ink);
   min-height: 100vh;
-  color: #25313d;
-  font-size: 13px;
+  font-size: 14px;
 }
-/* 운영 브랜드와 고객 화면 이동 링크를 상단 양 끝에 배치한다. */
-.hmi-app > header {
-  background: white;
+.hmi-app * {
+  box-sizing: border-box;
+}
+.hmi-app button,
+.hmi-app a {
+  -webkit-tap-highlight-color: transparent;
+}
+.hmi-app button {
+  font: inherit;
+  border: 1px solid var(--line);
+  background: #fffdf9;
+  color: var(--ink);
+  padding: 10px 15px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.hmi-app button:focus-visible,
+.hmi-app a:focus-visible {
+  outline: 3px solid #93774d;
+  outline-offset: 3px;
+}
+.hmi-app button[aria-pressed="true"] {
+  background: #eee4d4;
+  border-color: #b29b77;
+}
+.hmi-app button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.hmi-app a {
+  color: inherit;
+  text-decoration: none;
+}
+/* 스크롤 위치와 무관하게 상단 안전 상태와 정지 안내에 접근할 수 있다. */
+.hmi-safety {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #fff4ef;
+  border-bottom: 1px solid #dcaaa0;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 22px 30px;
-  border-bottom: 1px solid #dce1e6;
+  gap: 12px;
+  padding: 12px 28px;
 }
-.hmi-app > header a {
-  text-decoration: none;
+.hmi-safety b {
+  color: #932f28;
+  display: block;
 }
-.hmi-app > header b {
-  font-size: 19px;
-}
-.hmi-app > header span {
+.hmi-safety span {
+  display: block;
   font-size: 12px;
-  margin-left: 14px;
-  color: #76808a;
+  margin-top: 4px;
 }
-/* 고정 폭 사이드바와 남은 폭을 사용하는 본문을 나란히 배치한다. */
+.hmi-safety button {
+  background: #a73e34;
+  color: #fff;
+  border: 0;
+  flex-shrink: 0;
+}
+.hmi-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--line);
+  background: #fffdf9;
+}
+.hmi-brand b {
+  font-size: 23px;
+  letter-spacing: 3px;
+}
+.hmi-brand span {
+  margin-left: 14px;
+  color: #85745c;
+}
+/* 노트북은 사이드바와 본문, 비교 영역은 두 열로 충분한 시각적 간격을 둔다. */
 .hmi-shell {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr);
 }
-/* 운영 위치와 선택 메뉴를 어두운 영역으로 묶는다. */
-.hmi-shell > aside {
-  background: #24303d;
-  color: #c1cbd6;
-  padding: 30px 18px;
-  min-height: calc(100vh - 69px);
+.hmi-shell aside {
+  padding: 32px 24px;
+  border-right: 1px solid var(--line);
+  background: #f0e9dd;
 }
-.hmi-shell > aside b {
-  font-size: 11px;
-  color: #9aabbd;
+.hmi-shell aside h2 {
+  font-size: 19px;
+  margin: 18px 0 32px;
 }
-.hmi-shell > aside p {
-  padding: 14px 12px;
+.hmi-shell nav {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 48px;
 }
-/* 현재 메뉴를 강조한다. 정적 화면에는 메뉴 전환 동작이 없다. */
-.hmi-shell .chosen {
-  background: #36485b;
-  color: #fff;
-  border-radius: 3px;
+.hmi-shell nav a {
+  border-radius: 10px;
+  padding: 14px 10px;
+  background: #ffffff85;
 }
-/* 고객 화면의 공통 main 폭 제한을 풀어 콘솔이 남은 영역을 채우게 한다. */
-.hmi-shell > main {
+.hmi-shell main {
+  padding: 32px;
+  min-width: 0;
   width: 100%;
-  max-width: none;
-  margin: 0;
-  padding: 28px;
+  max-width: 1500px;
+  margin: 0 auto;
 }
-/* 제목과 비활성 새로고침 버튼을 같은 행에 둔다. */
 .hmi-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 .hmi-title h1 {
-  font-size: 26px;
-  margin: 0;
+  font-size: 30px;
+  margin: 10px 0;
 }
-.hmi-title p {
-  font-size: 12px;
-  color: #7b8590;
+.hmi-app p {
+  line-height: 1.7;
 }
-/* 버튼 외곽은 승인 디자인을 유지한다. 비활성 표시는 공통 스타일을 따른다. */
-.hmi-title button {
-  border: 1px solid #ccd4dc;
-  background: white;
-  color: #465563;
-  border-radius: 5px;
-  padding: 10px 18px;
+.hmi-app small,
+.hmi-muted {
+  color: #827564;
 }
-/* 기존 배너 모양을 재사용해 정적 예시·미연결·데이터 미확정 상태를 명시한다. */
-.hmi-error {
-  background: #fff7e4;
-  border: 1px solid #ead8a9;
-  padding: 14px;
-  color: #8a6b2b;
-  margin-top: 14px;
+.hmi-banner {
+  padding: 15px 18px;
+  background: #eee9df;
+  border-radius: 12px;
+  margin: 20px 0;
+  line-height: 1.7;
 }
-/* 네 상태 카드를 같은 폭으로 배열한다. 표시 값은 실제 조회 결과가 아니다. */
+.hmi-banner.warning {
+  background: #fff0e7;
+  border: 1px solid #cf9586;
+  color: #8b352c;
+}
 .hmi-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
-  margin: 24px 0;
+  margin: 22px 0;
 }
-/* 제목·대표 값·보충 설명을 독립 카드로 묶는다. */
-.hmi-stats > div {
-  background: white;
-  border: 1px solid #dce1e6;
-  padding: 20px;
-  border-radius: 5px;
+.hmi-stats article,
+.hmi-card {
+  background: #fffefa;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 22px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
-.hmi-stats label {
-  display: block;
-  font-size: 12px;
-  color: #7c8792;
-}
-/* 대표 값을 크게 표시해 미연결 상태와 예시 건수를 쉽게 찾게 한다. */
 .hmi-stats strong {
   display: block;
   font-size: 23px;
-  margin: 16px 0 10px;
+  margin: 15px 0;
 }
-.hmi-stats small {
-  color: #7c8792;
-  font-size: 10px;
+.hmi-stats span {
+  font-size: 12px;
 }
-/* 예시 대기열과 로그를 나란히 배치한다. 좁은 화면에서는 한 열로 전환한다. */
 .hmi-panels {
   display: grid;
-  grid-template-columns: 1.1fr 1fr;
-  gap: 18px;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
 }
-/* 내용이 적어도 패널의 최소 높이를 유지하고 긴 내용의 폭 넘침을 막는다. */
-.hmi-panels section {
-  background: white;
-  border: 1px solid #dce1e6;
-  border-radius: 5px;
-  min-width: 0;
-  min-height: 260px;
+.hmi-card h2 {
+  font-size: 18px;
+  margin: 0 0 16px;
 }
-/* 패널 제목 행을 분리해 데이터가 예시라는 안내를 눈에 띄게 한다. */
-.hmi-panels h2 {
-  font-size: 14px;
-  padding: 18px;
-  margin: 0;
-  border-bottom: 1px solid #e7ebef;
+.hmi-card h3 {
+  font-size: 16px;
 }
-/* 주문 예시가 패널 폭을 사용하도록 셀 테두리를 합친다. */
-.hmi-panels table {
+.hmi-card progress {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
+  accent-color: #9a835f;
+  height: 14px;
+  margin-top: 14px;
 }
-/* 긴 주문 식별자도 셀 안에서 줄을 바꿔 다른 열을 밀어내지 않게 한다. */
-.hmi-panels th,
-.hmi-panels td {
+.hmi-orders {
+  display: grid;
+  max-height: 330px;
+  overflow: auto;
+  gap: 9px;
+}
+.hmi-orders button {
   text-align: left;
-  padding: 14px;
-  border-bottom: 1px solid #edf0f3;
-  overflow-wrap: anywhere;
+  display: grid;
+  gap: 7px;
+  width: 100%;
 }
-.hmi-panels th {
-  background: #f9fafb;
-  color: #7c8792;
-  font-weight: 400;
+.hmi-orders b {
+  font-size: 14px;
 }
-/* 빈 데이터 안내에 사용하는 기존 스타일을 보존한다. */
-.empty {
-  padding: 30px;
-  text-align: center;
-  color: #8b949d;
+.hmi-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
   font-size: 12px;
 }
-/* 시각·분류·메시지를 열로 나눠 로그를 읽는 순서를 유지한다. */
+.hmi-card dd {
+  margin: 0;
+  text-align: right;
+}
+.hmi-monitor,
+#logs {
+  margin-top: 22px;
+  scroll-margin-top: 125px;
+}
+.hmi-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.hmi-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0;
+}
+.hmi-comparison figure {
+  margin: 0;
+  min-width: 0;
+  background: #faf7f1;
+  border: 1px dashed #d6c9b4;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.hmi-comparison figcaption {
+  padding: 15px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.hmi-drawing {
+  display: block;
+  width: 100%;
+  height: 290px;
+  color: #9a7450;
+}
+.hmi-placeholder {
+  min-height: 290px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: #8c7f6e;
+  font-size: 13px;
+  line-height: 2;
+  padding: 18px;
+}
+/* 겹쳐 보기는 동일 원본 픽셀 좌표계를 사용한다. 실행 궤적이 없으면 안내만 겹친다. */
+.hmi-comparison.overlay {
+  grid-template-columns: 1fr;
+  position: relative;
+}
+.hmi-comparison.overlay figure:first-child {
+  grid-area: 1/1;
+}
+.hmi-comparison.overlay figure:last-child {
+  grid-area: 1/1;
+  background: transparent;
+}
+.hmi-comparison.overlay figure:last-child .hmi-drawing {
+  color: #347c77;
+  opacity: 0.8;
+}
+.hmi-comparison.overlay figure:first-child figcaption {
+  visibility: hidden;
+}
+.hmi-demo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+}
+.hmi-demo input {
+  width: 18px;
+  height: 18px;
+}
+.hmi-monitor input[type="range"] {
+  width: 100%;
+  accent-color: #9a835f;
+}
 .hmi-log {
   display: grid;
-  grid-template-columns: 1fr 50px 2fr;
-  gap: 10px;
-  padding: 14px;
-  font-size: 11px;
-  border-bottom: 1px solid #edf0f3;
-  overflow-wrap: anywhere;
+  grid-template-columns: 95px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  line-height: 1.6;
 }
-/* 실제 시각 요소를 사용할 때의 보조 색상이다. 현재 예시 시각은 일반 문구다. */
 .hmi-log time {
-  color: #8b949d;
+  color: #897c6b;
+  font-size: 12px;
 }
-/* 연결되지 않은 기능의 범위를 본문 아래 보충 설명으로 표시한다. */
 .hmi-shell footer {
-  font-size: 11px;
-  color: #7c8792;
+  font-size: 12px;
+  color: #877865;
+  padding: 24px 0;
   line-height: 1.8;
-  padding-top: 20px;
 }
-/* 태블릿에서는 사이드바를 숨기고 패널은 한 열, 상태 카드는 두 열로 전환한다. */
-@media (max-width: 1000px) {
+.hmi-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #302b2566;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.hmi-modal section {
+  max-width: 540px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  background: #fffdf9;
+  border-radius: 20px;
+  padding: 28px;
+}
+.hmi-modal button {
+  margin: 5px;
+}
+/* 태블릿은 메뉴를 본문 위로 옮기고 상태 카드를 두 열로 줄인다. */
+@media (max-width: 1100px) {
   .hmi-shell {
     grid-template-columns: 1fr;
   }
-  .hmi-shell > aside {
+  .hmi-shell aside {
     display: none;
-  }
-  .hmi-panels {
-    grid-template-columns: 1fr;
   }
   .hmi-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-/* 휴대폰에서는 바깥 여백과 카드 글자 크기를 줄여 내용이 잘리지 않게 한다. */
-@media (max-width: 500px) {
-  .hmi-shell > main {
-    padding: 16px;
+/* 휴대폰은 모든 비교·공정 패널을 한 열로 읽고 고정 안전 띠에 두 줄을 허용한다. */
+@media (max-width: 650px) {
+  .hmi-shell main {
+    padding: 18px 12px;
   }
-  .hmi-app > header {
-    padding: 18px;
+  .hmi-brand {
+    padding: 20px 14px;
+  }
+  .hmi-brand span {
+    display: none;
+  }
+  .hmi-safety {
+    padding: 12px;
+  }
+  .hmi-safety span {
+    font-size: 10px;
+    max-width: 220px;
   }
   .hmi-stats {
     gap: 10px;
   }
-  .hmi-stats > div {
-    padding: 14px;
+  .hmi-stats article,
+  .hmi-card {
+    padding: 16px;
+    border-radius: 14px;
   }
   .hmi-stats strong {
     font-size: 19px;
   }
+  .hmi-panels,
+  .hmi-comparison {
+    grid-template-columns: 1fr;
+  }
+  .hmi-log {
+    grid-template-columns: 75px minmax(0, 1fr);
+  }
+  .hmi-drawing,
+  .hmi-placeholder {
+    height: 240px;
+    min-height: 240px;
+  }
+}
+
+/* 실패·불명확 상태는 선택 주문과 무관하게 관측 로그에서 구분한다. */
+.hmi-log.error {
+  color: #97382e;
+}
+.hmi-log.warning {
+  color: #89621e;
+}
+
+/* 실제 수신 경로는 원본과 분리하며 같은 픽셀 좌표계에서 계획·가상 TCP만 겹친다. */
+.hmi-path-layers {
+  position: relative;
+  height: 290px;
+  color: #256eb4;
+}
+.hmi-path-layers > .hmi-drawing {
+  color: #256eb4;
+  height: 100%;
+}
+.hmi-measured-path {
+  position: absolute;
+  inset: 0;
+}
+.hmi-measured-path .hmi-drawing {
+  color: #20805b;
+  height: 100%;
+}
+.hmi-path-metrics {
+  color: #356858;
+  font-size: 12px;
+}
+@media (max-width: 650px) {
+  .hmi-path-layers {
+    height: 240px;
+  }
+}
+.hmi-comparison.overlay .hmi-path-layers > .hmi-drawing {
+  color: #256eb4;
+}
+.hmi-comparison.overlay .hmi-measured-path .hmi-drawing {
+  color: #20805b;
+}
+
+/* 작성 중 두 면을 주문 이력 위에 나란히 표시하고, 작은 화면에서는 높이를 줄인다. */
+.hmi-live {
+  margin-bottom: 20px;
+  border-color: #ccb991;
+}
+.hmi-live-faces {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.hmi-live-faces figure {
+  margin: 0;
+  padding: 10px;
+  background: #faf7f1;
+  border-radius: 12px;
+}
+.hmi-live-faces .hmi-drawing {
+  width: 100%;
+  height: 140px;
+}
+.hmi-live figcaption {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 주문과 별개인 연결 관측을 항상 표시하여 저장된 과거 상태를 실시간으로 오인하지 않게 한다. */
+.hmi-runtime {
+  margin-bottom: 20px;
+}
+.hmi-runtime p {
+  overflow-wrap: anywhere;
 }

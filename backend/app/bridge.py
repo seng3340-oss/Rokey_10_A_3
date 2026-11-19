@@ -30,6 +30,9 @@ class BridgeEvent(ContractModel):
         "rejected",
         "uncertain",
     ]
+    # 운전 모드는 브릿지 실행 설정이며 실제 장비 연결이나 안전 확인을 뜻하지 않는다.
+    execution_mode: Literal["unknown", "real", "simulation"] = "unknown"
+    current_command: Annotated[str, Field(max_length=128)] = ""
     phase: Annotated[str, Field(max_length=128)] = ""
     progress_pct: Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)] = 0.0
     message: Annotated[str, Field(max_length=2048)] = ""

@@ -8,12 +8,23 @@ const Kiosk = lazy(() =>
 const Hmi = lazy(() =>
   import("./components/Hmi").then((module) => ({ default: module.Hmi })),
 );
+const Workspace = lazy(() =>
+  import("./components/OperationWorkspace").then((module) => ({
+    default: module.OperationWorkspace,
+  })),
+);
 // HTML의 마운트 지점을 먼저 확인해 잘못된 페이지 구성에서는 명확하게 실패한다.
 const element = document.getElementById("root");
 if (!element) throw new Error("앱 루트 요소가 없습니다.");
 // 기존 경로 분기를 유지한다. 비동기 화면 로딩 중에는 접근 가능한 상태 문구를 표시한다.
 createRoot(element).render(
   <Suspense fallback={<p role="status">화면을 준비하고 있습니다.</p>}>
-    {location.pathname.startsWith("/hmi") ? <Hmi /> : <Kiosk />}
+    {["/workspace", "/paired"].includes(location.pathname) ? (
+      <Workspace />
+    ) : location.pathname.startsWith("/hmi") ? (
+      <Hmi />
+    ) : (
+      <Kiosk />
+    )}
   </Suspense>,
 );

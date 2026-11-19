@@ -75,8 +75,10 @@ def test_combined_order_prepares_once_draws_top_then_side_finishes_once():
 
         tm._gen_traj_client = SimpleNamespace(wait_for_service=lambda **_: True, call_async=convert)
         tm._wait_future = lambda *_: None
+        # HMI 표시 채널이 고장 나도 기존 운반·그리기·반납 순서를 바꾸지 않는다.
+        tm._plan_pub.publish = Mock(side_effect=RuntimeError("HMI 표시 채널 장애"))
         tm._run_plate_service = lambda client, phase: events.append('PREPARE' if client is tm._plate_prepare_client else 'FINISH') or True
-        tm._send_draw = lambda goal, _: remaining.append(goal.has_more_surfaces) or events.append(goal.drawing_surface) or True
+        tm._send_draw = lambda goal, _, *progress_context: remaining.append(goal.has_more_surfaces) or events.append(goal.drawing_surface) or True
         goal = Mock(request=request, is_cancel_requested=False)
         result = tm._execute_order(goal)
         assert result.success

@@ -204,7 +204,9 @@ class BridgeIntegrationTests(unittest.TestCase):
         headers = {"Idempotency-Key": "same-web-request"}
         receipt = self.http("/api/drawing", DRAWING, headers)
         self.start_nodes()
-        self.wait_state(receipt["order_id"], "completed")
+        detail = self.wait_state(receipt["order_id"], "completed")
+        self.assertEqual(detail["phase"], "COMPLETED")
+        self.assertEqual(detail["message"], "TM 작업 완료")
         self.assertEqual(self.http("/api/drawing", DRAWING, headers), receipt)
         self.assertEqual(len(self.tm.goals), 1)
         goal = self.tm.goals[0]
@@ -229,7 +231,9 @@ class BridgeIntegrationTests(unittest.TestCase):
         """확정된 Action 실패는 완료와 구분한다."""
         receipt = self.http("/api/drawing", DRAWING)
         self.start_nodes(success=False)
-        self.wait_state(receipt["order_id"], "failed")
+        detail = self.wait_state(receipt["order_id"], "failed")
+        self.assertEqual(detail["phase"], "FAILED")
+        self.assertEqual(detail["error_code"], "TEST_ABORT")
         self.assertEqual(len(self.tm.goals), 1)
 
     def test_result_timeout_keeps_lock_and_never_resends(self):

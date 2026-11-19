@@ -1,98 +1,52 @@
-# 그림 접수 서버
+# 그림 접수·TM 연결·HMI 서버
 
-현재 기준은 **지름100mm·높이80mm 원통, 원본 픽셀 입력, 윗면 중심**입니다.
-[최신 통신·설정 규격](../docs/CYLINDER_PIXEL_CONTRACT.md)을 우선합니다. 아래 원뿔대·이전 치수 설명은 과거 테스트 기록입니다.
+현재 기준은 지름100mm·높이80mm 원통, 원본 픽셀 입력, 케이크 윗면 중심입니다.
+[운용 HMI 실행 안내](../docs/HMI_OPERATION.md)와 [좌표 계약](../docs/CYLINDER_PIXEL_CONTRACT.md)을 참고하세요.
 
-
-FastAPI로 PM 형식의 그림을 검증하고 SQLite에 저장합니다.
-접수 성공은 서버 저장 성공입니다. 별도 ROS 브릿지용 내부 HTTP 연결을 제공합니다. HMI API·로봇 제어는 포함하지 않습니다.
+FastAPI가 고객 그림을 검증·저장하고, 인증된 ROS 브릿지가 주문을 TM에 전달합니다.
+HMI는 주문·TM 상태·계획 경로·연결 관측을 읽습니다. 웹 서버 자체는 ROS 드라이버나 장비를 시작하지 않습니다.
+접수201은 저장 성공이며 로봇 제작 완료가 아닙니다.
 
 ## 실행
 
-Python 3.12 기준입니다.
-
 ```bash
-cd ~/ws_cobot_pjt/backend
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 5000
+export CAKE_BRIDGE_TOKEN='REPLACE_WITH_YOUR_LOCAL_SECRET'
+# 프론트엔드 빌드 결과도 함께 제공할 경우 절대 경로를 지정합니다.
+export CAKE_FRONTEND_DIST='/absolute/project/path/frontend/dist'
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 5000
 ```
 
-별도 터미널에서 frontend의 `npm run dev`를 실행합니다.
-태블릿은 노트북의 Wi-Fi 주소 `http://노트북-IP:8080`에 접속합니다.
-Vite가 `/api`를 노트북 내부 `127.0.0.1:5000`으로 전달합니다.
-이 서버는 로봇 브링업이나 모션을 실행하지 않습니다.
+화면은 `/`, `/hmi`, `/workspace`이며 API 문서는 `/docs`입니다. 개발 Vite의 `/api` 프록시도 유지합니다.
+DB는 기본 `backend/data/orders.sqlite3`이며 `CAKE_DATABASE_PATH`로 변경합니다.
+토큰·DB·WAL/SHM 파일은 Git에 올리지 않습니다. 기존 DB에는 표시용 테이블을 추가하며 기존 주문은 보존합니다.
 
-API 문서: http://127.0.0.1:5000/docs
+## 입력과 상태
 
-## 파일
+`POST /api/drawing`: canvas_width, canvas_height, drawing_surface(top/side), strokes(stroke_id, points(x,y)).
+캔버스1~8192px,1~100획, 획당2~5000점, 전체20,000점 이하, 본문2MiB 이하입니다.
+숫자/유한수/캔버스 경계/연속된 획 ID를 검사합니다. 실제 작업 표면·경로 생성은 DP가 담당합니다.
 
-- `app/main.py`: 앱 생성, 요청 크기 제한, 오류 응답, 서버 확인
-- `app/schemas.py`: PM 요청/응답과 좌표 검증
-- `app/drawings.py`: 그림 접수 API
-- `app/orders.py`: 주문 번호 생성, 저장, 목록/상세 조회
-- `app/database.py`: SQLite 연결과 초기 테이블
-- `tests/test_drawings.py`: 잘못된 입력, 영구 저장, 동시 주문, 조회 검사
+활성 주문이 있으면409로 새 접수를 제한합니다. 같은 Idempotency-Key와 본문은 같은 주문을 반환합니다.
+인수 후 전송 여부가 불명확한 주문은 자동 재전송하지 않습니다. 기존 미확정 기록은 uncertain으로 보존합니다.
 
-FastAPI는 schemas 검증에 성공한 요청만 drawings 함수에 전달합니다.
-그 후 orders가 database를 통해 저장하고 접수 응답을 반환합니다.
+## 읽기·내부 연결
 
-## API
+- `/api/orders`, `/api/orders/{id}`: 원본·공정·진행률·오류.
+- `/api/orders/{id}/monitor`: 주문별 실행 설정·현재 명령·오류·시간.
+- `/api/monitor`: 브릿지/TM 연결 관측과 최신성. 물리 안전/장비 연결과 구분합니다.
+- `/api/orders/{id}/plan`: TM이 받은 실제 DP 결과의 표시용 계획. 실측 경로가 아닙니다.
+- `/api/health`: 웹 상태와 최신 TM 서버 발견 여부. 실제 장비 연결은 확인하지 않습니다.
+- `/internal/bridge/*`: 토큰 인증된 인수·상태·계획·heartbeat·수동 확인. 공개 화면은 GET만 사용합니다.
 
-`POST /api/drawing`은 PM의 canvas_width, canvas_height, drawing_surface, strokes를 그대로 받습니다.
-좌표는 원본 픽셀 값이며 로봇 좌표로 변환하지 않습니다. 한 요청은 한 면입니다.
+8초 이상 갱신되지 않은 관측은 최신 연결로 표시하지 않습니다. 물리 E-stop과 실제 TCP/잉크 측정은 별도 인터페이스가 필요합니다.
 
-```json
-{
-  "canvas_width": 1024,
-  "canvas_height": 768,
-  "drawing_surface": "top",
-  "strokes": [
-    {"stroke_id": 0, "points": [{"x": 500.5, "y": 350.0}, {"x": 520.0, "y": 360.0}]}
-  ]
-}
-```
-
-저장 성공은 HTTP 201과 `{"order_id":"ORD-20261114-001","status":"received"}`로 응답합니다.
-이것은 프론트와 맞춘 서버 접수 응답이며 로봇 접수·제작 완료와 다릅니다.
-
-- `GET /api/orders?limit=20&offset=0`: 최신 순 목록. items, total, limit, offset 반환. 좌표 배열 제외.
-- `GET /api/orders/{order_id}`: 원본 drawing과 상세. robot_dispatched는 미전송 false / 수락 확인 true / 불명확 null입니다. 없는 주문은 404.
-- `GET /api/health`: 서버 상태. ros_connected는 false.
-
-HMI API는 없습니다. 브릿지는 토큰 인증된 `/internal/bridge` 인수·상태 기록 API를 사용합니다.
-주문 목록·상세는 향후 연결용이며 현재 정적 HMI가 사용하지 않습니다.
-두 면을 한 주문으로 묶는 형식은 팀에서 확정해야 합니다.
-
-## 저장·검증
-
-기본 DB는 backend/data/orders.sqlite3이며 앱 시작 시 준비합니다.
-CAKE_DATABASE_PATH 환경변수로 다른 경로를 설정할 수 있습니다.
-주문과 날짜별 일련번호는 같은 트랜잭션으로 저장하여 동시 요청·재시작 시 번호 중복을 막습니다.
-DB를 삭제하면 주문과 번호 기록도 지워집니다. DB와 WAL 파일은 Git에 올리지 않습니다.
-
-제한: 캔버스 1~8192px, 그림 1~100획, 획당 2~5000점, 전체 최대 20,000점, 본문 최대 2MiB.
-엄격한 숫자 타입·유한수·캔버스 경계·0부터 연속된 획 ID를 검사합니다.
-실제 원형/곡면 작업 영역, mm 치수, TCP 자세와 로봇 도달 가능성은 아직 검사하지 않습니다.
-검증 오류 422, 본문 초과 413, 저장소 오류 503으로 응답합니다.
-
-활성 주문이 있으면 HTTP 409로 새 접수를 거부합니다. 프론트가 보낸 `Idempotency-Key`와 본문이 같으면 기존 주문 번호를 반환합니다.
-다른 본문으로 같은 키를 재사용하면 409입니다. 키 없이 종료 후 재전송하면 새 주문으로 구분됩니다.
-기존 DB 주문은 실행 여부가 불명확해 확인 대기로 보존합니다. 상세 상태·내부 API·수동 확인은 [브릿지 안내](../docs/BRIDGE_TEST.md)를 참고합니다.
-
-## 테스트
+## 검사
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 ```
 
-ROS를 source한 셸의 pytest 플러그인이 섞이지 않도록 자동 로드를 끕니다.
-테스트별 임시 DB를 사용하므로 개발 주문을 변경하지 않습니다.
-
-## 브릿지 연결 설정
-
-백엔드와 ROS 브릿지 터미널에 같은 `CAKE_BRIDGE_TOKEN`을 export합니다.
-`config/test_cake.json`은 실측 치수이며 주문 접수 시 사본을 저장합니다.
-`order_execution`은 상태·인수 토큰·요청 키를, `bridge_events`는 이벤트 중복 처리를 기록합니다.
-기존 `orders`와 날짜별 주문 번호는 보존합니다.
+각 검사는 임시 DB를 사용하며 장비를 시작하지 않습니다. ROS 프로토콜까지의 검사는 운용 안내의 장비 없는 도메인231 절차를 사용합니다.
