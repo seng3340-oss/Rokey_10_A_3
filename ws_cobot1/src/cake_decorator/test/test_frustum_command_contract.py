@@ -249,3 +249,59 @@ def test_released_defaults_match_verified_seventeen_degrees_and_one_mm_clearance
     finally:
         value.destroy_node()
         rclpy.try_shutdown()
+
+
+def _yaw_path_commands(start_yaw, end_yaw):
+    """BASE Z 회전량(rz1)만 바뀌는 옆면 명령. #2 전환점 뒤 공중 스플라인 한 바퀴를 흉내 낸다."""
+    from dataclasses import replace
+    from cake_decorator.drawing_motion import DsrPos, MotionCommand, Phase
+
+    def pose(yaw):
+        return DsrPos(400., 0., 250., yaw, 90., 0.)
+
+    base = MotionCommand(MotionType.MOVE_LINE, pose(start_yaw), 30., 100., Phase.APPROACH, False)
+    step = 4.0 if end_yaw > start_yaw else -4.0
+    count = int(abs(end_yaw - start_yaw) / 4.0)
+    spline = [pose(start_yaw + step * i) for i in range(1, count + 1)]
+    return [base, base, base, replace(base, pos=spline[-1], spline=spline)]
+
+
+def _wrapped_j6_inverse(target):
+    """제어기 IK처럼 J6를 -180~180 표현으로만 돌려준다. 펜 BASE 회전과 J6는 반대 방향이다."""
+    joint6 = (-target.rz1 + 180.) % 360. - 180.
+    return [0., 0., 90., 0., 90., joint6]
+
+
+def test_side_start_j6_branch_fits_whole_path_when_first_stroke_is_right_end():
+    """띠 오른쪽 끝에서 시작해 원주를 거꾸로 한 바퀴 도는 경로도 J6 한계 안에서 시작한다."""
+    from cake_decorator.side_pose_selection import choose_side_start_joints
+
+    # 오른쪽 끝(348도)에서 왼쪽 끝(0도)으로 공중 이동. 가까운 해(J6=+12)로 시작하면
+    # J6가 +360까지 감겨 실물 로그처럼 한계를 넘는다.
+    commands = _yaw_path_commands(348., 0.)
+    joints, (low, high) = choose_side_start_joints(
+        commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse,
+    )
+    assert joints[5] == pytest.approx(-348.)
+    assert low == pytest.approx(-348.) and high == pytest.approx(0., abs=1e-9)
+
+
+def test_side_start_j6_branch_keeps_nearest_solution_when_it_fits():
+    """왼쪽 끝에서 시작하면 기존처럼 덜 도는 J6 해를 유지한다."""
+    from cake_decorator.side_pose_selection import choose_side_start_joints
+
+    commands = _yaw_path_commands(0., 340.)
+    joints, (low, high) = choose_side_start_joints(
+        commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse,
+    )
+    assert joints[5] == pytest.approx(0.)
+    assert low == pytest.approx(-340.) and high == pytest.approx(0., abs=1e-9)
+
+
+def test_side_start_j6_branch_rejects_rotation_beyond_joint_range():
+    """어느 분기로도 범위를 넘으면 이동 전에 거부한다."""
+    from cake_decorator.side_pose_selection import choose_side_start_joints
+
+    commands = _yaw_path_commands(0., 720.)
+    with pytest.raises(RuntimeError, match="J6 회전량"):
+        choose_side_start_joints(commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse)

@@ -494,12 +494,58 @@ class DoosanRobotClient:
 
     def select_reachable_side_commands(self, commands, cancelled):
         """이동 전에 제어기의 IK/FK를 조회해 현재 관절 해에서 가능한 펜 자세를 찾는다."""
-        import numpy as np
-        from scipy.spatial.transform import Rotation
         from .side_pose_selection import select_side_roll
 
         self._side_validated_solution = None
-        joints = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        joints, solution, inverse = self._side_inverse()
+        self._logger.info("옆면 도달 가능 자세 검사 시작. 아직 이동하지 않습니다.")
+        selected = select_side_roll(commands, list(joints.pos), inverse, cancelled, self._logger.info)
+        after = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        if not after or not after.success or max(abs(a-b) for a,b in zip(joints.pos, after.pos)) > 0.1:
+            raise RuntimeError("도달 검사 중 로봇 자세가 바뀌었습니다. 다시 영점을 준비하세요.")
+        self._side_validated_solution = int(solution.sol_space)
+        return selected
+
+    def move_side_start(self, commands, cancelled=lambda: False) -> bool:
+        """45도 펜 옆면의 자세 전환점(명령 #2)으로 J6 회전 방향을 지정해 관절 이동한다.
+
+        호출 시점: RE 드로잉 루프의 i == 2(펜이 닿지 않은 공중 전환점).
+        movejx는 J6의 ±360 해 중 제어기가 가까운 쪽을 고른다. 첫 획이 띠 오른쪽 끝이면
+        그 해가 이후 공중 이동(원주 역방향 한 바퀴)에서 J6 한계를 넘게 만든다.
+        그래서 남은 경로 전체의 J6 누적 변화를 IK로 미리 계산하고, 범위 안에 드는
+        J6 분기를 명시한 movej로 이동한다. 위치·자세(FK)는 movejx 목표와 같다.
+        반환: 이동과 TCP 도달 확인이 모두 성공하면 True. 검사 실패 시 이동하지 않는다.
+        """
+        from .side_pose_selection import choose_side_start_joints
+
+        try:
+            joints, _, inverse = self._side_inverse()
+            target, _ = choose_side_start_joints(
+                commands,
+                list(joints.pos),
+                inverse,
+                cancelled=cancelled,
+                report=self._logger.info,
+            )
+        except (RuntimeError, ValueError) as error:
+            self._logger.error(f"옆면 J6 분기 선택 실패: {error}")
+            return False
+        # 기존 movejx 자세 전환과 같은 관절 속도·가속도를 유지한다.
+        return self.move_joint(target, speed_deg_s=10.0, acc_deg_s2=20.0) and self.verify_pose(
+            commands[2].pos.to_list()
+        )
+
+    def _side_inverse(self):
+        """현재 TCP 기준 목표를 현재 팔꿈치 해(sol_space)의 관절각으로 푸는 함수를 만든다.
+
+        반환: (현재 관절 응답, solution space 응답, inverse(DsrPos) → 관절6개 | None).
+        드라이버가 FK를 플랜지 기준으로 주는 경우 TCP 목표를 플랜지 목표로 바꿔 푼다.
+        IK 결과는 FK 왕복으로 다시 확인한다. 로봇을 움직이지 않으며 90초 제한이 있다.
+        """
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+
+        joints =self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
         pose = self._call("current_pose", GetCurrentPosx.Request(ref=0), timeout=3)
         flange = self._call("flange", GetCurrentToolFlangePosx.Request(ref=0), timeout=3)
         if not (joints and joints.success and pose and pose.success and pose.task_pos_info and flange and flange.success):
@@ -549,13 +595,7 @@ class DoosanRobotClient:
                 return None
             return values
 
-        self._logger.info("옆면 도달 가능 자세 검사 시작. 아직 이동하지 않습니다.")
-        selected = select_side_roll(commands, list(joints.pos), inverse, cancelled, self._logger.info)
-        after = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
-        if not after or not after.success or max(abs(a-b) for a,b in zip(joints.pos, after.pos)) > 0.1:
-            raise RuntimeError("도달 검사 중 로봇 자세가 바뀌었습니다. 다시 영점을 준비하세요.")
-        self._side_validated_solution = int(solution.sol_space)
-        return selected
+        return joints, solution, inverse
 
 
     def execute_drawing_command(self, command) -> bool:
