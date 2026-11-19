@@ -77,8 +77,8 @@ def test_runtime_enables_surface_specific_executor_and_preserves_yaml(config_fil
     executor = runtime["robot_executor_node"]["ros__parameters"]
     assert dp["side_pen_45"] is True
     assert dp["side_y_inset_mm"] == 1.0
-    assert dp["side_drawing_speed"] == 30.0
-    assert dp["travel_speed"] == 100.0
+    assert dp["side_drawing_speed"] == 40.0
+    assert dp["travel_speed"] == 120.0
     assert dp["side_diameter_allowance_mm"] == 9.25
     assert executor["integrated_side_cycle"] is True
     assert executor["side_pen_45"] is False
@@ -326,3 +326,13 @@ def test_start_real_shell_enables_integrated_workflow_without_prompt(tmp_path):
         "--check", "--host", "192.0.2.1",
     ]
     assert payload["pen"] == payload["plate"] == "1"
+
+
+def test_top_calibration_does_not_move_verified_side_center(config_files):
+    """윗면 십자가 보정은 옆면 TCP 기준 중심과 분리해 전달한다."""
+    real, workspace = config_files
+    config = json.loads(real.read_text())
+    config['top_cake_center_xy_mm'] = [400.5243225097656, -53.00932998657227]
+    real.write_text(json.dumps(config))
+    assert launcher.load_config_cake_reference(real, workspace)[:2] == config['top_cake_center_xy_mm']
+    assert launcher.load_side_cake_reference(real)[:2] == config['side_cake_center_xy_mm']

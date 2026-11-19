@@ -113,7 +113,7 @@ def test_side_45_does_not_stack_vertical_pen_virtual_approach():
     robot._call.return_value = SimpleNamespace(
         success=True, task_pos_info=[SimpleNamespace(data=[399., -55., 270., 0., 180., 0.])],
     )
-    owner = SimpleNamespace(_param=lambda _: True, _robot=robot, get_logger=Mock())
+    owner = SimpleNamespace(_param=lambda key: key != 'integrated_side_cycle', _robot=robot, get_logger=Mock())
     command = SimpleNamespace(pen_down=False, pos=DsrPos(399., -55., 290., 0., 180., 0.))
     assert RobotExecutorNode._execute_motion_command(owner, command, 0)
     robot.prepare_virtual_approach.assert_not_called()

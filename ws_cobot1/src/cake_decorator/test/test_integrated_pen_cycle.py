@@ -429,11 +429,11 @@ def test_plate_resets_tcp_before_callback_and_rejects_reset_failure(monkeypatch)
 
 
 def test_top_return_position_skips_only_redundant_side_joint_approach():
-    """TOP 반납 상공이 실측으로 확인된 경우에만 중복 관절 자세를 생략한다."""
+    """TOP 반납 위치가 실측으로 확인된 경우에만 중복 관절 자세를 생략한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
     rack = rack_parameters()
     robot = ServiceRobot()
-    robot.flange = list(rack['pen_drop_after_pose'])
+    robot.flange = list(rack['pen_drop_pose'])
     cycle = IntegratedPenCycle(robot, rack.__getitem__)
     cycle.pick_side(reuse_rack_position=True)
     assert not any(kind == 'joint' for kind, _ in robot.events)
@@ -442,20 +442,21 @@ def test_top_return_position_skips_only_redundant_side_joint_approach():
 
 
 def test_moved_rack_position_keeps_original_side_joint_approach():
-    """반납 후 위치가 달라졌으면 원래 상공 경유를 유지한다."""
+    """반납 위치가 달라졌으면 제자리 재파지를 중단한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
     rack = rack_parameters()
     robot = ServiceRobot()
-    robot.flange = list(rack['pen_drop_after_pose'])
+    robot.flange = list(rack['pen_drop_pose'])
     robot.flange[0] += 10.
     cycle = IntegratedPenCycle(robot, rack.__getitem__)
-    cycle.pick_side(reuse_rack_position=True)
-    assert any(kind == 'joint' for kind, _ in robot.events)
+    with pytest.raises(RuntimeError, match='위치 불일치'):
+        cycle.pick_side(reuse_rack_position=True)
+    assert not any(kind == 'joint' for kind, _ in robot.events)
 
 
 @pytest.mark.parametrize('continuing', [False, True])
 def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
-    """TOP 이후 재파지는 기존 속도, 최초 SIDE 파지만 닫기 전 구간을 가속한다."""
+    """TOP 이후 재파지에도 펜 전용 인출·거치대 속도를 적용한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
     rack = rack_parameters()
     robot = ServiceRobot()
@@ -463,12 +464,12 @@ def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
     cycle = IntegratedPenCycle(robot, rack.__getitem__)
     cycle.pick_side(preserve_speed=continuing)
     speeds = [call.kwargs['speed_mm_s'] for call in robot.move_line.call_args_list]
-    assert speeds == ([50., 50., 50., 50.] if continuing else [75., 75., 50., 50.])
+    assert speeds == [80., 100., 100., 100.]
 
 
 @pytest.mark.parametrize('has_more', [False, True])
 def test_top_intermediate_return_keeps_speed_and_final_return_is_faster(monkeypatch, has_more):
-    """마지막 획 전 중간 반납과 주문 최종 반납의 속도를 구분한다."""
+    """중간 반납은 제자리에서 멈추고 최종 반납만 상공으로 후퇴한다."""
     from cake_decorator.drawing_motion import TaskState
     executor = make_executor(monkeypatch, integrated_side_cycle=True)
     executor._state = TaskState.DRAWING
@@ -477,7 +478,26 @@ def test_top_intermediate_return_keeps_speed_and_final_return_is_faster(monkeypa
     handle = draw_handle('TOP')
     handle.request.has_more_surfaces = has_more
     assert executor._do_returning_tool(handle, handle.request)
-    assert executor._robot.move_joint.call_args.kwargs['speed_deg_s'] == (30. if has_more else 45.)
+    assert executor._robot.move_joint.call_args.kwargs['speed_deg_s'] == 45.
     assert [call.kwargs['speed_mm_s'] for call in executor._robot.move_line.call_args_list] == (
-        [30., 50.] if has_more else [45., 75.]
+        [80.] if has_more else [80., 100.]
     )
+
+
+def test_top_to_side_regrips_without_return_lift_or_joint_approach(monkeypatch):
+    """실제 TOP 반납 후 SIDE 파지를 연속 호출해 상공 왕복이 재발하지 않게 한다."""
+    executor = make_executor(monkeypatch, integrated_side_cycle=True)
+    top = draw_handle('TOP')
+    top.request.has_more_surfaces = True
+    assert executor._execute_draw(top).success
+    rack = rack_parameters()
+    np.testing.assert_allclose(executor._robot.flange, rack['pen_drop_pose'], atol=1e-8)
+    boundary = len(executor._robot.events)
+    side = draw_handle('SIDE')
+    assert executor._execute_draw(side).success
+    events = executor._robot.events[boundary:]
+    close_index = next(i for i, (kind, _) in enumerate(events) if kind == 'close')
+    assert not any(kind == 'joint' for kind, _ in events[:close_index])
+    # 닫기 전 직선 목표는 반납 위치와 기울임 파지뿐이며 상공 후퇴는 없다.
+    poses = [value[1] for kind, value in events[:close_index] if kind == 'line']
+    assert len(poses) == 2

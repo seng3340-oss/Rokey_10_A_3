@@ -474,8 +474,8 @@ class DoosanRobotClient:
         )
         request = MoveJointx.Request(
             pos=target.to_list(),
-            vel=10.0,
-            acc=20.0,
+            vel=30.0,
+            acc=60.0,
             sol=solution.sol_space,
             ref=DR_BASE,
             mode=DR_MV_MOD_ABS,

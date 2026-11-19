@@ -103,10 +103,10 @@ def test_two_letters_travel_outside_frustum(node):
 
 def test_top_taught_orientation_is_separate_from_cake_yaw(node):
     """케이크를90도 회전해도 영점 펜 자세는 그대로이고 글자 위치만 회전한다."""
-    response, _ = convert(node, [[(512,384),(832,384)]], surface="TOP", yaw=math.pi/2)
+    response, _ = convert(node, [[(512,384),(800,384)]], surface="TOP", yaw=math.pi/2)
     contact = [wp for wp in response.waypoints_3d if wp.pen_down]
     assert contact[-1].pose.position.x == pytest.approx(0.4)
-    assert contact[-1].pose.position.y == pytest.approx(0.05675)
+    assert contact[-1].pose.position.y == pytest.approx(0.051075)
     assert all(wp.pose.orientation.y == pytest.approx(1.0) for wp in response.waypoints_3d)
 
 

@@ -7,6 +7,8 @@ export const CAKE_DIMENSIONS = Object.freeze({
   heightMm: measuredCake.height_mm,
   // 스테이지와 굵은 펜 몸체의 간섭 때문에 옆면 바닥 10mm는 사용하지 않는다.
   sideBottomClearanceMm: 10,
+  // 윗면 가장자리 5mm는 펜 입력을 제한한다. 좌표 축척은 그대로 둔다.
+  topEdgeClearanceMm: 5,
   boardWidthMm: measuredCake.board_width_mm,
   boardDepthMm: measuredCake.board_depth_mm,
   boardThicknessMm: measuredCake.board_thickness_mm,
@@ -39,6 +41,7 @@ export const DRAWING_LAYOUT = Object.freeze({
     centerX: 512,
     centerY: 384,
     radius: 320,
+    drawableRadius: 320 - (5 * 640) / CAKE_DIMENSIONS.topDiameterMm,
   },
   side: {
     x: (canvasWidth - sideWidth) / 2,

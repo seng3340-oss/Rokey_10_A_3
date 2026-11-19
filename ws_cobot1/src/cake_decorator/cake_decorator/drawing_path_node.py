@@ -234,10 +234,9 @@ class DrawingPathNode(Node):
             ):
                 raise ValueError("원본 픽셀이 캔버스 범위를 벗어났습니다.")
             raw_mm = [converter(x, y, *args) for x, y in pts_px]
-            if surface == "TOP" and any(
-                math.hypot(x, y) > cake.r_top + 1e-4 for x, y in raw_mm
-            ):
-                raise ValueError("점이 윗면 원형 영역 밖입니다.")
+            if surface == "TOP":
+                from .drawing_geometry import validate_top_drawing_margin
+                validate_top_drawing_margin(raw_mm, cake.r_top)
             if surface == "SIDE":
                 from .drawing_geometry import validate_side_drawing_height
 

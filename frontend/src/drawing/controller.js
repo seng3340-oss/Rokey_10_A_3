@@ -63,9 +63,9 @@ export function mountDrawing() {
     // 옆면 좌우는 원통을 펼친 이음매라 실제 테두리가 없다. 여백을 두면 끝까지 그은 선도
     // 로봇에서는 이음매에 약 4mm 빈틈이 생기므로 좌우는 띠 경계까지 허용한다.
     return surface === "top"
-      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.radius - 5
-      : p.x >= side.x &&
-          p.x <= side.x + side.width &&
+      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.drawableRadius - 3
+      : p.x >= side.x + 5 &&
+          p.x <= side.x + side.width - 5 &&
           p.y >= side.y + 5 &&
           p.y <= side.drawableBottomY - 5;
   }
@@ -150,8 +150,15 @@ export function mountDrawing() {
     if (surface === "top")
       ctx.arc(region.centerX, region.centerY, region.radius, 0, 2 * Math.PI);
     else ctx.rect(region.x, region.y, region.width, region.height);
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = surface === "top" ? "#e8e4df" : "#fff";
     ctx.fill();
+    if (surface === "top") {
+      // 외곽 5mm는 회색, 그릴 수 있는 안쪽은 흰색으로 표시한다. 그림을 축소하지 않는다.
+      ctx.beginPath();
+      ctx.arc(region.centerX, region.centerY, region.drawableRadius, 0, 2 * Math.PI);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+    }
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#d7c8b6";
     ctx.setLineDash([7, 8]);
