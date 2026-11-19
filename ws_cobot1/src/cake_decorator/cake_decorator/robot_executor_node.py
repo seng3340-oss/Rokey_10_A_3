@@ -682,8 +682,12 @@ class RobotExecutorNode(Node):
                 result.completed_strokes = 0
                 goal_handle.abort()
                 return result
-            # 펜을 집은 뒤 케이크 중심(상공 → 중심 → 상공)으로 이동하고 드로잉을 시작한다.
-            if not self._go_to_cake_center(goal_handle, request):
+            # 펜을 집은 뒤 케이크 중심 상공 → 첫 획 시작점 상공으로 이동한다.
+            # 하강과 펜 내림은 아래 드로잉 명령(접근점 → PEN_DOWN)이 수행한다.
+            if not (
+                self._go_to_cake_center(goal_handle, request)
+                and self._move_above_first_stroke(plan)
+            ):
                 self._state = TaskState.IDLE
                 result.success = False
                 result.error_code = 'MOVING_TO_CAKE_CENTER_FAILED'
@@ -842,34 +846,56 @@ class RobotExecutorNode(Node):
         return True
 
     def _go_to_cake_center(self, goal_handle, task_goal) -> bool:
-        """케이크 중심으로 이동: 상공 → 케이크 중심 → 상공"""
-        # TaskState에 MOVING_TO_CAKE_CENTER 상태가 없어 전이 검사는 하지 않는다.
-        # 펜 집기(GRASPING_TOOL) 상태를 유지한 채 이동만 수행한다.
+        """케이크 중심 상공(cake_center_approach_pose, 관절)으로만 이동한다.
 
+        호출 시점: 펜을 집은 뒤 드로잉 직전, 그리고 전체 상태 머신의 드로잉 전후.
+        케이크로 하강하지 않는다. 실제 하강은 드로잉 경로가 맡는다.
+          1) _move_above_first_stroke가 이 상공 높이 그대로 첫 획 시작점 위로 수평 이동한다.
+          2) 드로잉 계획의 첫 명령들이 수직으로 내려가 상면(cake_center_pose의 Z)에 펜을 댄다.
+        TaskState에 MOVING_TO_CAKE_CENTER 상태가 없어 전이 검사는 하지 않는다.
+        """
         approach = self._param('cake_center_approach_pose')
-        center = self._param('cake_center_pose')
 
-        # 1. 케이크 중심 상공으로 이동 (관절)
+        # approach는 관절 각도라서 move_line이 아닌 move_joint로 이동한다.
         self.get_logger().info('케이크 중심 상공 이동')
         if not self._robot.move_joint(approach):
             self._fail('케이크 중심 상공 이동 실패')
             return False
 
-        # 2. 케이크 중심으로 하강 (직선)
-        self.get_logger().info('케이크 중심으로 하강')
-        if not self._robot.move_line(DsrPos(*center), speed_mm_s=30.0):
-            self._fail('케이크 중심 하강 실패')
-            return False
+        self.get_logger().info('케이크 중심 상공 도착')
+        return True
 
-        # 3. 케이크 중심 상공으로 올리기 (관절)
-        # approach는 관절 각도라서 작업 좌표용 move_line에 넣으면 엉뚱한 위치(x=-8mm 등)로
-        # 직선 이동하게 된다. 1단계와 같이 move_joint로 복귀한다.
-        self.get_logger().info('케이크 중심 상공으로 올리기')
-        if not self._robot.move_joint(approach):
-            self._fail('케이크 중심 상공으로 올리기 실패')
-            return False
+    def _move_above_first_stroke(self, plan) -> bool:
+        """케이크 중심 상공 높이를 유지한 채 첫 획 시작점 바로 위로 직선 이동한다.
 
-        self.get_logger().info('케이크 중심 이동 완료')
+        호출 시점: _go_to_cake_center 직후, 드로잉 명령 실행 전.
+        입력: plan.commands[0]은 DP가 만든 첫 접근점(시작점 + approach_height, 펜 올림)이다.
+        동작: 현재 TCP의 Z(상공 높이)와 첫 접근점의 XY·자세로 move_line한다.
+          이후 첫 명령이 그 자리에서 수직으로 내려가고, 다음 PEN_DOWN 명령이 상면에 닿는다.
+          그래서 펜은 '중심 상공 → 시작점 상공 → 수직 하강' 순서로 움직이고,
+          케이크 위를 비스듬히 가로지르며 내려가지 않는다.
+        반환: 이동 성공 여부. 현재 TCP를 읽지 못하면 이동하지 않고 실패한다.
+        """
+        first = plan.commands[0].pos
+        current = self._robot.current_pose()
+        if current is None:
+            self._fail('현재 TCP를 읽지 못해 첫 획 상공으로 이동하지 않습니다.')
+            return False
+        # 상공이 첫 접근점보다 낮으면 수평 이동 중 케이크와 부딪힐 수 있으므로 멈춘다.
+        if current[2] <= first.z:
+            self._fail(
+                f'케이크 중심 상공(Z={current[2]:.1f})이 첫 접근점'
+                f'(Z={first.z:.1f})보다 낮습니다. cake_center_approach_pose를 확인하세요.'
+            )
+            return False
+        above = DsrPos(first.x, first.y, current[2], first.rz1, first.ry, first.rz2)
+        self.get_logger().info(
+            f'첫 획 시작점 상공 이동: {above.to_list()} '
+            f'(이후 Z {current[2]:.1f} → {first.z:.1f} 수직 하강)'
+        )
+        if not self._robot.move_line(above, speed_mm_s=50.0):
+            self._fail('첫 획 시작점 상공 이동 실패')
+            return False
         return True
 
     def _do_returning_tool(self, goal_handle, task_goal) -> bool:

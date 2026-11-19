@@ -22,6 +22,10 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 POSE_SERVICE = "/dsr01/dsr_controller2/aux_control/get_current_posx"
+# ROS 노드 파라미터 파일. 드로잉 기준 자세(cake_center_pose)를 여기서 읽는다.
+WORKSPACE_CONFIG = ROOT / "ws_cobot1/src/cake_decorator/config/workspace_config.yaml"
+# 실물 케이크 상면 위치·YES 펜촉 TCP 설정 파일(사용자가 실측값을 관리).
+REAL_ROBOT_CONFIG = ROOT / "config/real_robot.json"
 
 
 def configure_discovery(mode, env):
@@ -158,6 +162,61 @@ def prepare_reference(
 
         return apply_contact_tcp(session, cake_top_z_mm, calibration_log)
     return session.pose()
+
+
+def load_real_robot_config(config_path=REAL_ROBOT_CONFIG):
+    """config/real_robot.json의 실물 설정을 읽고 검증한다. 파일만 읽고 부수 효과는 없다.
+
+    키(단위 mm)
+      - cake_top_z_mm: 케이크 상면의 BASE Z. 펜촉 TCP 기준이므로 펜촉이 닿는 높이다.
+      - configure_pen_tcp_on_yes: start_real.sh 단위 테스트에서 YES 때 펜촉 TCP를
+        새로 등록할지 여부. 전체 공정(--cake-center-from-config)에서는 쓰지 않는다.
+      - side_cake_center_xy_mm: [x, y] 케이크 상면 중심의 BASE XY.
+        단위 테스트만 하는 설정에는 없을 수 있어 여기서는 필수로 검사하지 않는다.
+    """
+    config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    z = float(config["cake_top_z_mm"])
+    if not math.isfinite(z) or not 0 <= z <= 900:
+        raise RuntimeError("config/real_robot.json의 cake_top_z_mm는 BASE 기준 0~900mm여야 합니다.")
+    if not isinstance(config.get("configure_pen_tcp_on_yes", False), bool):
+        raise RuntimeError("config/real_robot.json의 configure_pen_tcp_on_yes는 true/false여야 합니다.")
+    return config
+
+
+def load_config_cake_reference(
+    config_path=REAL_ROBOT_CONFIG, workspace_path=WORKSPACE_CONFIG,
+):
+    """케이크 상면 중심을 드로잉 기준점(BASE mm·ZYZ deg 6값)으로 만든다.
+
+    호출 시점: 실제 모드에서 --cake-center-from-config를 지정했을 때 YES 영점 대신 호출한다.
+    XY: real_robot.json의 side_cake_center_xy_mm.
+    Z : workspace_config.yaml의 robot_executor_node.cake_center_pose Z.
+      펜을 쥐고 케이크 중심에 펜촉을 댈 때 티칭한 TCP 높이다. 펜을 내리는 깊이를
+      기존 '케이크 중심 하강'과 같게 하라는 요청에 따라 이 값을 접촉 높이로 쓴다.
+      real_robot.json의 cake_top_z_mm(실측 상면 높이)는 현재 TCP 기준 값과 달라
+      전체 공정의 드로잉 높이로 쓰지 않는다. goal_mapping.build_goal도 Z에 높이를 더하지 않는다.
+    자세: 같은 cake_center_pose의 자세 3값(실제로 도달한 펜 자세).
+    반환: [x, y, z, a, b, c].
+    """
+    import yaml
+
+    config = load_real_robot_config(config_path)
+    xy = config.get("side_cake_center_xy_mm")
+    if not isinstance(xy, (list, tuple)) or len(xy) != 2:
+        raise RuntimeError("config/real_robot.json에 side_cake_center_xy_mm [x, y]가 필요합니다.")
+    with open(workspace_path, encoding="utf-8") as file:
+        workspace = yaml.safe_load(file) or {}
+    executor = workspace.get("robot_executor_node", {}).get("ros__parameters", {})
+    center_pose = executor.get("cake_center_pose")
+    if not isinstance(center_pose, (list, tuple)) or len(center_pose) != 6:
+        raise RuntimeError("workspace_config.yaml에 robot_executor_node.cake_center_pose 6값이 필요합니다.")
+    reference = [float(xy[0]), float(xy[1]), *map(float, center_pose[2:])]
+    if not all(math.isfinite(value) for value in reference):
+        raise RuntimeError("케이크 기준 좌표에 유한하지 않은 값이 있습니다.")
+    # 작업 영역 밖 값은 오타일 가능성이 높으므로 로봇을 움직이기 전에 거부한다.
+    if math.hypot(reference[0], reference[1]) > 900 or not 0 <= reference[2] <= 900:
+        raise RuntimeError(f"케이크 기준 좌표가 작업 영역 밖입니다: {reference[:3]}")
+    return reference
 
 
 class RobotSession:
@@ -354,7 +413,11 @@ def bridge_worker(args):
     session = RobotSession()
     try:
         session.identity(args.mode, args.host)
-        if math.dist(session.pose()[:3], reference["pose"][:3]) > 0.1:
+        # YES 영점은 '지금 TCP 위치'가 곧 기준점이라 그 사이 이동을 막아야 한다.
+        # 설정 파일 기준점은 로봇 위치와 무관한 고정 좌표이므로 이 검사를 하지 않는다.
+        if reference.get("source") != "config" and math.dist(
+            session.pose()[:3], reference["pose"][:3]
+        ) > 0.1:
             raise RuntimeError(
                 "영점 기록 후 TCP가 이동했습니다. 실행기를 다시 시작하세요."
             )
@@ -565,12 +628,44 @@ def main():
         ),
     )
     parser.add_argument(
+        "--cake-center-from-config",
+        action="store_true",
+        help=(
+            "real: YES 영점 대신 config/real_robot.json의 side_cake_center_xy_mm·"
+            "cake_top_z_mm를 드로잉 기준점으로 사용(YES·펜촉 TCP 등록 없음)"
+        ),
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="준비 상태만 검사하고 아무것도 실행하지 않음",
     )
     parser.add_argument("--bridge-reference", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    # start_real.sh 단위 테스트(YES 영점)에서는 real_robot.json 설정대로
+    # YES 직후 펜촉 TCP를 등록한다. 명령줄 옵션을 직접 준 경우에는 그 값을 우선한다.
+    # 다음 경우에는 TCP를 바꾸지 않는다.
+    #   - 설정 파일 기준점(전체 공정): YES 자체가 없다.
+    #   - 펜 순환·플레이트 시퀀스: pen_*·plate_* 직선 좌표는 현재 TCP로 티칭했으므로
+    #     TCP가 바뀌면 목표가 펜 길이만큼 어긋난다.
+    #   - 미리보기: 주문을 넣지 않는 점검 전용이다.
+    if (
+        args.mode == "real"
+        and not args.calibrate_pen_tcp
+        and args.cake_top_z_mm is None
+        and not args.cake_center_from_config
+        and not args.preview_no_order
+        and not args.bridge_reference
+        and os.environ.get("CAKE_PEN_TOOL_CYCLE") != "1"
+        and os.environ.get("CAKE_PLATE_SEQUENCE") != "1"
+    ):
+        try:
+            real_config = load_real_robot_config()
+        except (OSError, KeyError, ValueError, RuntimeError) as error:
+            parser.error(f"config/real_robot.json을 읽지 못했습니다: {error}")
+        if real_config.get("configure_pen_tcp_on_yes", False):
+            args.calibrate_pen_tcp = True
+            args.cake_top_z_mm = float(real_config["cake_top_z_mm"])
     if args.calibrate_pen_tcp:
         if args.mode != "real" or args.cake_top_z_mm is None:
             parser.error("펜촉 TCP 추정은 real 모드에서 --cake-top-z-mm와 함께 사용하세요.")
@@ -585,6 +680,14 @@ def main():
             parser.error(
                 "--preview-no-order와 --calibrate-pen-tcp는 함께 사용할 수 없습니다."
             )
+    # 설정 파일 기준점은 YES·TCP 추정·미리보기와 기준점을 정하는 방식이 겹치므로 함께 쓰지 않는다.
+    if args.cake_center_from_config and (
+        args.mode != "real" or args.calibrate_pen_tcp or args.preview_no_order
+    ):
+        parser.error(
+            "--cake-center-from-config는 real 모드에서 "
+            "--calibrate-pen-tcp·--preview-no-order 없이 사용하세요."
+        )
     entry_mode = os.environ.get("CAKE_SYSTEM_MODE")
     if entry_mode and args.mode != entry_mode:
         parser.error(
@@ -655,6 +758,12 @@ def main():
             raise RuntimeError(
                 "가상 에뮬레이터가 이미 켜져 있습니다. 종료하거나 --reuse-driver를 사용하세요."
             )
+    # 기준 좌표가 빠졌거나 잘못됐으면 드라이버를 켜기 전에 알린다(--check 포함).
+    config_reference = (
+        load_config_cake_reference() if args.cake_center_from_config else None
+    )
+    if config_reference is not None:
+        print(f"real_robot.json 케이크 기준점 [mm, deg]: {config_reference}", flush=True)
     if args.check:
         print(
             f"준비 검사 통과: {args.mode}, ROS_DOMAIN_ID={os.environ.get('ROS_DOMAIN_ID', '30')}"
@@ -747,16 +856,28 @@ def main():
         )
         processes.wait(lambda: healthy(args.backend_port), 20)
         resolve_pending_orders(database, args.backend_port, env["CAKE_BRIDGE_TOKEN"])
-        reference = prepare_reference(
-            session, args.mode,
-            calibrate_pen_tcp=args.calibrate_pen_tcp,
-            cake_top_z_mm=args.cake_top_z_mm,
-            calibration_log=folder / "contact_tcp.json",
-            no_prompt=args.preview_no_order,
-        )
+        # 기준점 결정: 설정 파일 옵션이면 real_robot.json 좌표를 그대로 쓰고 YES를 묻지 않는다.
+        # 그 외에는 기존처럼 YES 시점의 현재 TCP(단위 테스트용)를 기록한다.
+        if config_reference is not None:
+            reference = config_reference
+            reference_source = "config"
+        else:
+            reference = prepare_reference(
+                session, args.mode,
+                calibrate_pen_tcp=args.calibrate_pen_tcp,
+                cake_top_z_mm=args.cake_top_z_mm,
+                calibration_log=folder / "contact_tcp.json",
+                no_prompt=args.preview_no_order,
+            )
+            reference_source = "tcp"
         print(f"상면 중심 TCP [mm, deg]: {reference}", flush=True)
         reference_file = folder / "reference.json"
-        reference_file.write_text(json.dumps({"mode": args.mode, "pose": reference}))
+        # source는 브릿지가 'TCP 이동 검사'를 할지 정하는 데 쓴다.
+        reference_file.write_text(
+            json.dumps(
+                {"mode": args.mode, "pose": reference, "source": reference_source}
+            )
+        )
         config = str(ROOT / "ws_cobot1/src/cake_decorator/config/workspace_config.yaml")
         for name in ("drawing_path_node", "robot_executor_node", "task_manager_node"):
             command = ["ros2", "run", "cake_decorator", name, "--ros-args"]
@@ -774,6 +895,16 @@ def main():
                 and os.environ.get("CAKE_PEN_TOOL_CYCLE") == "1"
             ):
                 command += ["-p", "pen_tool_cycle:=true"]
+            # start_real_full_process.sh로 실행한 경우에만 드로잉 앞뒤의
+            # 플레이트 준비(/plate_prepare)·후처리(/plate_finish)를 켠다.
+            # 실행 노드는 서비스를 제공하고 작업 관리 노드는 주문마다 호출하므로
+            # 두 노드에 같은 값을 넘겨야 한다. task_manager_node는 yaml을
+            # 읽지 않으므로 -p로 직접 전달한다. 기존 진입점의 기본값(false)은 유지된다.
+            if (
+                name in ("robot_executor_node", "task_manager_node")
+                and os.environ.get("CAKE_PLATE_SEQUENCE") == "1"
+            ):
+                command += ["-p", "plate_sequence_enabled:=true"]
             processes.start(name, command)
         session.ready_application()
         processes.start(

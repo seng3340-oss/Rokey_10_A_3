@@ -414,6 +414,17 @@ class DoosanRobotClient:
                 return False
             time.sleep(0.05)
 
+    def current_pose(self) -> Optional[list[float]]:
+        """현재 활성 TCP를 BASE 기준 [x, y, z, rz1, ry, rz2](mm, ZYZ°)로 읽는다.
+
+        이동 명령은 보내지 않는다. 조회에 실패하면 None을 반환하므로
+        호출부는 None일 때 이동을 진행하지 않아야 한다.
+        """
+        result = self._call("current_pose", GetCurrentPosx.Request(ref=DR_BASE))
+        if result is None or not result.success or not result.task_pos_info:
+            return None
+        return [float(value) for value in result.task_pos_info[0].data[:6]]
+
     def move_task_joint(self, target: DsrPos) -> bool:
         """옆면 케이크 바깥 경유점에서 자세를 바꾼다. 그리기 원호에는 사용하지 않는다."""
         joints = self._call("current_joints", GetCurrentPosj.Request())
