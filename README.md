@@ -62,6 +62,17 @@ bash scripts/start_virtual.sh
 로봇용 유선 LAN과 태블릿용 Wi-Fi를 함께 사용할 수 있습니다.
 자세한 설정은 [네트워크 안내](docs/NETWORK.md)를 참고하세요.
 
+## 45도 펜 옆면 이동만 가상 검증
+
+```bash
+bash scripts/start_virtual_side_web_test.sh
+```
+
+RViz에서 케이크 중앙 도착을 확인하고 터미널에 YES를 입력합니다.
+웹 `http://localhost:8081`에서 옆면을 선택해 그림을 제출합니다.
+실물과 분리한 도메인187·별도 주문 DB를 사용하며 펜 반납과 그리퍼 조작은 생략합니다.
+다른 그림을 시험하려면 Ctrl+C 후 같은 명령을 다시 실행합니다.
+
 ## 자주 바꾸는 설정
 
 | 파일 | 내용 |

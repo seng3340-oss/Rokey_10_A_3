@@ -9,9 +9,9 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Opaq
 import runpy
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
+import xacro
 import yaml
 
 
@@ -36,6 +36,29 @@ def _read_pen_length(context):
     return []
 
 
+def _workcell_publisher(context):
+    """가상 작업대 문자열을 만들고 옆면 검증일 때만 케이크 표시 위치를 맞춘다."""
+    models = Path(get_package_share_directory("cake_workcell_description"))
+    share = Path(get_package_share_directory("cake_workcell_bringup"))
+    mappings = {
+        name: LaunchConfiguration(name).perform(context)
+        for name in ("layout", "fixture_x", "fixture_y", "fixture_z", "fixture_yaw")
+    }
+    description = xacro.process_file(str(models / "urdf/workcell.urdf.xacro"), mappings=mappings).toxml()
+    if LaunchConfiguration("side_pen_45").perform(context).lower() == "true":
+        helpers = runpy.run_path(str(share / "scripts/virtual_pen.py"))
+        center = [float(LaunchConfiguration(key).perform(context))
+                  for key in ("side_center_x", "side_center_y", "side_top_z")]
+        description = helpers["align_side_workcell"](description, center)
+    return [Node(
+        package="robot_state_publisher", executable="robot_state_publisher",
+        name="workcell_state_publisher",
+        parameters=[{"robot_description": description}],
+        remappings=[("robot_description", "/workcell_description")],
+        output="screen",
+    )]
+
+
 def generate_launch_description():
     """real 모드 인자를 제공하지 않으며 로봇 이동 명령은 발행하지 않는다."""
     share = Path(get_package_share_directory("cake_workcell_bringup"))
@@ -54,19 +77,13 @@ def generate_launch_description():
         DeclareLaunchArgument("fixture_y", default_value=str(config["y_mm"] / 1000)),
         DeclareLaunchArgument("fixture_z", default_value=str(config["z_mm"] / 1000)),
         DeclareLaunchArgument("fixture_yaw", default_value=str(math.radians(config["yaw_deg"]))),
+        DeclareLaunchArgument("side_pen_45", default_value="false"),
+        DeclareLaunchArgument("side_center_x", default_value="0.3992743225097656"),
+        DeclareLaunchArgument("side_center_y", default_value="-0.054559329986572266"),
+        DeclareLaunchArgument("side_top_z", default_value="0.220"),
         DeclareLaunchArgument("show_rviz", default_value="true"),
         DeclareLaunchArgument("pen_extension_cm", default_value=""),
     ]
-
-    # 시각화 중 로봇과의 TF 충돌을 피하기 위해 작업대는 독립 description Topic을 사용한다.
-    description = Command([
-        FindExecutable(name="xacro"), " ", str(models / "urdf/workcell.urdf.xacro"),
-        " layout:=", LaunchConfiguration("layout"),
-        " fixture_x:=", LaunchConfiguration("fixture_x"),
-        " fixture_y:=", LaunchConfiguration("fixture_y"),
-        " fixture_z:=", LaunchConfiguration("fixture_z"),
-        " fixture_yaw:=", LaunchConfiguration("fixture_yaw"),
-    ])
 
     # 강의 launch는 어댑터에서 가상 모드로 고정하고 중복 RViz만 제외한다.
     return LaunchDescription([
@@ -76,13 +93,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(str(share / "launch/course_virtual.launch.py")),
             launch_arguments={"mode": "virtual", "host": "127.0.0.1", "port": "12345"}.items(),
         ),
-        Node(
-            package="robot_state_publisher", executable="robot_state_publisher",
-            name="workcell_state_publisher",
-            parameters=[{"robot_description": ParameterValue(description, value_type=str)}],
-            remappings=[("robot_description", "/workcell_description")],
-            output="screen",
-        ),
+        OpaqueFunction(function=_workcell_publisher),
         Node(
             package="tf2_ros", executable="static_transform_publisher",
             name="robot_to_workcell",

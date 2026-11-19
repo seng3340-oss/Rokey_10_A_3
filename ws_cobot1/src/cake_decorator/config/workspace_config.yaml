@@ -23,8 +23,8 @@ drawing_path_node:
     side_path_error_mm: 0.1
     side_diagonal_mode: spline
     side_pen_vertical_deg: 17.0
-    # 실제 치수는 유지하고 옆면 펜촉 목표만 반지름 방향으로 1mm 바깥에 둔다.
-    side_diameter_allowance_mm: 2.0
+    # 실제 치수는 유지하고 옆면 펜촉 목표만 반지름 방향으로 4.05mm 바깥에 둔다.
+    side_diameter_allowance_mm: 8.1
     drawing_z_offset: 0.0
     # TOP은 YES 시점의 펜 자세를 우선 유지하고, 영점 자세가 없을 때만 수직을 쓴다.
     # SIDE의 수직 기준 17도 설정과 별개다.

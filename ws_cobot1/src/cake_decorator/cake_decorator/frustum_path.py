@@ -17,6 +17,9 @@ class DrawingFrustum(FrustumCake):
 
     # 실제 형상과 픽셀 매핑은 유지하고 옆면 목표의 반지름만 보정한다(mm).
     radial_offset_mm: float = 0.0
+    # BASE Y 양쪽을 각각 안으로 옮기는 거리(mm).
+    # X/Z와 중심은 유지하고 sin(theta)에 따라 부드럽게 보정한다.
+    side_y_inset_mm: float = 0.0
 
     @property
     def radius(self):
@@ -30,7 +33,7 @@ class DrawingFrustum(FrustumCake):
         theta = arc_mm / self.radius + self.yaw
         return (
             point[0] + self.radial_offset_mm * math.cos(theta),
-            point[1] + self.radial_offset_mm * math.sin(theta),
+            point[1] + (self.radial_offset_mm - self.side_y_inset_mm) * math.sin(theta),
             point[2],
         )
 

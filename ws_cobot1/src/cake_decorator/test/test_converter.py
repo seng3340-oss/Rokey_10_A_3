@@ -270,12 +270,13 @@ class TestMultipleStrokes:
         assert response.success, response.error_msg
         contact_points = [wp for wp in response.waypoints_3d if wp.pen_down]
         assert len(contact_points) == 2
+        # 지름 보정 3.5mm는 위·아래 반지름을 각각 1.75mm 늘린다.
         assert contact_points[0].pose.position.x == pytest.approx(
-            CAKE_TOP[0] + 0.05775 * math.cos(math.pi / 2.0),
+            CAKE_TOP[0] + 0.0585 * math.cos(math.pi / 2.0),
             abs=3e-5,
         )
         assert contact_points[0].pose.position.y == pytest.approx(
-            CAKE_TOP[1] + 0.05775,
+            CAKE_TOP[1] + 0.0585,
             abs=3e-5,
         )
         assert contact_points[0].pose.position.z == pytest.approx(
@@ -283,11 +284,11 @@ class TestMultipleStrokes:
             abs=3e-5,
         )
         assert contact_points[1].pose.position.x == pytest.approx(
-            CAKE_TOP[0] + 0.061 * math.cos(math.pi / 2.0),
+            CAKE_TOP[0] + 0.06175 * math.cos(math.pi / 2.0),
             abs=3e-5,
         )
         assert contact_points[1].pose.position.y == pytest.approx(
-            CAKE_TOP[1] + 0.061,
+            CAKE_TOP[1] + 0.06175,
             abs=3e-5,
         )
         assert contact_points[1].pose.position.z == pytest.approx(

@@ -111,3 +111,27 @@ def test_short_pen_up_diagonal_uses_outer_tangents_not_tiny_arcs():
                 assert math.hypot(point[0]-cake.cx, point[1]-cake.cy) >= cake.radius_at(point[2]-cake.cz)
         previous = move.end
     assert moves[-1].end == cake.side_abs_with_offset(*end, 10.)
+
+
+def test_y_inset_moves_both_sides_without_changing_x_or_z():
+    """각 높이에서 Y 양끝만 각각 1mm 줄이고 X 양끝·높이는 보존한다."""
+    from dataclasses import replace
+    from cake_decorator.frustum_path import DrawingFrustum
+
+    original = DrawingFrustum(
+        r_top=56.75, r_bottom=60., height=79.,
+        cx=400., cy=-50., cz=141., radial_offset_mm=4.,
+    )
+    corrected = replace(original, side_y_inset_mm=1.)
+    for height in (0., 40., 79.):
+        for angle in (0., math.pi / 2, math.pi, 3 * math.pi / 2):
+            arc = (angle - original.yaw) * original.radius
+            before = original.side_to_abs(arc, height)
+            after = corrected.side_to_abs(arc, height)
+            assert abs(after[0] - before[0]) < 1e-9
+            assert abs(after[2] - before[2]) < 1e-9
+            assert abs(after[1] - before[1] + math.sin(angle)) < 1e-9
+            # 접근·이탈의 공중점에도 같은 보정을 적용해 접촉점과 이어지게 한다.
+            clear_before = original.side_abs_with_offset(arc, height, 10.)
+            clear_after = corrected.side_abs_with_offset(arc, height, 10.)
+            assert abs(clear_after[1] - clear_before[1] + math.sin(angle)) < 1e-9

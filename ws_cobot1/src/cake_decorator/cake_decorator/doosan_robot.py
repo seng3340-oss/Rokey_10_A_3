@@ -32,6 +32,12 @@ from dsr_msgs2.srv import (
     GetCurrentToolFlangePosx,
     Ikin,
     Fkin,
+    CheckMotion,
+    GetCurrentTcp,
+    GetRobotMode,
+    MoveStop,
+    SetCurrentTcp,
+    SetRobotMode,
 )
 from rcl_interfaces.srv import GetParameters
 from onrobot_rg_msgs.srv import SetCommand
@@ -92,6 +98,12 @@ class DoosanRobotClient:
             MoveSplineTask,
         ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
+        "check_motion": ("/dsr01/dsr_controller2/motion/check_motion", CheckMotion),
+        "move_stop": ("/dsr01/dsr_controller2/motion/move_stop", MoveStop),
+        "get_tcp": ("/dsr01/dsr_controller2/tcp/get_current_tcp", GetCurrentTcp),
+        "set_tcp": ("/dsr01/dsr_controller2/tcp/set_current_tcp", SetCurrentTcp),
+        "get_mode": ("/dsr01/dsr_controller2/system/get_robot_mode", GetRobotMode),
+        "set_mode": ("/dsr01/dsr_controller2/system/set_robot_mode", SetRobotMode),
     }
 
     def __init__(self, node: Node, service_timeout: float = 5.0):
@@ -609,3 +621,28 @@ class DoosanRobotClient:
         if not self.move_line(approach, speed_mm_s=speed_retract):
             return False
         return True
+
+    def reset_default_tcp(self, *, stop_running=False):
+        """옆면 동작 종료 후 TCP 선택을 해제하고 플랜지 기준 복원을 확인한다."""
+        from .tcp_scope import reset_default_tcp
+
+        by_path = {path: key for key, (path, _) in self._SERVICES.items()}
+
+        def call(kind, path, request, *, timeout=5):
+            # 이미 생성한 재진입 서비스 그룹을 사용해 액션 실행 중에도 응답을 받는다.
+            return self._call(by_path[path], request, timeout=timeout)
+
+        description = self._call(
+            "description", GetParameters.Request(names=["robot_description"]), timeout=5,
+        )
+        if description is None or not description.values:
+            raise RuntimeError("TCP 복원 전 실물·가상 모드를 확인하지 못했습니다.")
+        root = ET.fromstring(description.values[0].string_value)
+        params = {item.get("name"): item.text for item in root.findall(".//ros2_control/hardware/param")}
+        mode = params.get("mode")
+        if mode not in ("real", "virtual"):
+            raise RuntimeError("TCP 복원 대상 모드를 확인하지 못했습니다.")
+        reset_default_tcp(
+            call, stop_running=stop_running,
+            flange_euler="ZYX" if mode == "virtual" else "ZYZ",
+        )

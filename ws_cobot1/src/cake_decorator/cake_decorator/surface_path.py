@@ -121,7 +121,9 @@ def split_spline_samples(samples):
     return result
 
 
-def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
+def continuous_side_leg(
+    cake, start, end, offset_mm=0.0, max_angle_deg=1.0, max_height_mm=0.5,
+):
     """원통 반지름을 유지하며 각도와 높이를 함께 변화시킨 표본을 생성한다.
 
     movesx는 표본 사이를 자체 보간한다. 이 함수는 목표점의 표면 일치만 보장하며
@@ -129,7 +131,7 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
     """
     if not all(
         math.isfinite(v)
-        for v in (*start, *end, cake.radius, cake.height, offset_mm, max_angle_deg)
+        for v in (*start, *end, cake.radius, cake.height, offset_mm, max_angle_deg, max_height_mm)
     ):
         raise ValueError("연속 표면 입력은 유한 값이어야 합니다.")
     if (
@@ -137,6 +139,7 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
         or cake.height <= 0
         or offset_mm < 0
         or not 0 < max_angle_deg <= 5
+        or not 0 < max_height_mm <= 1.0
     ):
         raise ValueError("연속 표면 치수·오프셋·각도 간격이 유효하지 않습니다.")
     if not all(0 <= point[1] <= cake.height for point in (start, end)):
@@ -145,7 +148,7 @@ def continuous_side_leg(cake, start, end, offset_mm=0.0, max_angle_deg=1.0):
     count = max(
         2,
         math.ceil(abs(delta_arc / cake.radius) / math.radians(max_angle_deg)),
-        math.ceil(abs(delta_height) / 0.5),
+        math.ceil(abs(delta_height) / max_height_mm),
     )
     if count > 4096:
         raise ValueError("연속 옆면 표본 한도를 초과했습니다.")

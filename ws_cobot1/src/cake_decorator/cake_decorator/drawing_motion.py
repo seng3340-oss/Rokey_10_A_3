@@ -307,7 +307,10 @@ def quaternion_to_zyz(
     else:
         # ry ≈ π (짐벌락)
         ry = math.pi
-        rz1 = math.atan2(r01, -r00)
+        # B=π이면 r00=-cos(A-C), r01=-sin(A-C)다.
+        # C=0 표현으로 합칠 때 A-C를 보존해야 한다. r01 부호를 그대로 쓰면
+        # 수직 그리퍼의 수평 방향이 반전되어 실제 펜이 케이크 중심을 벗어난다.
+        rz1 = math.atan2(-r01, -r00)
         rz2 = 0.0
 
     return (math.degrees(rz1), math.degrees(ry), math.degrees(rz2))

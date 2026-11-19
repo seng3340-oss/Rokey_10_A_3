@@ -240,12 +240,12 @@ def test_side_precheck_thins_dense_samples_but_keeps_command_boundaries():
 
 
 def test_released_defaults_match_verified_seventeen_degrees_and_one_mm_clearance():
-    """배포 기본값은 실기17도와 반지름1mm 보정을 사용한다."""
+    """배포 기본값은 실기17도와 반지름1.75mm 보정을 사용한다."""
     rclpy.init()
     value = DrawingPathNode()
     try:
         assert value._param("side_pen_vertical_deg") == 17.0
-        assert value._param("side_diameter_allowance_mm") / 2 == 1.0
+        assert value._param("side_diameter_allowance_mm") / 2 == 1.75
     finally:
         value.destroy_node()
         rclpy.try_shutdown()

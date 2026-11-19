@@ -69,7 +69,8 @@ class WebDrawingContractTests(unittest.TestCase):
         strip_height = 896 * 80 / (math.pi * 100)
         top = (768 - strip_height) / 2
         path = self.convert("SIDE", [(512, top), (512, top + strip_height)])[3:]
-        self.assertAlmostEqual(path[1].pose.position.x, 0.449, places=6)
+        # 중심 0.5m에서 반지름 50mm + 지름 보정의 절반 1.75mm를 뺀 위치다.
+        self.assertAlmostEqual(path[1].pose.position.x, 0.44825, places=6)
         self.assertAlmostEqual(path[1].pose.position.z, 0.142, places=6)
         self.assertAlmostEqual(path[2].pose.position.z, 0.062, places=6)
         # 옆면에서 펜을 올리는 동작은 Z 이동이 아니라 반지름 바깥 방향이다.

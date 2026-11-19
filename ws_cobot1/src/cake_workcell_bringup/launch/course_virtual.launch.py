@@ -46,7 +46,8 @@ def _course_actions(context):
             "mode": "virtual", "model": "m0609", "update_rate": "100",
         },
     ).toxml()
-    description = helpers["add_pen"](description, extension)
+    side_pen = LaunchConfiguration("side_pen_45", default="false").perform(context).lower() == "true"
+    description = helpers["add_pen"](description, extension, side_pen_45=side_pen)
     pen_setup = Node(package="cake_workcell_bringup", executable="virtual_pen.py", output="screen")
     # TCP 준비 실패를 놓친 채 가상 로봇을 계속 사용하지 않도록 전체 launch를 종료한다.
     def check_setup(event, _context):

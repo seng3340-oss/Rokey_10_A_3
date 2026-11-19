@@ -42,6 +42,8 @@ class RobotExecutorNode(Node):
         'pen_grip_force': 20.0,    # N
         'gripper_open_width': 100.0,  # mm
         'approach_height': 0.05,   # m
+        'side_pen_45': False,  # 실물 원주로 확인한 고정 파지 자세 사용
+        'side_return_pen': True,  # 가상 이동 검증에서는 반납·그리퍼 조작 생략
         'virtual_initial_approach': False,  # 실행기가 가상 모드에서만 활성화
     }
 
@@ -493,10 +495,23 @@ class RobotExecutorNode(Node):
 
     def _execute_motion_command(self, command, index):
         """가상 첫 접근의 특이점 보완만 분리하며 획 완료·취소 판단은 유지한다."""
+        if index == 0 and self._param('side_pen_45'):
+            from dsr_msgs2.srv import GetCurrentPosx
+
+            current = self._robot._call('current_pose', GetCurrentPosx.Request(ref=0))
+            if current is None or not current.success or not current.task_pos_info:
+                return False
+            raised = list(current.task_pos_info[0].data[:6])
+            raised[2] = max(raised[2] + 50., command.pos.z)
+            if not self._robot.move_line(DsrPos(*raised), speed_mm_s=80., acc_mm_s2=200.):
+                return False
+            if not self._robot.verify_pose(raised):
+                return False
         if (
             index == 0
             and not command.pen_down
             and self._param('virtual_initial_approach')
+            and not self._param('side_pen_45')
         ):
             self.get_logger().info('가상 첫 접근: 현재 자세로 이탈 후 movejx로 접근합니다.')
             return self._robot.prepare_virtual_approach(command.pos)
@@ -516,6 +531,45 @@ class RobotExecutorNode(Node):
     # ==================================================================
 
     def _execute_draw(self, goal_handle):
+        """옆면 검증의 반납·실패·취소 뒤 TCP를 초기화하고 최종 결과를 알린다."""
+        side_45 = (
+            goal_handle.request.drawing_surface == 'SIDE'
+            and self._param('side_pen_45')
+        )
+        if not side_45:
+            return self._execute_draw_motion(goal_handle)
+
+        result = None
+        try:
+            result = self._execute_draw_motion(goal_handle)
+        except Exception as error:
+            self.get_logger().error(f'옆면 동작 예외: {error}')
+            result = DrawOnCake.Result(success=False, error_code='SIDE_OPERATION_FAILED')
+            if goal_handle.is_active:
+                goal_handle.abort()
+        finally:
+            # 초기화한 뒤에는 기존 펜촉 좌표로 새 주문을 실행할 수 없다.
+            self._side_pen_returned = True
+            try:
+                self._robot.reset_default_tcp(
+                    stop_running=result is None or not result.success,
+                )
+                self.get_logger().info('옆면 작업 TCP 해제: 기본 0,0,0,0,0,0 복원 완료')
+            except Exception as error:
+                self.get_logger().error(f'기본 TCP 복원 실패. 펜던트 확인 필요: {error}')
+                if result is None:
+                    result = DrawOnCake.Result(success=False)
+                result.success = False
+                result.error_code = 'TCP_RESET_FAILED'
+                if goal_handle.is_active:
+                    goal_handle.abort()
+
+        # 펜 반납과 TCP 초기화를 모두 확인한 다음에만 성공 응답을 보낸다.
+        if result.success:
+            goal_handle.succeed()
+        return result
+
+    def _execute_draw_motion(self, goal_handle):
         """DrawOnCake 액션 — 웨이포인트를 하나씩 MoveLine으로 실행."""
         request = goal_handle.request
         result = DrawOnCake.Result()
@@ -524,6 +578,24 @@ class RobotExecutorNode(Node):
             f'드로잉 시작: waypoints={len(request.waypoints)}, '
             f'surface={request.drawing_surface}'
         )
+
+        side_45 = request.drawing_surface == 'SIDE' and self._param('side_pen_45')
+        initial_joints = None
+        if side_45:
+            if getattr(self, '_side_pen_returned', False):
+                result.success = False
+                result.error_code = 'PEN_RETURNED_REGRASP_AND_RESTART'
+                goal_handle.abort()
+                return result
+            from dsr_msgs2.srv import GetCurrentPosj
+            measured = self._robot._call("current_joints", GetCurrentPosj.Request())
+            if measured is None or not measured.success:
+                result.success = False
+                result.error_code = 'PEN_START_JOINT_QUERY_FAILED'
+                goal_handle.abort()
+                return result
+            initial_joints = list(measured.pos)
+            self.get_logger().info(f"반납 시 J6 복귀 각도 {initial_joints[5]:.2f}도")
 
         waypoints_dict, pen_states = self._convert_waypoints(
             request.waypoints, default_speed=request.speed,
@@ -541,7 +613,7 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
             return result
 
-        if request.drawing_surface == 'SIDE':
+        if request.drawing_surface == 'SIDE' and not self._param('side_pen_45'):
             try:
                 plan.commands = self._robot.select_reachable_side_commands(
                     plan.commands, lambda: goal_handle.is_cancel_requested,
@@ -609,11 +681,26 @@ class RobotExecutorNode(Node):
                 completed_strokes += 1
                 prev_stroke_idx = cmd.stroke_idx
 
+        if side_45 and self._param('side_return_pen'):
+            try:
+                from .side_pen_return import return_pen
+
+                return_pen(self._robot, initial_joints, lambda: goal_handle.is_cancel_requested)
+                self._side_pen_returned = True
+            except RuntimeError as error:
+                self.get_logger().error(str(error))
+                result.success = False
+                result.error_code = 'PEN_RETURN_FAILED'
+                result.completed_strokes = plan.total_strokes
+                goal_handle.abort()
+                return result
+
         self.get_logger().info(f'드로잉 완료: {plan.total_strokes} 획')
         result.success = True
         result.completed_strokes = plan.total_strokes
         result.error_code = ''
-        goal_handle.succeed()
+        if not side_45:
+            goal_handle.succeed()
         return result
 
     # ==================================================================
