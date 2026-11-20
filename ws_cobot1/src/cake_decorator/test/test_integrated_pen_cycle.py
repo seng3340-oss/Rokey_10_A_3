@@ -125,6 +125,10 @@ class ServiceRobot:
         """이동 실패 주입은 move_line에서 처리한다."""
         return True
 
+    def get_gripper_width(self):
+        """기존 정상 순환 시험에서 최근 파지 폭 표본을 제공한다."""
+        return 0.080
+
     def gripper_open(self, width=100.):
         self.events.append(("open", self.tcp))
         return self.fail != "open"

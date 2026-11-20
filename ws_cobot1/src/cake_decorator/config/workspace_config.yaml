@@ -40,6 +40,20 @@ drawing_path_node:
 
 robot_executor_node:
   ros__parameters:
+    # 실제 RG2 토픽으로 파지 상태를 확인한다. virtual 실행에서는 비활성화한다.
+    gripper_safety_check_enabled: true
+    pen_open_min_width_m: 0.060
+    pen_hold_min_width_m: 0.030
+    opener_hold_min_width_m: 0.015
+    # 하중은 팀 PR 기준 75g 초과 증가를 사용하며 실물 측정 전에는 OFF다.
+    plate_weight_check_enabled: false
+    plate_opener_weight_kg: 0.05
+    plate_cake_weight_kg: 0.20
+    plate_weight_tolerance_percent: 10.0
+    plate_cake_min_delta_kg: 0.075
+    plate_weight_wait_sec: 1.0
+    plate_weight_reads: 2
+    plate_weight_read_interval: 0.2
     service_timeout: 5.0
     # 펜 인출·케이크 공중 이동·거치대 반납 전용(mm/s, mm/s²).
     pen_travel_speed_mm_s: 180.0

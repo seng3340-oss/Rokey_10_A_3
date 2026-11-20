@@ -21,6 +21,7 @@ from .bent_pen import SIDE_TCP_NAME, SIDE_TCP_OFFSET_MM
 from .drawing_motion import DsrPos
 from .tcp_scope import reset_default_tcp
 from .side_pen_return import return_pen
+from .safety_exceptions import require_pen_width
 
 
 # real_pen_pick_45.py에서 검증한 손끝 지문 중심. grip TCP의 240mm와 다르다.
@@ -256,6 +257,7 @@ class IntegratedPenCycle:
             ):
                 raise RuntimeError("45도 펜 거치대 상공 이동 실패")
             self._check_cancel(cancelled)
+            require_pen_width(self.robot, self.parameter, 'open')
             # PR23과 동일하게 파지 직전 열기 펄스를 반복하지 않는다.
             # 앞선 도구 반납에서 열린 상태로 내려가 기울인 뒤 닫기만 실행한다.
             self.robot._logger.info("SIDE 펜 파지: 추가 열기 없이 하강 → 기울임 → 닫기")
@@ -273,6 +275,8 @@ class IntegratedPenCycle:
                     angular_acc_deg_s2=self.parameter(f"{rotation}_acc_deg_s2"),
                 ) or not self.robot.verify_pose(pose):
                     raise RuntimeError(f"45도 펜 파지 이동/도달 실패: {index}")
+                if index == 2:
+                    require_pen_width(self.robot, self.parameter, 'held')
                 if index == 1:
                     # 중심 고정 기울임이 끝난 뒤에만 닫고, 인출 후에만 수직 복귀한다.
                     self._check_cancel(cancelled)

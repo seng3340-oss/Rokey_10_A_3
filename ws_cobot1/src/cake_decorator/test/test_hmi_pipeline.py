@@ -50,7 +50,7 @@ class HardwareFreeDraw(Node):
         if self.fail:
             handle.abort()
             return DrawOnCake.Result(
-                success=False, error_code="TEST_RE_FAILURE", completed_strokes=0
+                success=False, error_code=self.fail if isinstance(self.fail, str) else "TEST_RE_FAILURE", completed_strokes=0
             )
         handle.succeed()
         return DrawOnCake.Result(success=True, error_code="", completed_strokes=1)
@@ -151,7 +151,7 @@ class HmiPipelineTest(unittest.TestCase):
                 thread.start()
                 bridge.start()
                 results = []
-                for surface, fail in [("top", False), ("side", True)]:
+                for surface, fail in [("top", False), ("side", True), ("side", "PEN_GRASP_FAILED")]:
                     draw.fail = fail
                     body = {
                         "canvas_width": 1024,
@@ -180,8 +180,10 @@ class HmiPipelineTest(unittest.TestCase):
                         detail["status"], "failed" if fail else "completed"
                     )
                     self.assertEqual(
-                        detail["error_code"], "TEST_RE_FAILURE" if fail else ""
+                        detail["error_code"], fail if isinstance(fail, str) else "TEST_RE_FAILURE" if fail else ""
                     )
+                    if fail == "PEN_GRASP_FAILED":
+                        self.assertEqual(detail["message"], "펜 파지 실패, 안전 자세에서 대기중")
                     plan = http("/api/orders/" + oid + "/plan")
                     self.assertEqual(
                         plan["source"], "task_manager_node/GenerateTrajectory"
@@ -210,8 +212,14 @@ class HmiPipelineTest(unittest.TestCase):
                             "observed_states": seen,
                         }
                     )
-                self.assertEqual(len(draw.goals), 2)
-                services = [name for name, _ in tm.get_service_names_and_types()]
+                self.assertEqual(len(draw.goals), 3)
+                # 전체 그래프 조회에는 조회용 클라이언트 이름도 보일 수 있다.
+                # 실제 각 노드가 제공하는 서비스 서버만 조사해 장비 부재를 검사한다.
+                services = [
+                    service_name
+                    for node_name, namespace in tm.get_node_names_and_namespaces()
+                    for service_name, _ in tm.get_service_names_and_types_by_node(node_name, namespace)
+                ]
                 self.assertFalse(
                     any("/dsr01/" in name for name in services),
                     "검사 도메인에 로봇 드라이버가 없어야 합니다.",

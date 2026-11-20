@@ -29,6 +29,7 @@ from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
 from .doosan_robot import DoosanRobotClient
 from .plate_sequence import PlateSequence
+from .safety_exceptions import SafetyException, PenGraspError, require_pen_width
 from .integrated_pen_cycle import IntegratedPenCycle
 from .drawing_motion import (
     DsrPos,
@@ -45,6 +46,18 @@ class RobotExecutorNode(Node):
 
     # 파라미터 기본값
     _PARAM_DEFAULTS = {
+        'gripper_safety_check_enabled': False,
+        'pen_open_min_width_m': 0.060,
+        'pen_hold_min_width_m': 0.030,
+        'opener_hold_min_width_m': 0.015,
+        'plate_weight_check_enabled': False,
+        'plate_opener_weight_kg': 0.05,
+        'plate_cake_weight_kg': 0.20,
+        'plate_weight_tolerance_percent': 10.0,
+        'plate_cake_min_delta_kg': 0.075,
+        'plate_weight_wait_sec': 1.0,
+        'plate_weight_reads': 2,
+        'plate_weight_read_interval': 0.2,
         'plate_sequence_enabled': False,  # [변경] 기본 비활성: 실물 충돌 검증 전 작동 금지
         'opener_grip_width_mm': 10.0,
         'opener_grip_force_n': 20.0,
@@ -226,6 +239,10 @@ class RobotExecutorNode(Node):
             self._pen_cycle.ensure_default()
             response.success = bool(callback())
             response.message = f'{phase} 완료' if response.success else f'{phase} 이동/그리퍼 실패, 즉시 중단'
+        except SafetyException as exc:
+            self.get_logger().error(f'{phase}: {exc.code}: {exc}')
+            response.success = False
+            response.message = f'{exc.code}: {exc}'
         except Exception as exc:
             self.get_logger().error(f'{phase} 예외: {exc}\n{traceback.format_exc()}')
             response.success = False
@@ -765,6 +782,9 @@ class RobotExecutorNode(Node):
             if top_cycle:
                 self._pen_cycle.ensure_default()
             result = self._execute_draw_motion(goal_handle)
+        except PenGraspError as error:
+            self.get_logger().error(f'펜 파지 검사 실패: {error}')
+            result = DrawOnCake.Result(success=False, error_code=error.code)
         except Exception as error:
             self.get_logger().error(f'펜/드로잉 동작 예외: {error}')
             result = DrawOnCake.Result(success=False, error_code='PEN_OPERATION_FAILED')
@@ -788,6 +808,13 @@ class RobotExecutorNode(Node):
                 # 실패/취소 뒤에도 상태 머신 전이 잔재로 다음 주문을 막지 않는다.
                 self._state = TaskState.IDLE
                 self._cancel_requested = False
+
+        # 옆면 피벗·펜촉 TCP 정리가 끝난 뒤 플랜지 기준 안전 자세로 복귀한다.
+        if result.error_code == 'PEN_GRASP_FAILED' and goal_handle.is_cancel_requested:
+            result.error_code = 'CANCELLED'
+        if result.error_code == 'PEN_GRASP_FAILED':
+            if not self._recover_pen_grasp():
+                result.error_code = 'PEN_GRASP_RECOVERY_FAILED'
 
         # 정리 중 발생한 취소도 성공으로 보고하지 않는다.
         if result.success and goal_handle.is_cancel_requested:
@@ -856,6 +883,8 @@ class RobotExecutorNode(Node):
                     preserve_speed=rack_ready,
                     extra_lift_mm=50.0,
                 )
+            except PenGraspError:
+                raise
             except (RuntimeError, ValueError) as error:
                 self.get_logger().error(f'45도 펜 파지 실패: {error}')
                 return failed('PEN_PICK_FAILED')
@@ -1013,7 +1042,15 @@ class RobotExecutorNode(Node):
         action = request.action.upper()
         if action == 'GRASP':
             self._state = TaskState.PLACING_CAKE
-            ok = self._do_grasping_tool(goal_handle, request)
+            try:
+                ok = self._do_grasping_tool(goal_handle, request)
+            except PenGraspError:
+                recovered = self._recover_pen_grasp()
+                result.success = False
+                result.error_code = 'PEN_GRASP_FAILED' if recovered else 'PEN_GRASP_RECOVERY_FAILED'
+                self._state = TaskState.IDLE
+                goal_handle.abort()
+                return result
         elif action == 'RELEASE':
             self._state = TaskState.DRAWING
             ok = self._do_returning_tool(goal_handle, request)
@@ -1027,6 +1064,22 @@ class RobotExecutorNode(Node):
         else:
             goal_handle.abort()
         return result
+
+    def _recover_pen_grasp(self):
+        """펜 검사 실패 후 열기와 안전 자세 이동 결과를 순서대로 확인한다."""
+        if self._robot.stop_latched or self._cancel_requested or self._robot.gripper_output_fault:
+            self.get_logger().error('펜 검사 실패: 복구 동작이 차단되어 현재 자세에서 중단')
+            return False
+        if not self._robot.gripper_open(self._param('gripper_open_width')):
+            self.get_logger().error('펜 검사 실패: 그리퍼 열기 실패, 현재 자세에서 중단')
+            return False
+        returned = self._robot.move_joint(
+            self._param('plate_safe_position_1'),
+            speed_deg_s=self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=self._param('free_joint_acc_deg_s2'),
+        )
+        self.get_logger().error('펜 파지 실패, 안전 자세에서 대기중' if returned else '펜 파지 실패, 안전 자세 복귀 실패')
+        return returned
 
     def _do_grasping_tool(self, goal_handle, task_goal, *, first_approach=None) -> bool:
         """펜 집기: 상공 → 펜 위치 → 그리퍼 닫기 → 수직 상공"""
@@ -1054,6 +1107,7 @@ class RobotExecutorNode(Node):
 
         # PR23의 수정 유지: 앞선 반납에서 열린 그리퍼에 열기 펄스를 반복하지 않는다.
         # 열린 상태로 파지 위치까지 내려간 뒤 닫기만 실행한다.
+        require_pen_width(self._robot, self._param, 'open')
         self.get_logger().info('TOP 펜 파지: 추가 열기 없이 하강 → 닫기')
 
         # 3. 펜 위치로 하강 (직선)
@@ -1094,6 +1148,7 @@ class RobotExecutorNode(Node):
             self._fail('펜 들어올리기 실패')
             return False
 
+        require_pen_width(self._robot, self._param, 'held')
         self.get_logger().info('펜 집기 완료')
         return True
 
