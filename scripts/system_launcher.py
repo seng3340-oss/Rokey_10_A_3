@@ -1301,6 +1301,8 @@ def main():
                 if name == "task_manager_node"
                 else ["--params-file", config]
             )
+            if name == "robot_executor_node" and args.mode == "virtual":
+                command += ["-p", "gripper_safety_check_enabled:=false", "-p", "plate_weight_check_enabled:=false"]
             if name == "robot_executor_node" and args.mode == "virtual" and not args.side_pen_45:
                 command += ["-p", "virtual_initial_approach:=true"]
             # 실물 전체 공정과 명시적 펜 순환 실행에서 집기·반납을 켠다.

@@ -21,6 +21,7 @@ import xml.etree.ElementTree as ET
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
 from dsr_msgs2.srv import (
@@ -32,6 +33,7 @@ from dsr_msgs2.srv import (
     MoveJointx,
     GetCurrentPosx,
     GetCurrentPosj,
+    GetWorkpieceWeight,
     GetSolutionSpace,
     GetCurrentToolFlangePosx,
     Ikin,
@@ -184,6 +186,9 @@ class DoosanRobotClient:
             SetCtrlBoxDigitalOutput,
         ),
         "gripper": ("/onrobot/sendCommand", SetCommand),
+        "get_workpiece_weight": (
+            "/dsr01/dsr_controller2/force/get_workpiece_weight", GetWorkpieceWeight,
+        ),
         "check_motion": ("/dsr01/dsr_controller2/motion/check_motion", CheckMotion),
         "move_stop": ("/dsr01/dsr_controller2/motion/move_stop", MoveStop),
         "get_tcp": ("/dsr01/dsr_controller2/tcp/get_current_tcp", GetCurrentTcp),
@@ -241,6 +246,60 @@ class DoosanRobotClient:
             gripper_pulse_sec,
             robot_stopped=True,
         )
+
+        # 각도와 수신 시각을 함께 보관해 오래된 파지 상태를 사용하지 않는다.
+        self._gripper_sample = None
+        self._gripper_command_since = 0.0
+        self._gripper_joint_sub = node.create_subscription(
+            JointState, "/onrobot_joint_states", self._on_gripper_joint_state,
+            10, callback_group=self._service_group,
+        )
+
+    def _on_gripper_joint_state(self, message):
+        """실제 finger_joint만 수신하며 다른 관절이나 비정상 값은 무시한다."""
+        if "finger_joint" not in message.name:
+            return
+        index = message.name.index("finger_joint")
+        if index >= len(message.position):
+            return
+        angle = float(message.position[index])
+        if math.isfinite(angle):
+            self._gripper_sample = (angle, time.monotonic())
+
+    @staticmethod
+    def gripper_width_from_angle(angle):
+        """OnRobot RG2 드라이버의 기하식으로 폭(m)을 계산한다."""
+        if not math.isfinite(angle):
+            return None
+        width = 2.0 * (
+            math.cos(angle + 0.76794) * 0.055
+            - 0.0144 + 0.108505 * math.cos(1.41371)
+        )
+        return width if math.isfinite(width) and 0 <= width <= 0.12 else None
+
+    def get_gripper_width(self, timeout=2.0):
+        """최대 2초 동안 마지막 그리퍼 명령 이후의 신선한 폭 표본을 기다린다."""
+        deadline = time.monotonic() + timeout
+        while True:
+            if getattr(self, 'stop_latched', False):
+                return None
+            sample = getattr(self, '_gripper_sample', None)
+            now = time.monotonic()
+            if sample is not None:
+                angle, stamp = sample
+                if now - stamp <= 1.0 and stamp >= getattr(self, '_gripper_command_since', 0.0):
+                    return self.gripper_width_from_angle(angle)
+            if now >= deadline:
+                return None
+            time.sleep(0.02)
+
+    def get_workpiece_weight(self):
+        """kg 단위 하중을 읽고 실패 응답·비정상 값을 측정 실패로 처리한다."""
+        response = self._call('get_workpiece_weight', GetWorkpieceWeight.Request(), timeout=10.0)
+        if response is None or not response.success:
+            return None
+        weight = float(response.weight)
+        return weight if math.isfinite(weight) and weight >= 0 else None
 
     # ------------------------------------------------------------------
     # 서비스 호출 헬퍼
@@ -950,6 +1009,7 @@ class DoosanRobotClient:
         ----------
         width_mm : 기존 호출부 호환을 위한 열림 폭 인자 (DO 제어에서는 미사용)
         """
+        self._gripper_command_since = time.monotonic()
         del width_mm
         # 1번 포트를 0.5초간 ON 후 OFF 하여 열림 신호를 전달한다.
         time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
@@ -966,6 +1026,7 @@ class DoosanRobotClient:
         width_mm : 기존 호출부 호환을 위한 파지 폭 인자 (DO 제어에서는 미사용)
         force_n : 기존 호출부 호환을 위한 파지 힘 인자 (DO 제어에서는 미사용)
         """
+        self._gripper_command_since = time.monotonic()
         del width_mm, force_n
         # 2번 포트를 0.5초간 ON 후 OFF 하여 닫힘 신호를 전달한다.
         time.sleep(GRIPPER_PULSE_SEC_DEFAULT)
@@ -1015,6 +1076,10 @@ class DoosanRobotClient:
         close_wait_sec: float = 0.0,
         close_settle_sec: float = 0.0,
         pre_open_wait_sec: float = 0.0,
+        *,
+        acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """접근 → 그리퍼 열기 → 하강 → 그리퍼 닫기 → 들어올리기.
 
@@ -1031,20 +1096,28 @@ class DoosanRobotClient:
         close_wait_sec : 닫힘 명령 후 추가 대기(초)
         close_settle_sec : 닫힘 안정화 대기(초)
         pre_open_wait_sec : 접근 후 열림 완료를 기다리는 시간(초)
+        acc_mm_s2 : 모든 접근·하강·후퇴에 적용할 선형 가속도(mm/s²)
+        angular_speed_deg_s, angular_acc_deg_s2 : 자세 회전 제한(도/s, 도/s²).
+            생략하면 기존 호출자의 제한을 유지한다. 따개 이동은 공통 설정을 전달한다.
         """
-        if not self.move_line(approach, speed_mm_s=speed_approach):
+        motion = {
+            'acc_mm_s2': acc_mm_s2,
+            'angular_speed_deg_s': angular_speed_deg_s,
+            'angular_acc_deg_s2': angular_acc_deg_s2,
+        }
+        if not self.move_line(approach, speed_mm_s=speed_approach, **motion):
             return False
         # 그리퍼 명령 실패(특히 OFF 실패) 뒤에는 절대 다음 이동을 보내지 않는다.
         # if not self.gripper_open(open_width):
         #     return False
         # time.sleep(max(0.0, pre_open_wait_sec))
-        if not self.move_line(target, speed_mm_s=speed_slow):
+        if not self.move_line(target, speed_mm_s=speed_slow, **motion):
             return False
         if not self.gripper_close(grip_width, grip_force):
             return False
         time.sleep(max(0.0, close_wait_sec))
         time.sleep(max(0.0, close_settle_sec))
-        if not self.move_line(approach, speed_mm_s=speed_slow):
+        if not self.move_line(approach, speed_mm_s=speed_slow, **motion):
             return False
         return True
 
@@ -1057,6 +1130,10 @@ class DoosanRobotClient:
         speed_slow: float = 30.0,
         speed_retract: float = 50.0,
         open_wait_sec: float = 0.0,
+        *,
+        acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """접근 → 하강 → 그리퍼 열기 → 후퇴.
 
@@ -1068,16 +1145,24 @@ class DoosanRobotClient:
         target : 배치 위치
         approach : 접근/후퇴 위치
         open_wait_sec : 열림 명령 후 추가 대기(초)
+        acc_mm_s2 : 모든 접근·하강·후퇴에 적용할 선형 가속도(mm/s²)
+        angular_speed_deg_s, angular_acc_deg_s2 : 자세 회전 제한(도/s, 도/s²).
+            생략하면 기존 호출자의 제한을 유지한다. 따개 이동은 공통 설정을 전달한다.
         """
-        if not self.move_line(approach, speed_mm_s=speed_approach):
+        motion = {
+            'acc_mm_s2': acc_mm_s2,
+            'angular_speed_deg_s': angular_speed_deg_s,
+            'angular_acc_deg_s2': angular_acc_deg_s2,
+        }
+        if not self.move_line(approach, speed_mm_s=speed_approach, **motion):
             return False
-        if not self.move_line(target, speed_mm_s=speed_slow):
+        if not self.move_line(target, speed_mm_s=speed_slow, **motion):
             return False
         # 열기 실패 시 후퇴 이동을 보내지 않는다.
         if not self.gripper_open(open_width):
             return False
         time.sleep(max(0.0, open_wait_sec))
-        if not self.move_line(approach, speed_mm_s=speed_retract):
+        if not self.move_line(approach, speed_mm_s=speed_retract, **motion):
             return False
         return True
 

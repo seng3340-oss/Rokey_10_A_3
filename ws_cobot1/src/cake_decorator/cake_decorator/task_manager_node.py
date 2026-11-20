@@ -17,6 +17,7 @@ from std_srvs.srv import Trigger
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, DurabilityPolicy
 
+from .safety_exceptions import ERROR_MESSAGES
 from .hmi_plan import build_hmi_plan
 
 from builtin_interfaces.msg import Time as TimeMsg
@@ -221,8 +222,8 @@ class TaskManagerNode(Node):
             if self.get_parameter('plate_sequence_enabled').value:
                 self._set_phase(Phase.PREPARING, goal_handle, 0.0, '플레이트 준비')
                 if not self._run_plate_service(self._plate_prepare_client, '드로잉 준비'):
-                    return self._fail(goal_handle, result, 'PLATE_PREPARE_FAILED',
-                                      '플레이트 준비 실패', start_time)
+                    code, message = self._plate_error or ('PLATE_PREPARE_FAILED', '플레이트 준비 실패')
+                    return self._fail(goal_handle, result, code, message, start_time)
                 if self._check_cancel(goal_handle):
                     return self._cancel(goal_handle, result, start_time)
 
@@ -243,8 +244,8 @@ class TaskManagerNode(Node):
                     return self._cancel(goal_handle, result, start_time)
                 self._set_phase(Phase.FINISHING, goal_handle, 90.0, '플레이트 회수 및 출고')
                 if not self._run_plate_service(self._plate_finish_client, '드로잉 후처리'):
-                    return self._fail(goal_handle, result, 'PLATE_FINISH_FAILED',
-                                      '플레이트 후처리 실패', start_time)
+                    code, message = self._plate_error or ('PLATE_FINISH_FAILED', '플레이트 후처리 실패')
+                    return self._fail(goal_handle, result, code, message, start_time)
 
             if self._check_cancel(goal_handle):
                 return self._cancel(goal_handle, result, start_time)
@@ -276,6 +277,7 @@ class TaskManagerNode(Node):
 
     def _run_plate_service(self, client, phase: str) -> bool:
         """[변경 2026-11-18] Robot Executor에 작업 단위 요청. TM은 좌표를 다루지 않는다."""
+        self._plate_error = None
         if not client.wait_for_service(timeout_sec=10.0):
             self.get_logger().error(f'{phase}: 서비스 연결 실패')
             return False
@@ -285,7 +287,11 @@ class TaskManagerNode(Node):
             self._wait_future(future, 300.0)
             result = future.result()
             if result is None or not result.success:
-                self.get_logger().error(f'{phase}: {getattr(result, "message", "응답 없음")}')
+                detail = getattr(result, "message", "응답 없음")
+                code, separator, message = detail.partition(": ")
+                if separator and code in ERROR_MESSAGES:
+                    self._plate_error = (code, message[:2048])
+                self.get_logger().error(f'{phase}: {detail}')
                 return False
             return True
         except Exception as exc:
@@ -481,7 +487,7 @@ class TaskManagerNode(Node):
         action_result = result_future.result().result
         if not action_result.success:
             code = getattr(action_result, "error_code", "") or "DRAWING_FAILED"
-            self._drawing_error = (code[:256], f"DrawOnCake 실패: {code}"[:2048])
+            self._drawing_error = (code[:256], ERROR_MESSAGES.get(code, f"DrawOnCake 실패: {code}")[:2048])
             self.get_logger().error(
                 f'DrawOnCake 실패: {getattr(action_result, "error_code", "")}'
             )

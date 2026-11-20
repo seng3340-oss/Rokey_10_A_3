@@ -73,7 +73,7 @@ def generate_launch_description():
         package='cake_decorator',
         executable='robot_executor_node',
         name='robot_executor_node',
-        parameters=[config_file],
+        parameters=[config_file, {'gripper_safety_check_enabled': False, 'plate_weight_check_enabled': False}],
         output='screen',
     )
 

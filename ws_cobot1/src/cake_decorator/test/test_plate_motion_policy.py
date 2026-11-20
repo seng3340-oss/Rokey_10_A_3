@@ -144,9 +144,9 @@ def test_stage_speeds_order_modes_and_logs(phase, expected):
 
 
 @pytest.mark.parametrize("phase", ["prepare", "finish"])
-@pytest.mark.parametrize("free_speed, rack_speed", [(150, 90), (71, 71), (90, 90), (240, 90)])
+@pytest.mark.parametrize("free_speed, rack_speed", [(150, 150), (71, 71), (90, 90), (240, 240)])
 def test_opener_speeds_waits_and_grip_contract(phase, free_speed, rack_speed):
-    """오프너의 자유 이동·랙 속도 상한과 기존 대기·그리퍼 계약을 검사한다."""
+    """따개 거치대 전체의 동일 속도·가속도와 기존 대기·그리퍼 계약을 검사한다."""
     sequence, robot, params = make_sequence({"free_line_speed_mm_s": free_speed})
     with patch("cake_decorator.doosan_robot.time.sleep") as sleep:
         assert getattr(sequence, "_plate_" + phase + "_steps")()
@@ -156,7 +156,8 @@ def test_opener_speeds_waits_and_grip_contract(phase, free_speed, rack_speed):
     assert [req.vel[0] for _, req in opener] == [
         free_speed, rack_speed, rack_speed, free_speed, rack_speed, free_speed,
     ]
-    assert all(kind == "move_line" and req.acc[0] == 100 for kind, req in opener)
+    assert all(kind == "move_line" and req.acc[0] == 300 for kind, req in opener)
+    assert all((req.vel[1], req.acc[1]) == (60, 120) for _, req in opener)
     assert all((req.ref, req.mode, req.sync_type) == (0, 0, 0) for _, req in opener)
     approach = params["plate_pick_opener1"]
     target = [426.73, 252.72, 279.41, 30.09, 179.36, 28.13]

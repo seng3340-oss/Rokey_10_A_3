@@ -125,6 +125,10 @@ class ServiceRobot:
         """이동 실패 주입은 move_line에서 처리한다."""
         return True
 
+    def get_gripper_width(self):
+        """기존 정상 순환 시험에서 최근 파지 폭 표본을 제공한다."""
+        return 0.080
+
     def gripper_open(self, width=100.):
         self.events.append(("open", self.tcp))
         return self.fail != "open"
@@ -260,7 +264,7 @@ def test_side_tcp_name_with_wrong_transform_cannot_start_drawing(offset):
 def make_executor(monkeypatch, **parameters):
     """액션·서비스는 실제 Python 메서드를 쓰고 모터/통신 경계만 대체한다."""
     import cake_decorator.robot_executor_node as module
-    from cake_decorator.drawing_motion import DsrPos, TaskState
+    from cake_decorator.drawing_motion import DsrPos, MotionCommand, TaskState
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
 
     executor = module.RobotExecutorNode.__new__(module.RobotExecutorNode)
@@ -275,8 +279,10 @@ def make_executor(monkeypatch, **parameters):
     executor._go_to_cake_center = Mock(side_effect=AssertionError("중심 접근 호출"))
     executor._robot.move_home = Mock(side_effect=AssertionError("실패 후 홈 이동"))
     commands = [
-        SimpleNamespace(
+        MotionCommand(
             pos=DsrPos(401., -55., z, 0., 180., 0.),
+            vel=180.0,
+            acc=100.0,
             phase=SimpleNamespace(value="APPROACH"),
             motion_type=SimpleNamespace(value="LINE"),
             pen_down=down, stroke_idx=0,
@@ -485,7 +491,7 @@ def test_moved_rack_position_keeps_original_side_joint_approach():
 
 @pytest.mark.parametrize('continuing', [False, True])
 def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
-    """TOP 이후 재파지에도 펜 전용 인출·거치대 속도를 적용한다."""
+    """TOP 이후 재파지에도 일반 직선·회전 속도를 동일하게 적용한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
     rack = rack_parameters()
     robot = ServiceRobot()
@@ -493,10 +499,10 @@ def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
     cycle = IntegratedPenCycle(robot, rack.__getitem__)
     cycle.pick_side(preserve_speed=continuing)
     speeds = [call.kwargs['speed_mm_s'] for call in robot.move_line.call_args_list]
-    assert speeds == [120., 150., 150., 150.]
-    # 45도 기울임·수직 복귀만 동일하게 낮추고 직선 인출은 빠르게 유지한다.
-    assert [call.kwargs['angular_speed_deg_s'] for call in robot.move_line.call_args_list] == [90., 31.5, 90., 31.5]
-    assert [call.kwargs['angular_acc_deg_s2'] for call in robot.move_line.call_args_list] == [180., 90., 180., 90.]
+    assert speeds == [150., 150., 150., 150.]
+    # 케이크에 접근하기 전 하강·피벗·인출 모두 공통 속도를 사용한다.
+    assert [call.kwargs['angular_speed_deg_s'] for call in robot.move_line.call_args_list] == [60., 60., 60., 60.]
+    assert [call.kwargs['angular_acc_deg_s2'] for call in robot.move_line.call_args_list] == [120., 120., 120., 120.]
 
 
 @pytest.mark.parametrize('has_more', [False, True])
@@ -512,7 +518,7 @@ def test_top_intermediate_return_keeps_speed_and_final_return_is_faster(monkeypa
     assert executor._do_returning_tool(handle, handle.request)
     assert executor._robot.move_joint.call_args.kwargs['speed_deg_s'] == 60.
     assert [call.kwargs['speed_mm_s'] for call in executor._robot.move_line.call_args_list] == (
-        [120.] if has_more else [120., 150.]
+        [150.] if has_more else [150., 150.]
     )
 
 

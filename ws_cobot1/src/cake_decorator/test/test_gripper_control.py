@@ -296,7 +296,9 @@ class PlateSequenceReuseTests(unittest.TestCase):
 
         def move_line(
             self, pos, speed_mm_s=50.0, acc_mm_s2=100.0, ref=None, mode=None,
+            *, angular_speed_deg_s=20.0, angular_acc_deg_s2=40.0,
         ):
+            """실제 클라이언트와 같은 선형·회전 인자를 받고 호출 순서만 기록한다."""
             self.calls.append("move_line")
             return True
 

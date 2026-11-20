@@ -17,6 +17,8 @@ import rclpy
 from rclpy.action import ActionServer
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.parameter import Parameter
+from std_srvs.srv import Trigger
 from cake_decorator_interfaces.action import DrawOnCake
 from cake_decorator.backend_client import BackendClient
 from cake_decorator.ros_bridge_node import RosBridgeNode
@@ -30,12 +32,39 @@ class HardwareFreeDraw(Node):
     """오직 테스트용 피드백과 결과만 생성한다. DSR 서비스/토픽을 사용하지 않는다."""
 
     def __init__(self):
+        """드로잉 Action과 준비·후처리 대역만 제공하며 각 호출 이력을 보관한다."""
         super().__init__("test_hardware_free_draw")
-        self.fail = False
+        self.fail = ""
         self.goals = []
         self.server = ActionServer(self, DrawOnCake, "draw_on_cake", self.execute)
+        # 실제 플레이트 시퀀스 대신 서비스 결과만 주입한다. 장비 명령은 생성하지 않는다.
+        self.plate_failure = None
+        self.plate_calls = []
+        self.prepare_server = self.create_service(
+            Trigger, "plate_prepare", self.prepare
+        )
+        self.finish_server = self.create_service(
+            Trigger, "plate_finish", self.finish
+        )
+
+    def prepare(self, request, response):
+        """준비 서비스 호출을 기록하고 지정된 예외 응답을 반환한다."""
+        return self.plate_response("prepare", response)
+
+    def finish(self, request, response):
+        """후처리 서비스 호출을 기록하고 지정된 예외 응답을 반환한다."""
+        return self.plate_response("finish", response)
+
+    def plate_response(self, phase, response):
+        """해당 단계에만 코드·상세 문구를 주입해 TM의 원문 보존을 검증한다."""
+        self.plate_calls.append(phase)
+        failure = self.plate_failure
+        response.success = failure is None or failure[0] != phase
+        response.message = "완료" if response.success else f"{failure[1]}: {failure[2]}"
+        return response
 
     def execute(self, handle):
+        """드로잉 요청을 기록하고 진행률 뒤에 설정한 성공·실패 결과를 반환한다."""
         self.goals.append(handle.request)
         for percent in [0.0, 25.0, 50.0, 75.0]:
             handle.publish_feedback(
@@ -50,7 +79,9 @@ class HardwareFreeDraw(Node):
         if self.fail:
             handle.abort()
             return DrawOnCake.Result(
-                success=False, error_code="TEST_RE_FAILURE", completed_strokes=0
+                success=False,
+                error_code=self.fail,
+                completed_strokes=0,
             )
         handle.succeed()
         return DrawOnCake.Result(success=True, error_code="", completed_strokes=1)
@@ -62,7 +93,7 @@ class HardwareFreeDraw(Node):
 )
 class HmiPipelineTest(unittest.TestCase):
     def test_real_tm_plan_status_success_and_failure(self):
-        """상단 성공·측면 실패를 실제 프로토콜로 전달하고 하드웨어 서비스 부재를 확인한다."""
+        """성공·예외 3종·복귀 실패를 주문 조회까지 전달하고 장비 서비스 부재를 확인한다."""
         self.assertEqual(os.environ.get("ROS_DOMAIN_ID"), "231")
         self.assertEqual(os.environ.get("ROS_LOCALHOST_ONLY"), "1")
         with tempfile.TemporaryDirectory(prefix="cake-production-hmi-") as directory:
@@ -135,6 +166,9 @@ class HmiPipelineTest(unittest.TestCase):
                     )
                 rclpy.init()
                 tm = TaskManagerNode()
+                tm.set_parameters([
+                    Parameter("plate_sequence_enabled", value=True),
+                ])
                 dp = DrawingPathNode()
                 draw = HardwareFreeDraw()
                 bridge = RosBridgeNode(
@@ -151,8 +185,54 @@ class HmiPipelineTest(unittest.TestCase):
                 thread.start()
                 bridge.start()
                 results = []
-                for surface, fail in [("top", False), ("side", True)]:
-                    draw.fail = fail
+                # 서비스 예외는 준비/후처리에, 펜 예외는 Action 결과에 주입한다.
+                # 복귀 실패 문구도 별도로 넣어 성공 복귀 문구로 덮어쓰지 않는지 확인한다.
+                cases = [
+                    ("top", "", "", None),
+                    (
+                        "side",
+                        "TEST_RE_FAILURE",
+                        "DrawOnCake 실패: TEST_RE_FAILURE",
+                        None,
+                    ),
+                    (
+                        "side",
+                        "PEN_GRASP_FAILED",
+                        "펜 파지 실패, 안전 자세에서 대기중",
+                        None,
+                    ),
+                    (
+                        "side",
+                        "PEN_GRASP_RECOVERY_FAILED",
+                        "펜 파지 실패, 안전 자세 복귀 실패. 현재 자세를 확인하세요",
+                        None,
+                    ),
+                    (
+                        "top",
+                        "OPENER_MISSING",
+                        "따개 없음, 안전 자세에서 대기중",
+                        "prepare",
+                    ),
+                    (
+                        "top",
+                        "CAKE_WEIGHT_FAILED",
+                        "케이크 무게 확인 실패: 하중 측정 실패. 안전 자세에서 대기중",
+                        "prepare",
+                    ),
+                    (
+                        "side",
+                        "CAKE_WEIGHT_FAILED",
+                        "케이크 무게 확인 실패: 하중 측정 실패. 안전 자세 복귀 실패",
+                        "finish",
+                    ),
+                ]
+                for surface, code, message, plate_phase in cases:
+                    draw.fail = code if plate_phase is None else ""
+                    draw.plate_failure = (
+                        (plate_phase, code, message) if plate_phase else None
+                    )
+                    draw.plate_calls.clear()
+                    goals_before = len(draw.goals)
                     body = {
                         "canvas_width": 1024,
                         "canvas_height": 768,
@@ -177,11 +257,32 @@ class HmiPipelineTest(unittest.TestCase):
                             break
                         time.sleep(0.1)
                     self.assertEqual(
-                        detail["status"], "failed" if fail else "completed"
+                        detail["status"], "failed" if code else "completed"
                     )
+                    self.assertEqual(detail["error_code"], code)
+                    if code:
+                        self.assertEqual(detail["message"], message)
+                    expected_calls = ["prepare"]
+                    if not code or plate_phase == "finish":
+                        expected_calls.append("finish")
+                    self.assertEqual(draw.plate_calls, expected_calls)
                     self.assertEqual(
-                        detail["error_code"], "TEST_RE_FAILURE" if fail else ""
+                        len(draw.goals) - goals_before,
+                        0 if plate_phase == "prepare" else 1,
                     )
+                    results.append(
+                        {
+                            "order_id": oid,
+                            "surface": surface,
+                            "status": detail["status"],
+                            "error_code": detail["error_code"],
+                            "message": detail["message"],
+                            "observed_states": seen,
+                        }
+                    )
+                    # 준비 실패 주문은 DP를 호출하지 않으므로 계획을 조회하지 않는다.
+                    if plate_phase == "prepare":
+                        continue
                     plan = http("/api/orders/" + oid + "/plan")
                     self.assertEqual(
                         plan["source"], "task_manager_node/GenerateTrajectory"
@@ -200,18 +301,17 @@ class HmiPipelineTest(unittest.TestCase):
                             self.assertLess(abs(a["y"] - b["y"]), 1.0)
                         else:
                             self.assertAlmostEqual(a["y"], b["y"], places=3)
-                    results.append(
-                        {
-                            "order_id": oid,
-                            "surface": surface,
-                            "status": detail["status"],
-                            "error_code": detail["error_code"],
-                            "plan_source": plan["source"],
-                            "observed_states": seen,
-                        }
+                    results[-1]["plan_source"] = plan["source"]
+                self.assertEqual(len(draw.goals), 5)
+                # 전체 그래프 조회에는 조회용 클라이언트 이름도 보일 수 있다.
+                # 실제 각 노드가 제공하는 서비스 서버만 조사해 장비 부재를 검사한다.
+                services = [
+                    service_name
+                    for node_name, namespace in tm.get_node_names_and_namespaces()
+                    for service_name, _ in tm.get_service_names_and_types_by_node(
+                        node_name, namespace
                     )
-                self.assertEqual(len(draw.goals), 2)
-                services = [name for name, _ in tm.get_service_names_and_types()]
+                ]
                 self.assertFalse(
                     any("/dsr01/" in name for name in services),
                     "검사 도메인에 로봇 드라이버가 없어야 합니다.",

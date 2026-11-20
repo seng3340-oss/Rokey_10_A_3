@@ -31,24 +31,23 @@ def return_pen(
     from dsr_msgs2.srv import GetCurrentPosj, GetCurrentPosx
     from onrobot_rg_msgs.srv import SetCommand
 
-    # 통합 실행은 현재 이동 설정을 받으며, 독립 시험도 같은 속도 기준을 쓴다.
-    # 기울임·수직 복귀만 완만하게 하고 공중 이동·하강·인출의 선속도는 유지한다.
+    # 드로잉 계획의 마지막 이탈 뒤 반납은 일반 이동이다. 독립 시험도 같은
+    # 선형·회전 설정을 사용해 J6 되감기와 기울임에서 별도 감속이 생기지 않게 한다.
     defaults = {
         "free_joint_speed_deg_s": 60.0,
         "free_joint_acc_deg_s2": 120.0,
-        "pen_travel_speed_mm_s": 180.0,
+        "free_line_speed_mm_s": 150.0,
+        "free_line_acc_mm_s2": 300.0,
+        # 마지막 획 직후 상공으로 빠지는 한 동작만 기존 제한을 보존한다.
         "pen_lift_speed_mm_s": 150.0,
-        "pen_rack_speed_mm_s": 120.0,
         "pen_motion_acc_mm_s2": 400.0,
-        "pen_rotation_speed_deg_s": 90.0,
-        "pen_rotation_acc_deg_s2": 180.0,
         "pen_tilt_speed_deg_s": 31.5,
         "pen_tilt_acc_deg_s2": 90.0,
     }
     resolved = {}
 
     def setting(name):
-        """새 기울임 설정만 없는 이전 노드는 검증된 기본값으로 반납한다.
+        """일반 직선 설정이 없는 이전 노드도 기본값으로 반납한다.
 
         나머지 필수 설정의 누락은 그대로 오류로 처리한다. 이미 읽은 값은 같은
         반납 동안 고정하고, 구버전 호환 안내도 설정마다 한 번만 남긴다.
@@ -60,7 +59,10 @@ def return_pen(
                 try:
                     value = parameter(name)
                 except ParameterNotDeclaredException:
-                    if name not in ("pen_tilt_speed_deg_s", "pen_tilt_acc_deg_s2"):
+                    if name not in (
+                        "free_line_speed_mm_s", "free_line_acc_mm_s2",
+                        "pen_tilt_speed_deg_s", "pen_tilt_acc_deg_s2",
+                    ):
                         raise
                     value = defaults[name]
                     robot._logger.warning(
@@ -84,35 +86,42 @@ def return_pen(
         require(result is not None and result.success, "현재 관절 조회")
         return list(result.pos)
 
-    def movej(target, label, *, tilt=False):
-        """절대 관절로 되감되 거치대 수직 복귀에만 기울임 속도를 적용한다."""
+    def movej(target, label):
+        """되감기·거치대 접근 모두 같은 관절 속도로 실행하고 도달을 확인한다."""
         check_cancel()
-        rotation = "pen_tilt" if tilt else "free_joint"
         require(robot.move_joint(
             target,
-            speed_deg_s=setting(f"{rotation}_speed_deg_s"),
-            acc_deg_s2=setting(f"{rotation}_acc_deg_s2"),
+            speed_deg_s=setting("free_joint_speed_deg_s"),
+            acc_deg_s2=setting("free_joint_acc_deg_s2"),
         ), label)
         actual = joints()
         require(max(abs(a-b) for a,b in zip(target,actual)) < .5, label+" 도달")
 
-    def line(pose, label, speed_name="pen_travel_speed_mm_s"):
-        """반납 회전은 기울임 제한을 쓰고 하강·인출·공중 선속도는 유지한다."""
+    def line(pose, label, *, final_lift=False):
+        """최종 상공 이탈은 기존 속도, 이후 반납은 공통 속도로 도달을 확인한다."""
         check_cancel()
-        require(robot.move_line(
-            DsrPos(*pose),
-            speed_mm_s=setting(speed_name),
-            acc_mm_s2=setting("pen_motion_acc_mm_s2"),
-            angular_speed_deg_s=setting("pen_tilt_speed_deg_s"),
-            angular_acc_deg_s2=setting("pen_tilt_acc_deg_s2"),
-        ), label)
+        motion = {
+            "speed_mm_s": setting(
+                "pen_lift_speed_mm_s" if final_lift else "free_line_speed_mm_s"
+            ),
+            "acc_mm_s2": setting(
+                "pen_motion_acc_mm_s2" if final_lift else "free_line_acc_mm_s2"
+            ),
+            "angular_speed_deg_s": setting(
+                "pen_tilt_speed_deg_s" if final_lift else "free_joint_speed_deg_s"
+            ),
+            "angular_acc_deg_s2": setting(
+                "pen_tilt_acc_deg_s2" if final_lift else "free_joint_acc_deg_s2"
+            ),
+        }
+        require(robot.move_line(DsrPos(*pose), **motion), label)
         require(robot.verify_pose(pose),label+" 도달")
 
     current = robot._call("current_pose", GetCurrentPosx.Request(ref=0))
     require(current is not None and current.success and bool(current.task_pos_info),"현재 펜촉 조회")
     raised = list(current.task_pos_info[0].data[:6])
     raised[2] += 100.
-    line(raised,"케이크 밖 상공으로 추가 이탈", "pen_lift_speed_mm_s")
+    line(raised, "케이크 밖 상공으로 추가 이탈", final_lift=True)
 
     # DRL에서 사용한 높은 경유 관절 자세. 먼저 현재 회전수를 유지한 채 이동하고
     # 그 자세에서 J6만 집기 완료 시점의 값으로 되감는다.
@@ -124,7 +133,7 @@ def return_pen(
         list(rack['pen_drop_approach_pose']) if rack is not None
         else [43.58, .53, 69.85, .09, 109.63, 43.31]
     )
-    movej(drop_approach, "펜 거치대 상공", tilt=True)
+    movej(drop_approach, "펜 거치대 상공")
 
     # 펜은 RG2에 +Y 기울임 상태로 물려 있다. 원래 파지와 같은 45도 기울임을
     # 재현하면 펜 자체가 수직으로 돌아온다. 반납 중심은 DRL의 티칭값을 쓴다.
@@ -163,7 +172,7 @@ def return_pen(
     above = list(drop)
     above[2] += clearance
     line(above,"펜을 수직으로 맞추는 기울임 자세 상공")
-    line(list(drop),"거치대 반납 위치로 하강", "pen_rack_speed_mm_s")
+    line(list(drop),"거치대 반납 위치로 하강")
     check_cancel()
     if open_gripper is None:
         response = robot._call("gripper", SetCommand.Request(command="o"))
@@ -176,5 +185,5 @@ def return_pen(
         reset_tcp()
         above = [*flange_position, *angles]
         above[2] += clearance
-    line(above,"반납 후 수직 인출", "pen_lift_speed_mm_s")
+    line(above,"반납 후 수직 인출")
     robot._logger.info("J6 되감기와 펜 반납 완료")

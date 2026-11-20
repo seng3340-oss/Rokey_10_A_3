@@ -1,18 +1,20 @@
 # 옆면 그리기 확정 설정
 
-2026-11-19 실물 시험 후 확정한 값이다. 현재 45도 펜 파지와 케이크 배치를 기준으로 한다.
+2026-11-19 실물 시험 기준값에 2026-11-20 요청한 중심·유격 보정을 반영했다.
+상면·옆면 중심을 각각 BASE X -1mm, Y -0.8mm 옮겼으며 전체 지름 유격은 0.3mm 줄였다.
+이번 보정값의 실물 운전은 수행하지 않았다.
 
 | 항목 | 확정 값 | 설정 위치 |
 |---|---|---|
-| 케이크 윗면 중심 BASE XYZ | 396.7743225097656, -50.759329986572266, 222.0 mm | `config/real_robot.json` |
+| 옆면용 케이크 윗면 중심 BASE XYZ | 395.6743225097656, -51.35932998657227, 222.0 mm | `config/real_robot.json` |
 | Y 양쪽 안쪽 보정 | 각각 1mm, 전체 Y 폭 2mm 감소 | `scripts/start_real_side_web_test.sh`의 `--side-y-inset-mm 1` |
-| 옆면 지름 유격 | 8.0mm, 반지름 방향으로 4.0mm 추가 | `ws_cobot1/src/cake_decorator/config/workspace_config.yaml`의 `side_diameter_allowance_mm` |
+| 옆면 지름 유격 | 6.2mm, 반지름 방향으로 3.1mm 추가 | `ws_cobot1/src/cake_decorator/config/workspace_config.yaml`의 `side_diameter_allowance_mm` |
 | 옆면 TCP 이름 | `Pen_Side_45` | 펜던트 등록값 및 `bent_pen.py` |
 | 펜촉 TCP XYZ / ABC | 1.095, -46.474, 271.695 mm / 0, 0, 0도 | 펜던트 등록값 및 `bent_pen.py`의 검증 기준 |
 | 펜 파지 회전 중심 | 0, 0, 220mm | `scripts/real_pen_pick_45.py`의 `GRIP_CENTER_MM` |
 
 Y 보정은 중심에 대해 sin(theta)로 부드럽게 적용한다. X/Z는 유지하고 Y 양끝만 각각 1mm 줄인다.
-지름 유격과 함께 적용되므로 같은 높이에서 X 양끝은 원래 표면보다 4mm, Y 양끝은 3mm 바깥이다.
+지름 유격과 함께 적용되므로 같은 높이에서 X 양끝은 원래 표면보다 3.1mm, Y 양끝은 2.1mm 바깥이다.
 펜 파지 중심 TCP와 펜촉 TCP는 용도가 다르다. 220mm는 회전할 때 지문 중앙을 고정하기 위한 값이고 펜촉 길이가 아니다.
 TCP의 XYZ는 로봇 BASE 기준 케이크 좌표가 아니라 플랜지 기준 펜촉 오프셋이다.
 ABC가 0이어도 펜은 물리적으로 45도로 잡혀 있다. TCP 축을 플랜지 축과 같게 정의한 것이다.
@@ -22,6 +24,7 @@ ABC가 0이어도 펜은 물리적으로 45도로 잡혀 있다. TCP 축을 플�
 ### config/real_robot.json — 실제 케이크 위치
 
 - `side_cake_center_xy_mm`: 옆면 시험에서 접근할 케이크 상면 중심 BASE X/Y(mm).
+- `top_cake_center_xy_mm`: 상면용 TCP 기준 중심 BASE X/Y(mm). 현재 [399.5243225097656, -53.80932998657227]이며 옆면과의 기존 보정 차이를 유지한다.
 - `cake_top_z_mm`: 같은 중심의 BASE Z(mm). 테이블 기준 케이크 높이가 아니다.
 - `configure_pen_tcp_on_yes`: 일반 실물 실행의 수직 접촉 TCP 추정 기능. 45도 옆면 시험은 이 기능을 건너뛰고 `Pen_Side_45`를 적용한다.
 
