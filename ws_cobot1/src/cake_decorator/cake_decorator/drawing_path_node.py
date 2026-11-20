@@ -34,6 +34,7 @@ from .surface_path import (
     continuous_side_leg,
     SplineSurfaceMove,
     split_spline_samples,
+    thin_spline_samples,
 )
 
 from .drawing_geometry import (
@@ -62,6 +63,9 @@ class DrawingPathNode(Node):
         self.declare_parameter("simplify_tolerance_mm", 0.15)
         self.declare_parameter("duplicate_tolerance_mm", 0.01)
         self.declare_parameter("side_path_error_mm", 0.1)
+        # 옆면 한 획의 movesx 표본을 솎을 때 허용하는 경로 이탈(mm). 표본이 줄면 100점 제한으로
+        # 생기는 명령 경계(정지)가 줄어 한 획이 덜 끊긴다. 0이면 솎지 않는다(기존 동작).
+        self.declare_parameter("side_spline_tolerance_mm", 0.05)
         self.declare_parameter("side_diagonal_mode", "spline")
         self.declare_parameter("side_pen_vertical_deg", 17.0)
         # 양수이면 BASE +Y/-Y 가장자리를 각각 같은 거리만큼 안으로 줄인다.
@@ -491,6 +495,17 @@ class DrawingPathNode(Node):
                     samples.extend(zip(move.samples, move.sample_arcs))
             if len(samples) > 20000:
                 raise ValueError("옆면 연속 표본 한도 초과")
+            # 입력 선별 점마다 생긴 촘촘한 표본(약 1mm 간격)을 경로 이탈 허용치 안에서 솎는다.
+            # 원주 간격은 생성 때의 각도 한도(angle_step)를 넘지 않게 해 현의 처짐을 같게 유지한다.
+            # 표본이 100개 이하로 줄면 한 획이 movesx 한 번으로 끝나 중간 정지가 없어진다.
+            before = len(samples)
+            samples = thin_spline_samples(
+                samples,
+                self._param("side_spline_tolerance_mm"),
+                math.radians(angle_step) * cake.radius,
+            )
+            if len(samples) < before:
+                self.get_logger().debug(f"옆면 표본 솎기: {before} → {len(samples)}")
             for chunk in split_spline_samples(samples):
                 if len(chunk) < 2:
                     raise ValueError("스플라인 마지막 묶음은 두 점 이상이어야 합니다.")

@@ -27,6 +27,7 @@ from std_msgs.msg import Float64MultiArray
 from dsr_msgs2.srv import (
     MoveHome,
     MoveJoint,
+    MoveBlending,
     MoveLine,
     MoveSplineTask,
     MoveCircle,
@@ -175,6 +176,11 @@ class DoosanRobotClient:
         "move_jointx": ("/dsr01/dsr_controller2/motion/move_jointx", MoveJointx),
         "move_circle": ("/dsr01/dsr_controller2/motion/move_circle", MoveCircle),
         "move_line": ("/dsr01/dsr_controller2/motion/move_line", MoveLine),
+        # 윗면 연속 직선을 꼭짓점 블렌딩으로 한 번에 보내는 moveb.
+        "move_blending": (
+            "/dsr01/dsr_controller2/motion/move_blending",
+            MoveBlending,
+        ),
         "move_joint": ("/dsr01/dsr_controller2/motion/move_joint", MoveJoint),
         "move_home": ("/dsr01/dsr_controller2/motion/move_home", MoveHome),
         "move_spline": (
@@ -309,7 +315,8 @@ class DoosanRobotClient:
     # 그리퍼 구동(제어박스 DO, 가상 그리퍼 명령)이다.
     _LATCH_BLOCKED = frozenset({
         "move_jointx", "move_circle", "move_line", "move_joint",
-        "move_home", "move_spline", "set_digital_output", "gripper",
+        "move_home", "move_spline", "move_blending",
+        "set_digital_output", "gripper",
     })
 
     def _call(self, key: str, request, timeout: float = 180.0) -> Optional[object]:
@@ -358,15 +365,18 @@ class DoosanRobotClient:
         # 실제 제어기도 도달 불가 경고와 함께 success=True를 반환한 사례가 있다.
         # 동기 BASE 절대 이동은 TCP 위치·자세까지 확인해야 완료로 처리할 수 있다.
         if (
-            key in {"move_line", "move_circle", "move_spline"}
+            key in {"move_line", "move_circle", "move_spline", "move_blending"}
             and request.sync_type == SYNC
             and request.ref == DR_BASE
             and request.mode == DR_MV_MOD_ABS
         ):
-            target = (
-                list(request.pos)
-                if key == "move_line" else list(request.pos[-1].data)
-            )
+            if key == "move_line":
+                target = list(request.pos)
+            elif key == "move_blending":
+                # 세그먼트 데이터의 앞 6개가 직선 목표점이다. 마지막 세그먼트 끝을 확인한다.
+                target = list(request.segment[-1].data[:6])
+            else:
+                target = list(request.pos[-1].data)
             return self.verify_pose(target)
         return True
 
@@ -732,6 +742,11 @@ class DoosanRobotClient:
                 self._logger.error("스플라인 목표점 수가 유효하지 않습니다.")
                 return False
             return self.move_spline(command.spline, command.vel, command.acc, **angular)
+        if command.motion_type == MotionType.MOVE_BLEND:
+            if not command.blend or not 2 <= len(command.blend) <= 50:
+                self._logger.error("블렌딩 세그먼트 수가 유효하지 않습니다.")
+                return False
+            return self.move_blending(command.blend, command.vel, command.acc, **angular)
         if command.motion_type == MotionType.MOVE_CIRCLE:
             if command.via is None:
                 self._logger.error(
@@ -777,6 +792,45 @@ class DoosanRobotClient:
     def move_home(self) -> bool:
         """홈 위치로 이동."""
         return self._call_checked("move_home", MoveHome.Request())
+
+    def move_blending(
+        self,
+        segments: list[tuple[DsrPos, float]],
+        speed_mm_s: float = 20.0,
+        acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        *,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
+    ) -> bool:
+        """직선 세그먼트 묶음 블렌딩 이동 (MoveBlending, DRL moveb).
+
+        호출 시점: 윗면 드로잉에서 펜이 닿은 연속 직선을 blend_top_drawing()이 묶은 뒤.
+        입력: (목표점, 블렌딩 반경 mm) 목록, 2~50개. 반경은 해당 목표점에서
+              다음 세그먼트로 넘어갈 때 둥글게 깎는 거리이며 마지막은 0이어야 한다.
+        반환: 동기 실행 성공과 마지막 목표점 TCP 도달 확인(_call_checked)이 모두 참일 때 True.
+
+        드라이버 세그먼트 형식(dsr_controller2 moveb_cb):
+            data[0:6]  = 목표점(posx1)
+            data[6:12] = 원호용 두 번째 점(posx2). 직선(LINE)은 쓰지 않으므로 0
+            data[12]   = 세그먼트 종류(LINE=0)
+            data[13]   = 블렌딩 반경(mm)
+        """
+        if not 2 <= len(segments) <= 50:
+            return False
+
+        req = MoveBlending.Request()
+        req.pos_cnt = len(segments)
+        req.vel = [speed_mm_s, angular_speed_deg_s]
+        req.acc = [acc_mm_s2, angular_acc_deg_s2]
+        req.time = 0.0
+        req.ref = DR_BASE
+        req.mode = DR_MV_MOD_ABS
+        req.sync_type = SYNC
+        for pos, radius in segments:
+            msg = Float64MultiArray()
+            msg.data = pos.to_list() + [0.0] * 6 + [0.0, float(radius)]
+            req.segment.append(msg)
+        return self._call_checked("move_blending", req)
 
     def move_spline(
         self,

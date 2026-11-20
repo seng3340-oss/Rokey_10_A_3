@@ -66,6 +66,9 @@ class MotionType(Enum):
     MOVE_CIRCLE = "movec"
     MOVE_SPLINE = "movesx"
     MOVE_JOINT = "movej"
+    # 윗면 접촉 직선 여러 개를 꼭짓점 블렌딩으로 이어 한 번에 보내는 묶음 이동.
+    # 계획 단계(plan_drawing_motion)에서는 만들지 않고 blend_top_drawing()이 만든다.
+    MOVE_BLEND = "moveb"
 
 
 class Phase(Enum):
@@ -251,6 +254,9 @@ class MotionCommand:
     sync: bool = True  # True=동기, False=비동기
     spline: list[DsrPos] | None = None
     via: DsrPos | None = None  # 원호 경유점. 직선에서는 사용하지 않는다.
+    # MOVE_BLEND 전용: (직선 목표점, 그 목표점에서 다음 직선으로 넘어갈 블렌딩 반경 mm) 목록.
+    # 마지막 항목의 목표점은 pos와 같고 반경은 0이다(묶음 끝에서 정지).
+    blend: list[tuple[DsrPos, float]] | None = None
     angular_vel: float = DEFAULT_VEL_ANGULAR  # °/s, 도구 자세 회전 제한
     angular_acc: float = DEFAULT_ACC_ANGULAR  # °/s²
 
@@ -570,3 +576,179 @@ def _determine_phase(
         return Phase.PEN_UP
     # cur_pen == True
     return Phase.DRAWING
+
+
+# ---------------------------------------------------------------------------
+# 윗면 블렌딩 묶음 (movel 여러 개 → moveb)
+# ---------------------------------------------------------------------------
+
+# 두산 moveb 한 번에 보낼 수 있는 세그먼트 최대 개수(MoveBlending.srv 주석: 50).
+BLEND_MAX_SEGMENTS = 50
+# 블렌딩 반경은 앞뒤 세그먼트 길이의 절반보다 작아야 제어기가 구간 겹침 오류를 내지 않는다.
+# 정확히 절반이면 경계값이라 0.45배로 여유를 둔다.
+BLEND_RADIUS_SEGMENT_RATIO = 0.45
+# 이보다 짧은 세그먼트(mm)는 길이 0에 가까워 moveb에 넣지 않고 기존 movel로 보낸다.
+BLEND_MIN_SEGMENT_MM = 0.01
+# 두산 제어기가 받아들이는 최소 블렌딩 반경(mm). 실기에서 0.649mm를 넣자
+# 경보 1205 "[CheckUnavailableBlendRad] ... should be larger than (1mm)"로 moveb가 중단됐다.
+# 허용 반경이 이보다 작은 꼭짓점은 블렌딩하지 않고 그 지점에서 묶음을 끊어 정지시킨다.
+BLEND_MIN_RADIUS_MM = 1.0
+
+
+def _segment_length(start: DsrPos, end: DsrPos) -> float:
+    """두 목표점 사이의 직선 거리(mm). 자세 변화는 보지 않는다."""
+    return math.dist(start.to_list()[:3], end.to_list()[:3])
+
+
+def _can_blend(previous: MotionCommand, command: MotionCommand) -> bool:
+    """윗면에서 펜이 이미 닿은 채 이어지는 직선 그리기 명령인지 판단한다.
+
+    PEN_DOWN(접촉 진입)·PEN_UP(이탈)·공중 이동은 기존 movel로 남겨
+    접촉·이탈 높이와 속도를 그대로 지킨다.
+    """
+    return (
+        command.motion_type == MotionType.MOVE_LINE
+        and command.phase == Phase.DRAWING
+        and command.sync
+        and _segment_length(previous.pos, command.pos) >= BLEND_MIN_SEGMENT_MM
+    )
+
+
+def _same_profile(first: MotionCommand, command: MotionCommand) -> bool:
+    """moveb는 묶음 전체에 속도·가속도 하나만 쓰므로 같은 값끼리만 묶는다."""
+    return (
+        command.stroke_idx == first.stroke_idx
+        and command.vel == first.vel
+        and command.acc == first.acc
+        and command.angular_vel == first.angular_vel
+        and command.angular_acc == first.angular_acc
+    )
+
+
+def _split_even(items: list, limit: int) -> list[list]:
+    """limit 이하 크기로 최대한 고르게 나눈다.
+
+    51개를 50+1로 나누면 마지막 1개만 따로 정지하므로 26+25처럼 나눠
+    모든 묶음이 두 세그먼트 이상이 되게 한다.
+    """
+    count = -(-len(items) // limit)  # 올림 나눗셈
+    size, extra = divmod(len(items), count)
+    chunks, start = [], 0
+    for index in range(count):
+        end = start + size + (1 if index < extra else 0)
+        chunks.append(items[start:end])
+        start = end
+    return chunks
+
+
+def _corner_radii(start: DsrPos, group: list[MotionCommand], radius_mm: float) -> list[float]:
+    """group[i]의 목표점(꼭짓점)마다 쓸 수 있는 블렌딩 반경을 계산한다.
+
+    반경 = min(최대 반경, 앞 세그먼트·뒤 세그먼트 길이 × 0.45).
+    마지막 목표점은 뒤 세그먼트가 없으므로 0이다(묶음 끝에서 정지).
+    """
+    points = [start] + [command.pos for command in group]
+    lengths = [_segment_length(a, b) for a, b in zip(points, points[1:])]
+    radii = []
+    for index in range(len(group)):
+        if index == len(group) - 1:
+            radii.append(0.0)
+        else:
+            radii.append(min(
+                radius_mm,
+                lengths[index] * BLEND_RADIUS_SEGMENT_RATIO,
+                lengths[index + 1] * BLEND_RADIUS_SEGMENT_RATIO,
+            ))
+    return radii
+
+
+def _split_at_sharp_limits(group: list[MotionCommand], radii: list[float]) -> list[list[tuple[MotionCommand, float]]]:
+    """제어기 최소 반경(1mm)을 못 채우는 꼭짓점에서 묶음을 끊는다.
+
+    끊긴 꼭짓점은 그 묶음의 마지막 목표점이 되어 반경 0으로 정지한다.
+    반환: (명령, 반경) 목록들. 각 목록의 마지막 반경은 항상 0이다.
+    """
+    runs, current = [], []
+    for command, radius in zip(group, radii):
+        if radius >= BLEND_MIN_RADIUS_MM:
+            current.append((command, radius))
+            continue
+        current.append((command, 0.0))
+        runs.append(current)
+        current = []
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _blend_command(chunk: list[tuple[MotionCommand, float]]) -> MotionCommand:
+    """(직선 명령, 꼭짓점 반경) 목록을 moveb 명령 하나로 만든다.
+
+    묶음의 마지막 목표점은 다음 묶음·펜 들기 전에 정확히 도달해야 하므로 반경을 0으로 고정한다.
+    """
+    blend = [(command.pos, radius) for command, radius in chunk]
+    blend[-1] = (blend[-1][0], 0.0)
+    chunk = [command for command, _ in chunk]
+    last = chunk[-1]
+    # 피드백·로그용 단계·획 번호와 속도는 원래 직선 명령의 값을 그대로 쓴다.
+    return MotionCommand(
+        motion_type=MotionType.MOVE_BLEND,
+        pos=last.pos,
+        vel=last.vel,
+        acc=last.acc,
+        phase=last.phase,
+        pen_down=last.pen_down,
+        stroke_idx=last.stroke_idx,
+        angular_vel=last.angular_vel,
+        angular_acc=last.angular_acc,
+        blend=blend,
+    )
+
+
+def blend_top_drawing(
+    commands: list[MotionCommand],
+    radius_mm: float,
+) -> list[MotionCommand]:
+    """윗면 계획에서 펜이 닿은 연속 직선을 moveb 묶음으로 바꾼 새 목록을 돌려준다.
+
+    호출 시점: 실행기가 TOP 계획을 만든 직후, 로봇 명령을 보내기 전.
+    입력 목록은 바꾸지 않는다. radius_mm <= 0이면 원래 목록을 그대로 돌려준다(기존 movel).
+
+    처리 순서
+      1. 같은 획·같은 속도로 이어지는 DRAWING 직선을 한 묶음으로 모은다.
+      2. 꼭짓점마다 반경을 계산하고, 1mm(제어기 최소값) 미만인 꼭짓점에서 묶음을 끊는다.
+      3. 두 세그먼트 이상인 묶음은 50세그먼트 이하로 고르게 나눠 moveb 명령으로 바꾼다.
+      4. 한 개뿐인 직선과 접촉 진입·이탈·공중 이동은 movel 그대로 둔다.
+    radius_mm가 1mm 미만이면 어떤 꼭짓점도 블렌딩할 수 없으므로 원래 목록을 돌려준다.
+    목표점 좌표는 바뀌지 않는다. 꼭짓점이 반경만큼 둥글게 지나가는 것만 달라진다.
+    """
+    if radius_mm < BLEND_MIN_RADIUS_MM or not commands:
+        return list(commands)
+    result: list[MotionCommand] = [commands[0]]
+    group: list[MotionCommand] = []
+
+    def flush():
+        """모아 둔 직선을 결과에 넣는다. 묶음 시작점은 그 직전 명령의 목표점이다."""
+        if group:
+            radii = _corner_radii(result[-1].pos, group, radius_mm)
+            for run in _split_at_sharp_limits(group, radii):
+                if len(run) < 2:
+                    # 앞뒤가 모두 짧아 블렌딩할 수 없는 단독 직선은 기존 movel로 보낸다.
+                    result.extend(command for command, _ in run)
+                    continue
+                for chunk in _split_even(run, BLEND_MAX_SEGMENTS):
+                    result.append(_blend_command(chunk))
+        group.clear()
+
+    for previous, command in zip(commands, commands[1:]):
+        if _can_blend(previous, command) and (not group or _same_profile(group[0], command)):
+            group.append(command)
+            continue
+        flush()
+        if _can_blend(previous, command):
+            # 속도·획이 바뀐 지점부터 새 묶음을 시작한다.
+            group.append(command)
+        else:
+            result.append(command)
+    flush()
+    return result

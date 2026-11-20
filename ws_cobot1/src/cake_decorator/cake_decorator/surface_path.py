@@ -121,6 +121,54 @@ def split_spline_samples(samples):
     return result
 
 
+def _point_to_segment_mm(point, start, end):
+    """3차원 점에서 선분까지의 최단 거리(mm). 선분 길이가 0이면 점 사이 거리다."""
+    seg = [e - s for s, e in zip(start, end)]
+    rel = [p - s for s, p in zip(start, point)]
+    length_sq = sum(v * v for v in seg)
+    if length_sq < 1e-18:
+        return math.dist(point, start)
+    t = max(0.0, min(1.0, sum(a * b for a, b in zip(rel, seg)) / length_sq))
+    return math.dist(point, [s + t * v for s, v in zip(start, seg)])
+
+
+def thin_spline_samples(samples, tolerance_mm, max_arc_mm):
+    """옆면 한 획의 연속 표본에서 경로 모양에 기여하지 않는 점을 솎아 낸다.
+
+    배경: 입력 획의 선별 점마다 표본이 생겨 한 획이 1mm 간격 수백 점이 되면
+          movesx 100점 제한 때문에 여러 명령으로 나뉘고, 명령 경계마다 정지해 끊긴다.
+    입력: [((x, y, z), arc_mm), ...] 순서 목록. arc_mm은 pen_quat_side 자세 계산용 원주 거리다.
+    규칙(3차원 RDP + 원주 간격 제한)
+      - 처음·끝 표본은 항상 남긴다.
+      - 남긴 두 표본을 잇는 직선에서 빠진 표본까지 거리가 tolerance_mm를 넘으면 그 점을 남긴다.
+      - 남긴 두 표본의 원주 거리 차이가 max_arc_mm를 넘으면 가운데 점을 남긴다.
+        원통 위 두 점의 직선(현)이 곡면 안으로 처지는 양을 생성 때와 같은 한도로 묶기 위해서다.
+    반환: 솎아 낸 새 목록(입력은 바꾸지 않음). 각 표본의 좌표·원주 값은 그대로다.
+    """
+    if len(samples) <= 2 or tolerance_mm <= 0:
+        return list(samples)
+    keep = [False] * len(samples)
+    keep[0] = keep[-1] = True
+    # 재귀 대신 구간 스택을 써 표본 20000개에서도 호출 깊이 한도에 걸리지 않게 한다.
+    stack = [(0, len(samples) - 1)]
+    while stack:
+        first, last = stack.pop()
+        if last - first < 2:
+            continue
+        start, end = samples[first][0], samples[last][0]
+        split, worst = None, tolerance_mm
+        for index in range(first + 1, last):
+            distance = _point_to_segment_mm(samples[index][0], start, end)
+            if distance > worst:
+                split, worst = index, distance
+        if split is None and abs(samples[last][1] - samples[first][1]) > max_arc_mm:
+            split = (first + last) // 2
+        if split is not None:
+            keep[split] = True
+            stack.extend(((first, split), (split, last)))
+    return [sample for sample, kept in zip(samples, keep) if kept]
+
+
 def continuous_side_leg(
     cake, start, end, offset_mm=0.0, max_angle_deg=1.0, max_height_mm=0.5,
 ):

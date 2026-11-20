@@ -44,6 +44,7 @@ from .drawing_motion import (
     TaskState,
     can_transition,
     get_substeps,
+    blend_top_drawing,
     plan_drawing_motion,
     pose_msg_to_dsr,
 )
@@ -61,6 +62,11 @@ class RobotExecutorNode(Node):
         # 펜·따개 없음 판정 후 거치대에서 한 번 더 집기 전 대기 시간[초].
         # 작업자가 도구를 다시 놓을 시간이다. 재시도는 1회로 고정한다.
         'tool_regrasp_wait_sec': 5.0,
+        # 윗면 연속 직선을 moveb로 묶을 때의 최대 꼭짓점 블렌딩 반경[mm].
+        # 실제 반경은 앞뒤 세그먼트 길이의 0.45배를 넘지 않게 자동으로 줄어든다.
+        # 제어기 최소 반경이 1mm라서 줄어든 값이 1mm 미만인 꼭짓점은 정지 후 이어 간다.
+        # 1mm 미만(0 포함)으로 설정하면 기존처럼 점마다 movel.
+        'top_blend_radius_mm': 1.5,
         'plate_weight_check_enabled': False,
         'plate_opener_weight_kg': 0.05,
         'plate_cake_weight_kg': 0.20,
@@ -885,6 +891,17 @@ class RobotExecutorNode(Node):
         plan = plan_drawing_motion(waypoints_dict, pen_states, surface)
         if not plan.success:
             return failed(plan.error_msg)
+        if surface == 'TOP':
+            # 윗면에서 펜이 닿은 연속 직선을 moveb 묶음으로 바꿔 점마다 멈추지 않게 한다.
+            # 접촉 진입·이탈·공중 이동과 첫 상공 접근(commands[0])은 movel 그대로다.
+            line_count = len(plan.commands)
+            plan.commands = blend_top_drawing(
+                plan.commands, float(self._param('top_blend_radius_mm')),
+            )
+            self.get_logger().info(
+                f'윗면 블렌딩: 명령 {line_count}개 → {len(plan.commands)}개 '
+                f'(반경 최대 {self._param("top_blend_radius_mm")}mm)'
+            )
 
         if self._param('pen_tool_cycle') and surface != 'TOP' and not integrated:
             return failed('TOP_ONLY')
