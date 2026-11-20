@@ -59,6 +59,8 @@ class DrawingPathNode(Node):
         self.declare_parameter("approach_height", 10.0)  # mm (펜 접근 높이)
         self.declare_parameter("side_diameter_allowance_mm", 3.5)  # 옆면 경로 지름 보정(mm)
         self.declare_parameter("drawing_z_offset", 0.0)  # mm (표면 접촉 보정)
+        # 윗면에만 더하는 BASE Z 보정(mm). 음수는 펜을 내리며 옆면 반경에는 적용하지 않는다.
+        self.declare_parameter("top_drawing_z_offset", 0.0)
         self.declare_parameter("default_contact_force", 0.5)  # N
         self.declare_parameter("simplify_tolerance_mm", 0.15)
         self.declare_parameter("duplicate_tolerance_mm", 0.01)
@@ -199,6 +201,13 @@ class DrawingPathNode(Node):
             raise ValueError(
                 "옆면 안쪽으로 들어가는 음수 접촉 오프셋은 허용하지 않습니다."
             )
+
+        if surface == "TOP":
+            # 티칭한 케이크 높이·TCP를 유지하고 필기 접촉 높이만 별도로 조정한다.
+            top_offset = self._param("top_drawing_z_offset")
+            if not math.isfinite(top_offset):
+                raise ValueError("윗면 필기 높이 보정은 유한한 mm 값이어야 합니다.")
+            z_offset += top_offset
 
         if surface == "SIDE":
             allowance = self._param("side_diameter_allowance_mm")
