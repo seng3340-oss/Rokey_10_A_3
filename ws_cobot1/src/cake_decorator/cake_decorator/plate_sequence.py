@@ -80,7 +80,7 @@ class PlateSequence:
                 speed = self._param('free_line_speed_mm_s')
                 if not self._plate_place_opener(
                     speed_approach=speed * 0.5,
-                    speed_slow=min(90.0, speed) * 0.5,
+                    speed_slow=speed * 0.5,
                     speed_retract=speed * 0.5,
                 ):
                     raise PlateWeightError(f'케이크 무게 확인 실패: {error}. 따개 반납 실패, 현재 자세에서 중단') from error
@@ -144,10 +144,16 @@ class PlateSequence:
         acc = acc if acc_mm_s2 is None else acc_mm_s2
         self._validate_motion(speed, acc)
         self._logger.info(f'plate {name}: speed={speed:g}mm/s acc={acc:g}mm/s2')
+        # 보호 구간에는 기존 move_line 회전 제한을 유지한다. 일반 직선만 통일한다.
+        angular = {} if cake_carrying else {
+            'angular_speed_deg_s': self._param('free_joint_speed_deg_s'),
+            'angular_acc_deg_s2': self._param('free_joint_acc_deg_s2'),
+        }
         return self._robot.move_line(
             DsrPos(*self._param('plate_' + name)),
             speed_mm_s=speed,
             acc_mm_s2=acc,
+            **angular,
             ref=DR_BASE,
             mode=DR_MV_MOD_REL if relative else DR_MV_MOD_ABS,
         )
@@ -177,7 +183,7 @@ class PlateSequence:
     ) -> bool:
         """공통 pick()을 재사용해 케이크가 없는 오프너를 파지한다.
 
-        접근은 자유 속도, 랙 진입과 파지 후 후퇴는 동일한 제한 속도를 쓴다.
+        접근·랙 진입·파지 후 후퇴는 모두 일반 직선 속도를 쓴다.
         그리퍼 명령과 닫힘·안정화 대기는 공통 pick()에 맡겨 보존한다.
         거치대를 벗어나는 클리어런스 이동은 호출부에서 추가한다.
         """
@@ -185,9 +191,15 @@ class PlateSequence:
         if not self._plate_joint('safe_position_1'):
             return False
         self._weight_at_safe(self._weight_phase + '_start')
-        # 랙 진입은 최대 90mm/s로 제한하고, 더 낮은 자유 속도 설정도 존중한다.
-        speed = self._param('free_line_speed_mm_s') if speed_approach is None else speed_approach
-        rack_speed = min(90.0, self._param('free_line_speed_mm_s')) if speed_slow is None else speed_slow
+        # 케이크를 집기 전까지 따개 거치대 이동도 일반 속도로 통일한다.
+        speed = (
+            self._param('free_line_speed_mm_s')
+            if speed_approach is None else speed_approach
+        )
+        rack_speed = (
+            self._param('free_line_speed_mm_s')
+            if speed_slow is None else speed_slow
+        )
         self._validate_motion(speed, rack_speed)
         self._logger.info(
             f'plate pick_opener: approach={speed:g} slow={rack_speed:g} '
@@ -204,6 +216,9 @@ class PlateSequence:
             close_wait_sec=self._param('opener_close_wait_sec'),
             close_settle_sec=self._param('opener_close_settle_sec'),
             pre_open_wait_sec=self._param('opener_pre_open_wait_sec'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         )
 
         if not picked:
@@ -226,10 +241,10 @@ class PlateSequence:
         opener를 해제하고 다시 접근 위치로 후퇴한다. 따라서 호출부는 별도의
         그리퍼 열기 명령을 보내지 않는다.
         """
-        # 오프너만 반환하는 구간이므로 접근·후퇴는 자유 속도, 랙 진입은 상한 적용.
+        # 케이크를 내려놓은 뒤 따개만 반납하므로 모든 구간을 일반 속도로 맞춘다.
         base_speed = self._param('free_line_speed_mm_s')
         speed = base_speed if speed_approach is None else speed_approach
-        rack_speed = min(90.0, base_speed) if speed_slow is None else speed_slow
+        rack_speed = base_speed if speed_slow is None else speed_slow
         retract = base_speed if speed_retract is None else speed_retract
         self._validate_motion(speed, rack_speed, retract)
         self._logger.info(
@@ -244,6 +259,9 @@ class PlateSequence:
             speed_slow=rack_speed,
             speed_retract=retract,
             open_wait_sec=self._param('opener_open_wait_sec'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         )
 
         if placed:

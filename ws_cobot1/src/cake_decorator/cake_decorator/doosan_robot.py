@@ -1076,6 +1076,10 @@ class DoosanRobotClient:
         close_wait_sec: float = 0.0,
         close_settle_sec: float = 0.0,
         pre_open_wait_sec: float = 0.0,
+        *,
+        acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """접근 → 그리퍼 열기 → 하강 → 그리퍼 닫기 → 들어올리기.
 
@@ -1092,20 +1096,28 @@ class DoosanRobotClient:
         close_wait_sec : 닫힘 명령 후 추가 대기(초)
         close_settle_sec : 닫힘 안정화 대기(초)
         pre_open_wait_sec : 접근 후 열림 완료를 기다리는 시간(초)
+        acc_mm_s2 : 모든 접근·하강·후퇴에 적용할 선형 가속도(mm/s²)
+        angular_speed_deg_s, angular_acc_deg_s2 : 자세 회전 제한(도/s, 도/s²).
+            생략하면 기존 호출자의 제한을 유지한다. 따개 이동은 공통 설정을 전달한다.
         """
-        if not self.move_line(approach, speed_mm_s=speed_approach):
+        motion = {
+            'acc_mm_s2': acc_mm_s2,
+            'angular_speed_deg_s': angular_speed_deg_s,
+            'angular_acc_deg_s2': angular_acc_deg_s2,
+        }
+        if not self.move_line(approach, speed_mm_s=speed_approach, **motion):
             return False
         # 그리퍼 명령 실패(특히 OFF 실패) 뒤에는 절대 다음 이동을 보내지 않는다.
         # if not self.gripper_open(open_width):
         #     return False
         # time.sleep(max(0.0, pre_open_wait_sec))
-        if not self.move_line(target, speed_mm_s=speed_slow):
+        if not self.move_line(target, speed_mm_s=speed_slow, **motion):
             return False
         if not self.gripper_close(grip_width, grip_force):
             return False
         time.sleep(max(0.0, close_wait_sec))
         time.sleep(max(0.0, close_settle_sec))
-        if not self.move_line(approach, speed_mm_s=speed_slow):
+        if not self.move_line(approach, speed_mm_s=speed_slow, **motion):
             return False
         return True
 
@@ -1118,6 +1130,10 @@ class DoosanRobotClient:
         speed_slow: float = 30.0,
         speed_retract: float = 50.0,
         open_wait_sec: float = 0.0,
+        *,
+        acc_mm_s2: float = DEFAULT_ACC_LINEAR,
+        angular_speed_deg_s: float = DEFAULT_VEL_ANGULAR,
+        angular_acc_deg_s2: float = DEFAULT_ACC_ANGULAR,
     ) -> bool:
         """접근 → 하강 → 그리퍼 열기 → 후퇴.
 
@@ -1129,16 +1145,24 @@ class DoosanRobotClient:
         target : 배치 위치
         approach : 접근/후퇴 위치
         open_wait_sec : 열림 명령 후 추가 대기(초)
+        acc_mm_s2 : 모든 접근·하강·후퇴에 적용할 선형 가속도(mm/s²)
+        angular_speed_deg_s, angular_acc_deg_s2 : 자세 회전 제한(도/s, 도/s²).
+            생략하면 기존 호출자의 제한을 유지한다. 따개 이동은 공통 설정을 전달한다.
         """
-        if not self.move_line(approach, speed_mm_s=speed_approach):
+        motion = {
+            'acc_mm_s2': acc_mm_s2,
+            'angular_speed_deg_s': angular_speed_deg_s,
+            'angular_acc_deg_s2': angular_acc_deg_s2,
+        }
+        if not self.move_line(approach, speed_mm_s=speed_approach, **motion):
             return False
-        if not self.move_line(target, speed_mm_s=speed_slow):
+        if not self.move_line(target, speed_mm_s=speed_slow, **motion):
             return False
         # 열기 실패 시 후퇴 이동을 보내지 않는다.
         if not self.gripper_open(open_width):
             return False
         time.sleep(max(0.0, open_wait_sec))
-        if not self.move_line(approach, speed_mm_s=speed_retract):
+        if not self.move_line(approach, speed_mm_s=speed_retract, **motion):
             return False
         return True
 

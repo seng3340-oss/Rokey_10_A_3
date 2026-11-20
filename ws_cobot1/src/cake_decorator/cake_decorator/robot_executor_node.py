@@ -11,6 +11,8 @@ TM(task_manager)에서 ExecuteTask Goal을 보내면 전체 작업 흐름을
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import time
 import traceback
 import threading
@@ -116,7 +118,7 @@ class RobotExecutorNode(Node):
         'pen_tool_cycle': False,
         # 주문별 SIDE 집기·펜촉 TCP·반납. TOP/플레이트는 영점 TCP를 유지한다.
         'integrated_side_cycle': False,
-        # 펜의 비접촉 이동만 별도로 조절한다. 잉크 경로 속도와 분리한다.
+        # 기존 상공 안쪽 전환·마지막 이탈 제한을 보존한다. 일반 펜 이동은 free_*다.
         'pen_travel_speed_mm_s': 180.0,
         'pen_lift_speed_mm_s': 150.0,
         'pen_rack_speed_mm_s': 120.0,
@@ -125,7 +127,7 @@ class RobotExecutorNode(Node):
         'pen_rotation_acc_deg_s2': 180.0,
         'pen_tilt_speed_deg_s': 31.5,
         'pen_tilt_acc_deg_s2': 90.0,
-        # 빈손·도구만 들고 움직이는 구간만 가속하고, 케이크 운반은 유지한다.
+        # 보호 구간 밖의 빈손·도구 이동은 이 네 값으로 통일한다.
         'free_joint_speed_deg_s': 60.0,
         'free_joint_acc_deg_s2': 120.0,
         'free_line_speed_mm_s': 150.0,
@@ -220,9 +222,9 @@ class RobotExecutorNode(Node):
             'robot_executor_node 시작 — 상태 머신 + 액션 서버 대기 중'
         )
         self.get_logger().info(
-            f"펜 이동 설정: 인출={self._param('pen_lift_speed_mm_s'):g}mm/s, "
-            f"공중={self._param('pen_travel_speed_mm_s'):g}mm/s, "
-            f"반납={self._param('pen_rack_speed_mm_s'):g}mm/s; TOP→SIDE 제자리 재파지"
+            f"일반 펜 이동 설정: 인출={self._param('free_line_speed_mm_s'):g}mm/s, "
+            f"공중={self._param('free_line_speed_mm_s'):g}mm/s, "
+            f"반납={self._param('free_line_speed_mm_s'):g}mm/s; TOP→SIDE 제자리 재파지"
         )
 
     def _plate_run(self, response, phase: str, callback):
@@ -689,7 +691,11 @@ class RobotExecutorNode(Node):
     # ==================================================================
 
     def _execute_motion_command(self, command, index, *, side_45=None):
-        """가상 첫 접근의 특이점 보완만 분리하며 획 완료·취소 판단은 유지한다."""
+        """첫 상공 접근만 일반 속도로 보내고 이후 드로잉 명령은 원본대로 실행한다.
+
+        가상 접근의 특이점 보완은 유지한다. 호출자가 획 완료·취소를 판단하며,
+        여기서는 첫 SIDE 명령의 복사본만 바꿔 공유 계획에 영향을 주지 않는다.
+        """
         # 액션은 요청 면에서 계산한 값을 명시한다. TOP에 전역 SIDE 설정이 새지 않는다.
         # 생략값은 기존 독립 시험 호출과의 호환을 위한 것이다.
         if side_45 is None:
@@ -707,10 +713,10 @@ class RobotExecutorNode(Node):
             if raised[2] > current.task_pos_info[0].data[2] + 0.1:
                 if not self._robot.move_line(
                     DsrPos(*raised),
-                    speed_mm_s=self._param('pen_lift_speed_mm_s'),
-                    acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-                    angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-                    angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+                    speed_mm_s=self._param('free_line_speed_mm_s'),
+                    acc_mm_s2=self._param('free_line_acc_mm_s2'),
+                    angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+                    angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
                 ):
                     return False
                 if not self._robot.verify_pose(raised):
@@ -726,6 +732,16 @@ class RobotExecutorNode(Node):
         ):
             self.get_logger().info('가상 첫 접근: 현재 자세로 이탈 후 movejx로 접근합니다.')
             return self._robot.prepare_virtual_approach(command.pos)
+        if index == 0 and side_45 and not command.pen_down:
+            # 케이크 상공에 도착하는 첫 이동까지만 공통 속도다.
+            # 원본 계획은 수정하지 않아 이후 접촉·획 사이 이동·최종 이탈을 보존한다.
+            command = replace(
+                command,
+                vel=self._param('free_line_speed_mm_s'),
+                acc=self._param('free_line_acc_mm_s2'),
+                angular_vel=self._param('free_joint_speed_deg_s'),
+                angular_acc=self._param('free_joint_acc_deg_s2'),
+            )
         return self._robot.execute_drawing_command(command)
 
     def _goal_callback(self, goal_request):
@@ -1011,10 +1027,10 @@ class RobotExecutorNode(Node):
             raised[2] = safe_z
             if not self._robot.move_line(
                 DsrPos(*raised),
-                speed_mm_s=self._param('pen_lift_speed_mm_s'),
-                acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-                angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-                angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+                speed_mm_s=self._param('free_line_speed_mm_s'),
+                acc_mm_s2=self._param('free_line_acc_mm_s2'),
+                angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+                angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
             ):
                 return False
         if cancelled():
@@ -1022,10 +1038,10 @@ class RobotExecutorNode(Node):
         above = DsrPos(first.x, first.y, safe_z, first.rz1, first.ry, first.rz2)
         return self._robot.move_line(
             above,
-            speed_mm_s=self._param('pen_travel_speed_mm_s'),
-            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+            speed_mm_s=self._param('free_line_speed_mm_s'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         )
 
     # ==================================================================
@@ -1116,10 +1132,10 @@ class RobotExecutorNode(Node):
         self.get_logger().info('펜 위치로 하강')
         if not self._robot.move_line(
             DsrPos(*stand),
-            speed_mm_s=self._param('pen_rack_speed_mm_s'),
-            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+            speed_mm_s=self._param('free_line_speed_mm_s'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         ):
             self._fail('펜 하강 실패')
             return False
@@ -1140,10 +1156,10 @@ class RobotExecutorNode(Node):
         self.get_logger().info('펜 들어올리기')
         if not self._robot.move_line(
             DsrPos(*gripper_up),
-            speed_mm_s=self._param('pen_lift_speed_mm_s'),
-            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+            speed_mm_s=self._param('free_line_speed_mm_s'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         ):
             self._fail('펜 들어올리기 실패')
             return False
@@ -1243,10 +1259,10 @@ class RobotExecutorNode(Node):
             return False
         self.get_logger().info('펜 놓을 위치로 하강')
         if not self._robot.move_line(
-            DsrPos(*drop), speed_mm_s=self._param('pen_rack_speed_mm_s'),
-            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+            DsrPos(*drop), speed_mm_s=self._param('free_line_speed_mm_s'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         ):
             self._fail('펜 하강 실패')
             return False
@@ -1272,10 +1288,10 @@ class RobotExecutorNode(Node):
         self.get_logger().info('펜 반납 후 상공 이동')
         if not self._robot.move_line(
             DsrPos(*drop_after),
-            speed_mm_s=self._param('pen_lift_speed_mm_s'),
-            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
-            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
-            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+            speed_mm_s=self._param('free_line_speed_mm_s'),
+            acc_mm_s2=self._param('free_line_acc_mm_s2'),
+            angular_speed_deg_s=self._param('free_joint_speed_deg_s'),
+            angular_acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         ):
             self._fail('펜 반납 후퇴 실패')
             return False

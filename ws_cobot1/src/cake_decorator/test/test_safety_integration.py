@@ -28,7 +28,7 @@ def plate():
 
 
 def test_weight_failure_returns_at_half_speed_then_safe():
-    """75g 이하이면 75/45/75mm/s 반납 후 안전 자세로 끝난다."""
+    """75g 이하이면 75/75/75mm/s 반납 후 안전 자세로 끝난다."""
     seq, robot, params = plate()
     robot.get_workpiece_weight.side_effect = [0.10, 0.15, 0.20]
     seq._weight_at_safe('prepare_start')
@@ -37,7 +37,7 @@ def test_weight_failure_returns_at_half_speed_then_safe():
     with pytest.raises(PlateWeightError, match='안전 자세에서 대기'):
         seq._weight_at_safe('prepare_both')
     args = robot.place.call_args.kwargs
-    assert [args[key] for key in ('speed_approach', 'speed_slow', 'speed_retract')] == [75, 45, 75]
+    assert [args[key] for key in ('speed_approach', 'speed_slow', 'speed_retract')] == [75, 75, 75]
     assert robot.move_joint.call_args.args[0] == params['plate_safe_position_1']
     assert robot.move_joint.call_args.kwargs['speed_deg_s'] == 30
     assert [call[0] for call in robot.mock_calls if call[0] in ('place', 'move_joint')] == ['place', 'move_joint']

@@ -2,9 +2,10 @@
 
 from types import SimpleNamespace
 import unittest
+import pytest
 
 from cake_decorator.doosan_robot import DoosanRobotClient
-from cake_decorator.drawing_motion import DsrPos
+from cake_decorator.drawing_motion import DsrPos, MotionCommand, MotionType, Phase
 from cake_decorator.robot_executor_node import RobotExecutorNode
 
 
@@ -114,7 +115,52 @@ def test_side_45_does_not_stack_vertical_pen_virtual_approach():
         success=True, task_pos_info=[SimpleNamespace(data=[399., -55., 270., 0., 180., 0.])],
     )
     owner = SimpleNamespace(_param=lambda key: key != 'integrated_side_cycle', _robot=robot, get_logger=Mock())
-    command = SimpleNamespace(pen_down=False, pos=DsrPos(399., -55., 290., 0., 180., 0.))
+    command = MotionCommand(
+        motion_type=MotionType.MOVE_LINE,
+        pos=DsrPos(399., -55., 290., 0., 180., 0.),
+        vel=180.0,
+        acc=100.0,
+        phase=Phase.REPOSITIONING,
+        pen_down=False,
+    )
     assert RobotExecutorNode._execute_motion_command(owner, command, 0)
     robot.prepare_virtual_approach.assert_not_called()
     assert robot.move_line.call_args.args[0].z == 320.
+
+
+@pytest.mark.parametrize("index, pen_down", [(0, False), (1, False), (2, True), (3, False)])
+def test_side_entry_uses_free_speed_and_preserves_drawing_interval(index, pen_down):
+    """상공 도착까지만 일반 속도이며 이후 비접촉·그리기·최종 이탈은 원본을 쓴다."""
+    from unittest.mock import Mock
+
+    params = {
+        **RobotExecutorNode._PARAM_DEFAULTS,
+        "integrated_side_cycle": True,
+        "free_line_speed_mm_s": 135.0,
+        "free_line_acc_mm_s2": 270.0,
+        "free_joint_speed_deg_s": 55.0,
+        "free_joint_acc_deg_s2": 110.0,
+    }
+    robot = Mock()
+    robot._call.return_value = SimpleNamespace(
+        success=True,
+        task_pos_info=[SimpleNamespace(data=[399., -55., 700., 0., 180., 0.])],
+    )
+    owner = SimpleNamespace(_param=params.__getitem__, _robot=robot)
+    command = MotionCommand(
+        motion_type=MotionType.MOVE_LINE,
+        pos=DsrPos(399., -55., 290., 0., 180., 0.),
+        vel=40.0,
+        acc=100.0,
+        angular_vel=20.0,
+        angular_acc=40.0,
+        phase=Phase.REPOSITIONING,
+        pen_down=pen_down,
+    )
+    assert RobotExecutorNode._execute_motion_command(owner, command, index, side_45=True)
+    sent = robot.execute_drawing_command.call_args.args[0]
+    expected = (135., 270., 55., 110.) if index == 0 else (40., 100., 20., 40.)
+    assert (sent.vel, sent.acc, sent.angular_vel, sent.angular_acc) == expected
+    assert (command.vel, command.acc, command.angular_vel, command.angular_acc) == (
+        40., 100., 20., 40.,
+    )

@@ -264,15 +264,14 @@ class IntegratedPenCycle:
             for index, flange_pose in enumerate(geometry.flange_poses):
                 self._check_cancel(cancelled)
                 pose = flange_to_tcp(flange_pose, GRIP_CENTER_MM)
-                # 기울임·수직 복귀만 감속하고 하강·인출의 기존 회전 제한은 유지한다.
-                rotation = "pen_tilt" if index in (1, 3) else "pen_rotation"
+                # 거치대에서 케이크로 출발하기 전까지는 하강·피벗·인출을
+                # 같은 일반 이동 설정으로 실행한다. 파지 중심 좌표는 그대로다.
                 if not self.robot.move_line(
                     DsrPos(*pose),
-                    # 펜 전용 속도를 사용한다. 실제 잉크 경로 속도는 별도다.
-                    speed_mm_s=self.parameter("pen_rack_speed_mm_s") if index == 0 else self.parameter("pen_lift_speed_mm_s"),
-                    acc_mm_s2=self.parameter("pen_motion_acc_mm_s2"),
-                    angular_speed_deg_s=self.parameter(f"{rotation}_speed_deg_s"),
-                    angular_acc_deg_s2=self.parameter(f"{rotation}_acc_deg_s2"),
+                    speed_mm_s=self.parameter("free_line_speed_mm_s"),
+                    acc_mm_s2=self.parameter("free_line_acc_mm_s2"),
+                    angular_speed_deg_s=self.parameter("free_joint_speed_deg_s"),
+                    angular_acc_deg_s2=self.parameter("free_joint_acc_deg_s2"),
                 ) or not self.robot.verify_pose(pose):
                     raise RuntimeError(f"45도 펜 파지 이동/도달 실패: {index}")
                 if index == 2:

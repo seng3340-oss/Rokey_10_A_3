@@ -390,9 +390,10 @@ def test_real_defaults_are_configured_without_contact_cli_flags():
     config = json.loads((PATH.parents[1] / "config/real_robot.json").read_text())
     assert config["cake_top_z_mm"] == 222.0
     assert config["configure_pen_tcp_on_yes"] is True
-    # 확인 전에 거치대 위치를 중심으로 기록하지 않도록 명시한 좌표다.
+    # 거치대 위치와 구분한 케이크 중심에 BASE X -1mm, Y -0.8mm 보정을 반영한다.
     assert config["side_cake_center_xy_mm"] == [
-        396.6743225097656, -50.55932998657227,
+        395.6743225097656,
+        -51.35932998657227,
     ]
 
 

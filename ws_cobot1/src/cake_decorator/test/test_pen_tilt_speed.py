@@ -1,4 +1,4 @@
-"""실물 연결 없이 펜 기울임 속도와 기존 이동·좌표 계약을 검증한다."""
+"""실물 연결 없이 펜 일반 이동의 공통 속도와 기존 피벗·좌표 계약을 검증한다."""
 
 import numpy as np
 import pytest
@@ -27,34 +27,28 @@ class MotionRobot(ServiceRobot):
         return super().move_joint(joints, **kwargs)
 
 
-@pytest.mark.parametrize("tilt_speed, tilt_acc", [(31.5, 90.0), (30.0, 60.0)])
-def test_pick_slows_only_tilt_and_upright_with_fixed_pivot(tilt_speed, tilt_acc):
-    """기울임 두 구간만 감속하고 인출 속도·220mm 중심·티칭을 보존한다."""
+@pytest.mark.parametrize("joint_speed, joint_acc", [(60.0, 120.0), (30.0, 60.0)])
+def test_pick_uses_common_speeds_with_fixed_pivot(joint_speed, joint_acc):
+    """기울임·인출에 같은 속도를 적용하고 220mm 중심·티칭을 보존한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
 
     rack = rack_parameters()
-    rack.update(pen_tilt_speed_deg_s=tilt_speed, pen_tilt_acc_deg_s2=tilt_acc)
+    rack.update(free_joint_speed_deg_s=joint_speed, free_joint_acc_deg_s2=joint_acc)
     robot = MotionRobot()
     IntegratedPenCycle(robot, rack.__getitem__).pick_side()
 
     assert len(robot.lines) == 4
     assert [motion[2] for motion in robot.lines] == [
         {
-            "speed_mm_s": speed,
-            "acc_mm_s2": 400.0,
-            "angular_speed_deg_s": angular_speed,
-            "angular_acc_deg_s2": angular_acc,
+            "speed_mm_s": 150.0,
+            "acc_mm_s2": 300.0,
+            "angular_speed_deg_s": joint_speed,
+            "angular_acc_deg_s2": joint_acc,
         }
-        for speed, angular_speed, angular_acc in [
-            (120.0, 90.0, 180.0),
-            (150.0, tilt_speed, tilt_acc),
-            (150.0, 90.0, 180.0),
-            (150.0, tilt_speed, tilt_acc),
-        ]
-    ]
+    ] * 4
     assert robot.joints == [(
         rack["pen_stand_approach_pose"],
-        {"speed_deg_s": 60.0, "acc_deg_s2": 120.0},
+        {"speed_deg_s": joint_speed, "acc_deg_s2": joint_acc},
     )]
 
     # 각 선형 목표는 파지 중심 TCP다. 기울이기 전후 중심이 같아야 한다.
@@ -81,10 +75,10 @@ def test_pick_slows_only_tilt_and_upright_with_fixed_pivot(tilt_speed, tilt_acc)
 
 
 @pytest.mark.parametrize("standalone", [False, True])
-def test_return_slows_orientation_but_keeps_free_unwind_and_coordinates(
+def test_return_uses_common_speeds_and_keeps_unwind_coordinates(
     monkeypatch, standalone,
 ):
-    """통합·독립 반납 모두 기울임만 감속하고 J6·이탈·반납 중심을 유지한다."""
+    """통합·독립 반납 모두 공통 속도를 적용하고 J6·이탈·반납 중심을 유지한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
     import cake_decorator.side_pen_return as returning
 
@@ -116,17 +110,25 @@ def test_return_slows_orientation_but_keeps_free_unwind_and_coordinates(
     assert [settings for _, settings in robot.joints] == [
         {"speed_deg_s": 60.0, "acc_deg_s2": 120.0},
         {"speed_deg_s": 60.0, "acc_deg_s2": 120.0},
-        {"speed_deg_s": 31.5, "acc_deg_s2": 90.0},
+        {"speed_deg_s": 60.0, "acc_deg_s2": 120.0},
     ]
     assert len(robot.lines) == 4
     assert [settings for _, _, settings in robot.lines] == [
         {
-            "speed_mm_s": speed,
+            "speed_mm_s": 150.0,
             "acc_mm_s2": 400.0,
             "angular_speed_deg_s": 31.5,
             "angular_acc_deg_s2": 90.0,
-        }
-        for speed in (150.0, 180.0, 120.0, 150.0)
+        },
+        *[
+            {
+                "speed_mm_s": 150.0,
+                "acc_mm_s2": 300.0,
+                "angular_speed_deg_s": 60.0,
+                "angular_acc_deg_s2": 120.0,
+            }
+            for _ in range(3)
+        ],
     ]
 
     raised = list(initial_pose)
@@ -159,8 +161,8 @@ def test_return_slows_orientation_but_keeps_free_unwind_and_coordinates(
     np.testing.assert_allclose(after[1], expected_after, atol=1e-9)
 
 
-def test_return_accepts_legacy_node_without_new_tilt_parameters(monkeypatch):
-    """실행 중 코드가 바뀌어 새 기울임 설정이 없는 노드도 반납을 끝내야 한다."""
+def test_return_accepts_legacy_node_without_free_line_parameters(monkeypatch):
+    """일반 직선 설정이 없는 구버전 노드는 기본 속도로 반납을 끝내야 한다."""
     import rclpy
     from rclpy.node import Node
     import cake_decorator.side_pen_return as returning
@@ -185,7 +187,11 @@ def test_return_accepts_legacy_node_without_new_tilt_parameters(monkeypatch):
             rack=rack,
             parameter=lambda name: node.get_parameter(name).value,
         )
-        assert all(settings["angular_speed_deg_s"] == 31.5 for _, _, settings in robot.lines)
+        assert robot.lines[0][2]["angular_speed_deg_s"] == 31.5
+        assert all(
+            settings["angular_speed_deg_s"] == 60.0
+            for _, _, settings in robot.lines[1:]
+        )
         assert any(kind == "gripper" for kind, _ in robot.events)
     finally:
         node.destroy_node()
