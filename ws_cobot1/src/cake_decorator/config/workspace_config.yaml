@@ -63,7 +63,12 @@ robot_executor_node:
     plate_opener_weight_kg: 0.05  # 예시값, 실측 후 변경
     plate_cake_weight_kg: 0.20    # 예시값, 실측 후 변경
     plate_weight_tolerance_percent: 10.0
-    plate_weight_wait_sec: 3.0
+    # 케이크 보유(both) 단계의 최소 변화량(kg). 이 값 이하면 실패.
+    plate_cake_min_delta_kg: 0.075
+    # Safe Position 도착 후 1초 대기하고 2회 읽어 평균한다.
+    plate_weight_wait_sec: 1.0
+    plate_weight_reads: 2
+    plate_weight_read_interval: 0.2
     plate_sequence_enabled: false
     # [변경 2026-11-19] 그리퍼 최신 PM 방식: 제어박스 디지털 출력(DO) 펄스.
     # 기본 DO2=Open, DO1=Close, 0.5초 유지. 실제 배선이 반대이면 아래 두

@@ -384,6 +384,25 @@ class PlateSequenceReuseTests(unittest.TestCase):
         # 안전 자세 이동과 pick 시도까지만 하고 이후 좌표 이동은 없다.
         self.assertEqual(robot.calls, ["move_joint", "pick"])
 
+    def test_recover_opener_uses_half_speed(self):
+        params = self._params()
+        robot = self.PlateRobot()
+        sequence = PlateSequence(robot, params.__getitem__)
+        sequence._opener_held = True
+        self.assertTrue(sequence._recover_opener('test'))
+        self.assertFalse(sequence._opener_held)
+        # 기본 opener_place 속도(30)의 0.5배로 복구한다.
+        self.assertAlmostEqual(robot.place_kwargs['speed_approach'], 15.0)
+        self.assertAlmostEqual(robot.place_kwargs['speed_slow'], 15.0)
+        self.assertAlmostEqual(robot.place_kwargs['speed_retract'], 15.0)
+
+    def test_recover_opener_skips_when_not_held(self):
+        params = self._params()
+        robot = self.PlateRobot()
+        sequence = PlateSequence(robot, params.__getitem__)
+        self.assertTrue(sequence._recover_opener('test'))
+        self.assertNotIn('place', robot.calls)
+
 
 if __name__ == "__main__":
     unittest.main()

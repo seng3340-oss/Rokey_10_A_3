@@ -26,6 +26,12 @@ from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
 from .doosan_robot import DoosanRobotClient
 from .plate_sequence import PlateSequence
+from .safety_exceptions import (
+    OpenerMissingError,
+    PEN_GRASP_FAILED_CODE,
+    PEN_GRASP_FAILED_MESSAGE,
+    PenGraspError,
+)
 from .drawing_motion import (
     DsrPos,
     TaskState,
@@ -45,7 +51,12 @@ class RobotExecutorNode(Node):
         'plate_opener_weight_kg': 0.05,  # 예시값: 실측 필요
         'plate_cake_weight_kg': 0.20,  # 예시값: 실측 필요
         'plate_weight_tolerance_percent': 10.0,
-        'plate_weight_wait_sec': 3.0,
+        # 케이크 보유(both) 단계의 최소 변화량. 이 값 이하면 실패한다.
+        'plate_cake_min_delta_kg': 0.075,
+        'plate_weight_wait_sec': 1.0,
+        # Safe Position 도착 후 2회 읽어 평균한다.
+        'plate_weight_reads': 2,
+        'plate_weight_read_interval': 0.2,
         'plate_sequence_enabled': False,  # [변경] 기본 비활성: 실물 충돌 검증 전 작동 금지
         'opener_grip_width_mm': 10.0,
         'opener_grip_force_n': 20.0,
@@ -101,6 +112,12 @@ class RobotExecutorNode(Node):
         # scripts/start_real_pen_cycle.sh로 실행할 때만 켜진다.
         'pen_tool_cycle': False,
     }
+
+    # 펜 파지 안전예외 기준(m).
+    # A: 펜 상공에서 그리퍼가 충분히 열렸는지 확인한다.
+    _PEN_OPEN_MIN_WIDTH_M = 0.060
+    # B: 펜을 들어올린 뒤 실제로 보유 중인지 확인한다(초기값).
+    _PEN_HOLD_MIN_WIDTH_M = 0.030
 
     def __init__(self):
         super().__init__('robot_executor_node')
@@ -182,6 +199,12 @@ class RobotExecutorNode(Node):
         try:
             response.success = bool(callback())
             response.message = f'{phase} 완료' if response.success else f'{phase} 이동/그리퍼 실패, 즉시 중단'
+        except OpenerMissingError as exc:
+            # 따개 없음은 예상된 안전 정지다. 트레이스백/홈 복귀 없이
+            # 서비스 응답만 실패와 지정 메시지로 반환한다.
+            self.get_logger().error(str(exc))
+            response.success = False
+            response.message = str(exc)
         except Exception as exc:
             self.get_logger().error(f'{phase} 예외: {exc}\n{traceback.format_exc()}')
             response.success = False
@@ -680,7 +703,20 @@ class RobotExecutorNode(Node):
             # 바로 앞 단계(PLACING_CAKE)에서만 전이할 수 있다. 케이크 운반은 하지 않으므로
             # 상태만 그 단계로 맞춘 뒤 호출한다.
             self._state = TaskState.PLACING_CAKE
-            if not self._do_grasping_tool(goal_handle, request):
+            try:
+                pen_ok = self._do_grasping_tool(goal_handle, request)
+            except PenGraspError as exc:
+                # 펜 안전예외: _do_grasping_tool이 그리퍼 열기와
+                # Safe Position 이동을 마친 뒤 발생한다. 추가 이동 없이
+                # 액션만 실패로 종료한다.
+                self.get_logger().error(str(exc))
+                self._state = TaskState.IDLE
+                result.success = False
+                result.error_code = PEN_GRASP_FAILED_CODE
+                result.completed_strokes = 0
+                goal_handle.abort()
+                return result
+            if not pen_ok:
                 self._state = TaskState.IDLE
                 result.success = False
                 result.error_code = 'PEN_PICK_FAILED'
@@ -803,6 +839,46 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
         return result
 
+    def _pen_safety_stop(self, reason: str) -> None:
+        """펜 안전예외: 그리퍼를 열고 plate safe_position_1로 이동한다.
+
+        추가 복구/자동 재개는 하지 않는다. 호출부는 PenGraspError를 발생시켜
+        액션을 실패로 종료한다.
+        """
+        self.get_logger().error(reason)
+        if not self._robot.gripper_open(self._param('gripper_open_width')):
+            self.get_logger().error('펜 안전예외: 그리퍼 열기 실패')
+        if not self._robot.move_joint(
+            self._param('plate_safe_position_1')
+        ):
+            self.get_logger().error('펜 안전예외: Safe Position 이동 실패')
+
+    def _check_pen_open(self) -> None:
+        """펜 상공에서 그리퍼가 충분히 열렸는지 확인한다."""
+        width_m = self._robot.get_gripper_width()
+        self.get_logger().info(f'펜 상공 그리퍼 폭={width_m}')
+        if width_m is None:
+            self._pen_safety_stop('펜 파지 실패: 그리퍼 폭 측정 실패')
+            raise PenGraspError(PEN_GRASP_FAILED_MESSAGE)
+        if width_m < self._PEN_OPEN_MIN_WIDTH_M:
+            self._pen_safety_stop(
+                f'펜 파지 실패: 그리퍼 열림 감지(폭={width_m:.4f}m)'
+            )
+            raise PenGraspError(PEN_GRASP_FAILED_MESSAGE)
+
+    def _check_pen_held(self) -> None:
+        """펜을 들어올린 뒤 실제로 보유 중인지 확인한다."""
+        width_m = self._robot.get_gripper_width()
+        self.get_logger().info(f'펜 파지 후 그리퍼 폭={width_m}')
+        if width_m is None:
+            self._pen_safety_stop('펜 파지 실패: 그리퍼 폭 측정 실패')
+            raise PenGraspError(PEN_GRASP_FAILED_MESSAGE)
+        if width_m < self._PEN_HOLD_MIN_WIDTH_M:
+            self._pen_safety_stop(
+                f'펜 파지 실패: 파지 보유 확인 실패(폭={width_m:.4f}m)'
+            )
+            raise PenGraspError(PEN_GRASP_FAILED_MESSAGE)
+
     def _do_grasping_tool(self, goal_handle, task_goal) -> bool:
         """펜 집기: 상공 → 펜 위치 → 그리퍼 닫기 → 수직 상공"""
         if not self._transition_to(TaskState.GRASPING_TOOL):
@@ -817,6 +893,10 @@ class RobotExecutorNode(Node):
         if not self._robot.move_joint(approach):
             self._fail('펜 상공 이동 실패')
             return False
+
+        # 펜 상공 도착 직후 그리퍼가 충분히 열렸는지 확인한다.
+        # 60mm 미만이면 그리퍼를 열고 Safe Position에서 대기한다.
+        self._check_pen_open()
 
         # 2. 그리퍼 열기
         # time.sleep(0.5)
@@ -846,6 +926,9 @@ class RobotExecutorNode(Node):
         if not self._robot.move_line(DsrPos(*gripper_up), speed_mm_s=30.0):
             self._fail('펜 들어올리기 실패')
             return False
+
+        # 들어올린 뒤에도 펜을 보유하고 있는지 30mm 기준으로 확인한다.
+        self._check_pen_held()
 
         self.get_logger().info('펜 집기 완료')
         return True

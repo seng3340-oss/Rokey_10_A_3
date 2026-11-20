@@ -7,6 +7,11 @@ ROS2 노드가 아닌 일반 Python 모듈입니다.
 from .doosan_robot import DR_MV_MOD_REL, DR_MV_MOD_ABS, DR_BASE
 from .drawing_motion import DsrPos
 from .plate_weight_check import PlateWeightChecker
+from .safety_exceptions import (
+    OPENER_MISSING_MESSAGE,
+    OpenerMissingError,
+    PlateWeightError,
+)
 import time
 
 
@@ -35,7 +40,11 @@ _PLATE_PLACE_RETRACT_SPEED_MM_S = 30.0
 
 # 시작 전 그리퍼가 이미 열려 있는지 판단하는 임시 폭 기준(m).
 # RG2의 실제 개방/폐쇄 폭을 실물에서 측정한 뒤 확정한다.
-_PLATE_GRIPPER_OPEN_MIN_WIDTH_M = 0.05
+_PLATE_GRIPPER_OPEN_MIN_WIDTH_M = 0.015
+
+# 파지 후 그리퍼가 완전히 닫혔는지 판단하는 임시 최소 폭(m).
+# 따개 두께를 실측한 뒤 확정한다.
+_PLATE_GRIPPER_HOLD_MIN_WIDTH_M = 0.015
 
 _SPEED_OVERRIDES = {}
 
@@ -67,6 +76,9 @@ class PlateSequence:
         self._robot = robot
         self._param = param
         self._weight_checker = None
+        # pick 성공 후 place 전까지 opener를 들고 있음을 표시한다.
+        # 안전예외 복구 시 이 플래그가 True일 때만 opener를 반납한다.
+        self._opener_held = False
 
     def _weight_at_safe(self, stage: str) -> bool:
         """현재 Safe 자세에서 대기 후 하중 확인. 이상이면 False로 다음 작업 차단."""
@@ -80,26 +92,71 @@ class PlateSequence:
                     float(self._param('plate_opener_weight_kg')),
                     float(self._param('plate_cake_weight_kg')),
                     float(self._param('plate_weight_tolerance_percent')),
+                    float(self._param('plate_cake_min_delta_kg')),
                     phase='prepare' if stage == 'prepare_start' else 'finish',
+                    reads=int(self._param('plate_weight_reads')),
+                    read_interval=float(
+                        self._param('plate_weight_read_interval')
+                    ),
                 )
                 self._weight_checker.start()
                 return True
             if self._weight_checker is None:
                 raise RuntimeError('하중 기준값 미설정')
             result = self._weight_checker.check(stage)
-            if not result.passed:
-                raise RuntimeError(
+            # 성공/실패와 무관하게 측정값을 남긴다. 실패 시에만 로그를 남기면
+            # 정상 통과한 케이크 변화량을 확인할 수 없다.
+            if result.cake_delta_kg is not None:
+                self._robot._logger.info(
                     f'{stage}: 측정={result.current_kg:.4f}, '
-                    f'예상={result.expected_kg:.4f}, 허용=±{result.tolerance_kg:.4f}'
+                    f'케이크 변화량={result.cake_delta_kg:.4f}, '
+                    f'최소={result.cake_min_delta_kg:.4f}'
+                )
+            else:
+                self._robot._logger.info(
+                    f'{stage}: 측정={result.current_kg:.4f}, '
+                    f'기대={result.expected_kg:.4f}, '
+                    f'허용=±{result.tolerance_kg:.4f}'
+                )
+            if not result.passed:
+                if result.cake_delta_kg is not None:
+                    raise PlateWeightError(
+                        f'{stage}: 케이크 변화량='
+                        f'{result.cake_delta_kg:.4f}, '
+                        f'최소={result.cake_min_delta_kg:.4f}'
+                    )
+                raise PlateWeightError(
+                    f'{stage}: 측정={result.current_kg:.4f}, '
+                    f'예상={result.expected_kg:.4f}, '
+                    f'허용=±{result.tolerance_kg:.4f}'
                 )
             return True
         except (RuntimeError, ValueError, TypeError) as exc:
             self._robot._logger.error(f'Plate 하중 검사 실패: {exc}')
+            # 안전예외 시 opener를 원위치로 되돌린다. opener를 들고 있지
+            # 않으면 _recover_opener가 아무 동작도 하지 않는다.
+            try:
+                if not self._recover_opener(stage):
+                    self._robot._logger.error(
+                        f'Plate 하중 복구 실패({stage})'
+                    )
+            except Exception as recovery_exc:
+                self._robot._logger.error(
+                    f'Plate 하중 복구 예외({stage}): {recovery_exc}'
+                )
             return False
 
     def _plate_safe_check(self, position: str, stage: str) -> bool:
-        """Safe 위치 이동과 하중 검사를 한 곳에서 관리합니다."""
-        return self._plate_joint(position) and self._weight_at_safe(stage)
+        """Safe 위치 이동 후 그리퍼와 하중을 함께 검사한다.
+
+        그리퍼 안전예외는 파지 위치가 아니라 Safe Position 도착 후에만
+        수행한다. 그리퍼 폭이 닫힘 수준이면 다음 동작으로 넘어가지 않는다.
+        """
+        if not self._plate_joint(position):
+            return False
+        if not self._check_gripper_grasp(stage):
+            return False
+        return self._weight_at_safe(stage)
 
     def _plate_joint(
         self,
@@ -188,7 +245,7 @@ class PlateSequence:
         0bc4a70에서 pick()의 자동 열기가 제거되어, 파지 전에 명시적으로
         열어 충돌을 막는다. 그리퍼 폭을 읽어 이미 열려 있으면 불필요한
         DO 펄스를 보내지 않는다. 폭을 읽지 못하면 안전하게 열기 명령을
-        보낸다. 가벼운 물품의 안전예외를 확인하기 위해 사용한다.
+        보낸다.
         """
         width_m = self._robot.get_gripper_width()
         angle_deg = self._robot.get_gripper_angle_deg()
@@ -208,6 +265,65 @@ class PlateSequence:
             self._robot._logger.error(f"{stage}: 그리퍼 열기 실패")
             return False
         time.sleep(float(self._param('opener_pre_open_wait_sec')))
+        return True
+
+    def _check_gripper_grasp(self, stage: str) -> bool:
+        """Safe Position에서 그리퍼 폭으로 물품 존재를 확인한다.
+
+        가벼운 물품의 안전예외를 확인하기 위해 사용한다. 폭이 완전히 닫힌
+        수준(15mm)이면 파지 실패로 본다. 정상 파지 폭은 실측 후
+        _PLATE_GRIPPER_HOLD_MIN_WIDTH_M를 확정한다.
+        """
+        width_m = self._robot.get_gripper_width()
+        angle_deg = self._robot.get_gripper_angle_deg()
+        self._robot._logger.info(
+            f"{stage}: 그리퍼 폭={width_m}, 각도={angle_deg}"
+        )
+        if width_m is None:
+            self._robot._logger.error(f"{stage}: 그리퍼 폭 측정 실패")
+            return False
+        if width_m < _PLATE_GRIPPER_HOLD_MIN_WIDTH_M:
+            # 따개가 없으면 그리퍼를 열고 현재 Safe Position에서 대기한다.
+            # 추가 이동/복구는 하지 않고 서비스는 실패로 반환한다.
+            if not self._robot.gripper_open(
+                self._param('opener_open_width_mm')
+            ):
+                self._robot._logger.error(
+                    f"{stage}: 따개 없음, 그리퍼 열기 실패"
+                )
+            self._opener_held = False
+            self._robot._logger.error(
+                f"{stage}: {OPENER_MISSING_MESSAGE} (폭={width_m:.4f}m)"
+            )
+            raise OpenerMissingError(OPENER_MISSING_MESSAGE)
+        return True
+
+    def _recover_opener(self, stage: str) -> bool:
+        """안전예외 발생 시 opener를 원위치로 되돌린다.
+
+        기존 _plate_place_opener()를 재사용하고, 복구 속도는 현재
+        opener_place 속도의 0.5배로 낮춘다. opener를 들고 있지 않으면
+        아무 동작도 하지 않는다.
+        """
+        if not self._opener_held:
+            return True
+        kwargs = _speed_kwargs(
+            'opener_place',
+            _PLACE_SPEED_KEYS,
+            {
+                'speed_approach': _PLATE_PICK_SPEED_MM_S,
+                'speed_slow': _PLATE_PICK_SPEED_MM_S,
+                'speed_retract': _PLATE_PLACE_RETRACT_SPEED_MM_S,
+            },
+        )
+        half = {key: value * 0.5 for key, value in kwargs.items()}
+        self._robot._logger.warn(
+            f"{stage}: 안전예외 - opener 복구 (0.5x 속도: {half})"
+        )
+        if not self._plate_place_opener(**half):
+            self._robot._logger.error(f"{stage}: opener 복구 실패")
+            return False
+        self._opener_held = False
         return True
 
     def _plate_opener_target(self) -> DsrPos:
@@ -252,7 +368,7 @@ class PlateSequence:
             kwargs['speed_approach'] = speed_approach
         if speed_slow is not None:
             kwargs['speed_slow'] = speed_slow
-        return self._robot.pick(
+        result = self._robot.pick(
             target=self._plate_opener_target(),
             approach=DsrPos(*self._param('plate_pick_opener1')),
             grip_width=self._param('opener_grip_width_mm'),
@@ -263,6 +379,10 @@ class PlateSequence:
             pre_open_wait_sec=self._param('opener_pre_open_wait_sec'),
             **kwargs,
         )
+        if not result:
+            return False
+        self._opener_held = True
+        return True
 
     def _plate_place_opener(
         self,
@@ -299,13 +419,17 @@ class PlateSequence:
             kwargs['speed_slow'] = speed_slow
         if speed_retract is not None:
             kwargs['speed_retract'] = speed_retract
-        return self._robot.place(
+        result = self._robot.place(
             target=self._plate_opener_target(),
             approach=DsrPos(*self._param('plate_pick_opener1')),
             open_width=self._param('opener_open_width_mm'),
             open_wait_sec=self._param('opener_open_wait_sec'),
             **kwargs,
         )
+        if not result:
+            return False
+        self._opener_held = False
+        return True
 
     def _plate_prepare_steps(self) -> bool:
         if not self._ensure_gripper_open('prepare_start'):

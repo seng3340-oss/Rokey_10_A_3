@@ -64,6 +64,14 @@ ASYNC = 1
 GRIPPER_OPEN_DO_DEFAULT = 2
 GRIPPER_CLOSE_DO_DEFAULT = 1
 GRIPPER_PULSE_SEC_DEFAULT = 0.5
+
+# OnRobot RG2 조인트 각도 → 폭 변환 상수.
+# OnRobotRGControllerServer의 RG2 분기와 동일한 값이다.
+_RG2_L1 = 0.108505
+_RG2_L3 = 0.055
+_RG2_THETA1 = 1.41371
+_RG2_THETA3 = 0.76794
+_RG2_DY = -0.0144
 DIGITAL_OUTPUT_MIN_PORT = 1
 DIGITAL_OUTPUT_MAX_PORT = 16
 
@@ -857,18 +865,17 @@ class DoosanRobotClient:
         """조인트 각도(rad)로 그리퍼 폭(m)을 계산한다.
 
         가벼운 물품의 안전예외를 확인하기 위해 사용한다. /onrobot/pose는
-        알려진 인수 하나로 전체 pose를 계산하는 서비스다. 현재 조인트 각도를
-        known.theta로 넣고 pose.x(폭)를 읽는다. 서비스가 없거나 응답이
-        비정상이면 None을 반환한다.
+        36°를 넘는 각도를 거부해 닫힘 상태에서 0을 반환하므로, RG2 기하
+        상수로 직접 계산해 그 제한을 피한다. 상수는
+        OnRobotRGControllerServer의 RG2 분기와 동일하다.
         """
         if not math.isfinite(angle_rad):
             return None
-        request = GripperPose.Request()
-        request.known.theta = float(angle_rad)
-        response = self._call("gripper_pose", request, timeout=self._timeout)
-        if response is None:
-            return None
-        width = float(response.pose.x)
+        width = (
+            math.cos(angle_rad + _RG2_THETA3) * _RG2_L3
+            + _RG2_DY
+            + _RG2_L1 * math.cos(_RG2_THETA1)
+        ) * 2.0
         if not math.isfinite(width) or width < 0.0:
             self._logger.error(f"그리퍼 폭 계산 오류: {width}")
             return None

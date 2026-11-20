@@ -5,10 +5,15 @@
 바뀌지 않도록 하는 회귀 테스트다.
 """
 
+import math
 import unittest
+from types import SimpleNamespace
 
 import cake_decorator.plate_sequence as plate_sequence
+from cake_decorator.doosan_robot import DoosanRobotClient
 from cake_decorator.plate_sequence import PlateSequence
+from cake_decorator.plate_weight_check import PlateWeightChecker
+from cake_decorator.safety_exceptions import OpenerMissingError
 
 
 class RecordingRobot:
@@ -109,6 +114,185 @@ class GripperAngleGuardTests(unittest.TestCase):
     def test_above_max_raises(self):
         with self.assertRaises(RuntimeError):
             self.sequence._check_gripper_angle(21.0, "test", 0.0, 20.0)
+
+
+class WeightRobot:
+    """정해진 하중값을 순서대로 돌려주는 대역 객체."""
+
+    def __init__(self, values):
+        self.values = list(values)
+
+    def get_workpiece_weight(self):
+        return self.values.pop(0)
+
+
+class CakeMinDeltaTests(unittest.TestCase):
+    """케이크 보유 단계는 최소 변화량(75g)만 차단 기준으로 사용한다."""
+
+    def _checker(self, values):
+        return PlateWeightChecker(
+            WeightRobot(values),
+            opener_kg=0.05,
+            cake_kg=0.20,
+            tolerance_percent=10.0,
+            cake_min_delta_kg=0.075,
+            phase='prepare',
+        )
+
+    def _run(self, values):
+        checker = self._checker(values)
+        checker.start()
+        opener = checker.check('prepare_opener')
+        both = checker.check('prepare_both')
+        return opener, both
+
+    def test_cake_delta_below_min_fails(self):
+        _, both = self._run([1.200, 1.250, 1.300])
+        self.assertFalse(both.passed)
+        self.assertAlmostEqual(both.cake_delta_kg, 0.050)
+
+    def test_cake_delta_above_min_passes(self):
+        _, both = self._run([1.200, 1.250, 1.340])
+        self.assertTrue(both.passed)
+        self.assertAlmostEqual(both.cake_delta_kg, 0.090)
+
+    def test_noisy_opener_does_not_block_cake_check(self):
+        # 따개 단독 측정이 기준보다 낮아도 차단하지 않고 기준값으로만 쓴다.
+        opener, both = self._run([1.200, 1.150, 1.250])
+        self.assertTrue(opener.passed)
+        self.assertTrue(both.passed)
+        self.assertAlmostEqual(both.cake_delta_kg, 0.100)
+
+    def test_exact_min_delta_fails(self):
+        _, both = self._run([1.200, 1.250, 1.325])
+        self.assertFalse(both.passed)
+        self.assertAlmostEqual(both.cake_delta_kg, 0.075)
+
+    def test_two_reads_are_averaged(self):
+        checker = PlateWeightChecker(
+            WeightRobot([1.0, 1.2]),
+            opener_kg=0.05,
+            cake_kg=0.20,
+            tolerance_percent=10.0,
+            cake_min_delta_kg=0.075,
+            phase='prepare',
+            reads=2,
+            read_interval=0.0,
+        )
+        self.assertAlmostEqual(checker.start(), 1.1)
+
+
+class RecoveryRobot:
+    """무게 실패 복구 경로를 검사하기 위한 대역 로봇."""
+
+    def __init__(self, weights, place_result=True, width=0.1):
+        self.weights = list(weights)
+        self.place_result = place_result
+        self.width = width
+        self.calls = []
+        self.place_kwargs = {}
+        self._logger = SimpleNamespace(
+            info=lambda *args, **kwargs: None,
+            warn=lambda *args, **kwargs: None,
+            error=lambda *args, **kwargs: None,
+        )
+
+    def get_workpiece_weight(self):
+        return self.weights.pop(0)
+
+    def get_gripper_width(self):
+        return self.width
+
+    def get_gripper_angle_deg(self):
+        return 0.0
+
+    def gripper_open(self, width_mm):
+        self.calls.append('open')
+        return True
+
+    def place(self, **kwargs):
+        self.calls.append('place')
+        self.place_kwargs = kwargs
+        return self.place_result
+
+
+def _weight_params():
+    return {
+        'plate_weight_check_enabled': True,
+        'plate_weight_wait_sec': 0.0,
+        'plate_opener_weight_kg': 0.05,
+        'plate_cake_weight_kg': 0.20,
+        'plate_weight_tolerance_percent': 10.0,
+        'plate_cake_min_delta_kg': 0.075,
+        'plate_weight_reads': 1,
+        'plate_weight_read_interval': 0.0,
+        'plate_pick_opener1': [0.0] * 6,
+        'plate_pick_opener2': [0.0] * 6,
+        'opener_open_width_mm': 100.0,
+        'opener_open_wait_sec': 0.0,
+        'opener_pre_open_wait_sec': 0.0,
+    }
+
+
+class WeightFailureRecoveryTests(unittest.TestCase):
+    """무게 75g 실패 시 opener 복구가 실제로 호출되는지 검사한다."""
+
+    def _sequence_until_both(self, robot):
+        params = _weight_params()
+        sequence = PlateSequence(robot, params.__getitem__)
+        self.assertTrue(sequence._weight_at_safe('prepare_start'))
+        self.assertTrue(sequence._weight_at_safe('prepare_opener'))
+        sequence._opener_held = True
+        return sequence
+
+    def test_both_failure_recovers_opener_at_half_speed(self):
+        robot = RecoveryRobot([1.200, 1.250, 1.300])
+        sequence = self._sequence_until_both(robot)
+
+        self.assertFalse(sequence._weight_at_safe('prepare_both'))
+        self.assertIn('place', robot.calls)
+        self.assertAlmostEqual(robot.place_kwargs['speed_approach'], 15.0)
+        self.assertAlmostEqual(robot.place_kwargs['speed_slow'], 15.0)
+        self.assertAlmostEqual(robot.place_kwargs['speed_retract'], 15.0)
+        self.assertFalse(sequence._opener_held)
+
+    def test_recovery_failure_keeps_opener_flag(self):
+        robot = RecoveryRobot([1.200, 1.250, 1.300], place_result=False)
+        sequence = self._sequence_until_both(robot)
+
+        self.assertFalse(sequence._weight_at_safe('prepare_both'))
+        self.assertIn('place', robot.calls)
+        self.assertTrue(sequence._opener_held)
+
+    def test_missing_opener_opens_and_raises(self):
+        robot = RecoveryRobot([], width=0.0125)
+        params = _weight_params()
+        sequence = PlateSequence(robot, params.__getitem__)
+        with self.assertRaises(OpenerMissingError):
+            sequence._check_gripper_grasp('prepare_opener')
+        self.assertIn('open', robot.calls)
+        self.assertFalse(sequence._opener_held)
+
+
+class GripperWidthLocalTests(unittest.TestCase):
+    """/onrobot/pose 제한 없이 각도로 폭을 계산하는지 검사한다."""
+
+    def _client(self):
+        # __init__ 없이 순수 계산 메서드만 검사한다.
+        return object.__new__(DoosanRobotClient)
+
+    def test_open_angle_matches_observed_width(self):
+        width = self._client().gripper_width_from_angle(
+            math.radians(1.9000511035933385)
+        )
+        self.assertAlmostEqual(width, 0.0817, delta=0.001)
+
+    def test_closed_angle_bypasses_service_limit(self):
+        # 38.98°는 /onrobot/pose의 36° 제한을 넘지만 로컬 계산은 가능하다.
+        width = self._client().gripper_width_from_angle(
+            math.radians(38.976613858262915)
+        )
+        self.assertAlmostEqual(width, 0.0185, delta=0.001)
 
 
 if __name__ == "__main__":
