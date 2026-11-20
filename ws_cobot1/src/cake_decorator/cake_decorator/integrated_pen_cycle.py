@@ -20,6 +20,7 @@ from dsr_msgs2.srv import (
 from .bent_pen import SIDE_TCP_NAME, SIDE_TCP_OFFSET_MM
 from .drawing_motion import DsrPos
 from .tcp_scope import reset_default_tcp
+from .side_pen_return import return_pen
 
 
 # real_pen_pick_45.py에서 검증한 손끝 지문 중심. grip TCP의 240mm와 다르다.
@@ -298,8 +299,7 @@ class IntegratedPenCycle:
 
     def return_side(self, initial_joints, cancelled=lambda: False):
         """J6를 되감고 현재 YAML 거치대에 DO로 반납한 뒤 영점으로 후퇴한다."""
-        from .side_pen_return import return_pen
-
+        # 시작 시 함께 가져온 모듈을 사용해 실행 중 반납 코드만 새 버전이 되지 않게 한다.
         return_pen(
             self.robot, initial_joints, cancelled,
             rack=getattr(self, "rack", None) or self._rack(),

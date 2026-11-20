@@ -157,3 +157,36 @@ def test_return_slows_orientation_but_keeps_free_unwind_and_coordinates(
         assert ("open", "Pen_Side_45") in robot.events
     assert after[0] == ("Pen_Side_45" if standalone else "")
     np.testing.assert_allclose(after[1], expected_after, atol=1e-9)
+
+
+def test_return_accepts_legacy_node_without_new_tilt_parameters(monkeypatch):
+    """실행 중 코드가 바뀌어 새 기울임 설정이 없는 노드도 반납을 끝내야 한다."""
+    import rclpy
+    from rclpy.node import Node
+    import cake_decorator.side_pen_return as returning
+
+    monkeypatch.setattr(returning.time, "sleep", lambda _: None)
+    rack = rack_parameters()
+    rclpy.init()
+    node = Node("legacy_pen_return_test")
+    try:
+        # 이전 실행기가 알고 있던 설정만 선언해 실제 미선언 예외를 재현한다.
+        for name in (
+            "free_joint_speed_deg_s", "free_joint_acc_deg_s2",
+            "pen_travel_speed_mm_s", "pen_lift_speed_mm_s",
+            "pen_rack_speed_mm_s", "pen_motion_acc_mm_s2",
+        ):
+            node.declare_parameter(name, rack[name])
+        robot = MotionRobot()
+        robot.tcp = "Pen_Side_45"
+        returning.return_pen(
+            robot,
+            robot.joint_values.copy(),
+            rack=rack,
+            parameter=lambda name: node.get_parameter(name).value,
+        )
+        assert all(settings["angular_speed_deg_s"] == 45.0 for _, _, settings in robot.lines)
+        assert any(kind == "gripper" for kind, _ in robot.events)
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()

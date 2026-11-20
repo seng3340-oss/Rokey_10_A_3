@@ -13,19 +13,19 @@ test("확정 원뿔대형 케이크와 얇은 케이크판 크기를 사용한�
   assert.equal(CAKE_DIMENSIONS.boardWidthMm, 179);
   assert.equal(CAKE_DIMENSIONS.boardDepthMm, 179);
   assert.equal(CAKE_DIMENSIONS.boardThicknessMm, 2);
-  assert.equal(CAKE_DIMENSIONS.bottomDiameterMm, 120);
+  assert.equal(CAKE_DIMENSIONS.bottomDiameterMm, 119.5);
   assert.ok(
     Math.abs(MODEL_SIZE.cakeHeight / (2 * MODEL_SIZE.cakeRadius) - 79 / 113.5) <
       1e-10,
   );
-  assert.ok(Math.abs(MODEL_SIZE.cakeBottomRadius - 120 / 113.5) < 1e-10);
+  assert.ok(Math.abs(MODEL_SIZE.cakeBottomRadius - 119.5 / 113.5) < 1e-10);
 });
 
 test("옆면 편집 영역은 원뿔대 둘레와 높이 비율을 사용한다", () => {
   const side = DRAWING_LAYOUT.side;
   assert.ok(
     Math.abs(
-      side.width / side.height - (Math.PI * 116.75) / Math.hypot(79, 3.25),
+      side.width / side.height - (Math.PI * 116.5) / Math.hypot(79, 3.0),
     ) < 1e-10,
   );
   assert.equal(side.x + side.width / 2, 512);

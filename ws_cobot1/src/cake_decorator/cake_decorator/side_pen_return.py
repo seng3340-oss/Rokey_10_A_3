@@ -6,6 +6,7 @@ import warnings
 
 import numpy as np
 from scipy.spatial.transform import Rotation
+from rclpy.exceptions import ParameterNotDeclaredException
 
 from .bent_pen import SIDE_TCP_OFFSET_MM, VERTICAL_GRIPPER_ZYZ
 from .drawing_motion import DsrPos
@@ -44,7 +45,30 @@ def return_pen(
         "pen_tilt_speed_deg_s": 45.0,
         "pen_tilt_acc_deg_s2": 90.0,
     }
-    setting = parameter if parameter is not None else defaults.__getitem__
+    resolved = {}
+
+    def setting(name):
+        """새 기울임 설정만 없는 이전 노드는 검증된 기본값으로 반납한다.
+
+        나머지 필수 설정의 누락은 그대로 오류로 처리한다. 이미 읽은 값은 같은
+        반납 동안 고정하고, 구버전 호환 안내도 설정마다 한 번만 남긴다.
+        """
+        if name not in resolved:
+            if parameter is None:
+                value = defaults[name]
+            else:
+                try:
+                    value = parameter(name)
+                except ParameterNotDeclaredException:
+                    if name not in ("pen_tilt_speed_deg_s", "pen_tilt_acc_deg_s2"):
+                        raise
+                    value = defaults[name]
+                    robot._logger.warning(
+                        f"이전 노드에 {name} 설정이 없어 기본값 {value:g} 적용. "
+                        "다음 주문 전에 실행기를 재시작하세요."
+                    )
+            resolved[name] = value
+        return resolved[name]
 
     def require(success, stage):
         """실패·취소 시 이후 이동과 그리퍼 열기를 수행하지 않는다."""
