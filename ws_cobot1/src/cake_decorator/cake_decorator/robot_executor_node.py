@@ -989,14 +989,9 @@ class RobotExecutorNode(Node):
             self._fail('펜 상공 이동 실패')
             return False
 
-        # 2. 그리퍼 열기
-        # time.sleep(0.5)
-        # # [변경 2026-11-19] DO ON/OFF 결과를 확인한다. 실패하면 아래로
-        # # 하강하지 않고 즉시 중단해 그리퍼 상태가 불명확한 채 움직이지 않는다.
-        # if not self._robot.gripper_open(self._param('gripper_open_width')):
-        #     self._fail('펜 그리퍼 열기 실패')
-        #     return False
-        # time.sleep(0.5)  # 대기 시간 추가
+        # PR23의 수정 유지: 앞선 반납에서 열린 그리퍼에 열기 펄스를 반복하지 않는다.
+        # 열린 상태로 파지 위치까지 내려간 뒤 닫기만 실행한다.
+        self.get_logger().info('TOP 펜 파지: 추가 열기 없이 하강 → 닫기')
 
         # 3. 펜 위치로 하강 (직선)
         if self._check_cancel(goal_handle):

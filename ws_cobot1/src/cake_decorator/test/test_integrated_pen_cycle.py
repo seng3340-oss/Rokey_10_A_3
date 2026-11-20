@@ -169,7 +169,22 @@ def test_pick_selects_existing_side_tcp_and_removes_temporary_pivot():
     assert all(name.startswith("PickPivot_") for name, _ in lines)
 
 
-@pytest.mark.parametrize("failure", ["open", "close", "line", "set_tcp"])
+@pytest.mark.parametrize("surface", ["TOP", "SIDE"])
+def test_pen_pick_does_not_reopen_gripper_before_closing(monkeypatch, surface):
+    """PR23처럼 열린 손가락에 열기 펄스를 다시 보내지 않고 파지한다."""
+    executor = make_executor(monkeypatch, integrated_side_cycle=True)
+    if surface == "SIDE":
+        executor._pen_cycle.pick_side()
+    else:
+        from cake_decorator.drawing_motion import TaskState
+        executor._state = TaskState.PLACING_CAKE
+        handle = draw_handle("TOP")
+        assert executor._do_grasping_tool(handle, handle.request)
+    grip_events = [kind for kind, _ in executor._robot.events if kind in ("open", "close")]
+    assert grip_events == ["close"]
+
+
+@pytest.mark.parametrize("failure", ["close", "line", "set_tcp"])
 def test_pick_failure_resets_without_opening_to_return(failure):
     """집기 실패 뒤에는 반납을 시도하지 않고 TCP와 운전 모드만 복구한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
@@ -183,7 +198,7 @@ def test_pick_failure_resets_without_opening_to_return(failure):
     if failure != "set_tcp":
         assert robot.tcp == ""
         assert set(robot.offsets) == {"", "Pen_Side_45"}
-    assert len([event for event in robot.events if event[0] == "open"]) <= 1
+    assert not any(kind == "open" for kind, _ in robot.events)
 
 
 def test_return_uses_current_rack_do_and_zero_after_release(monkeypatch):
@@ -323,7 +338,7 @@ def test_interrupted_integrated_draw_resets_without_return_or_release(monkeypatc
     assert not result.success
     assert executor._robot.tcp == ""
     assert executor._robot.mode == 1
-    assert len([1 for kind, _ in executor._robot.events if kind == "open"]) == 1
+    assert len([1 for kind, _ in executor._robot.events if kind == "open"]) == 0
     assert len([1 for kind, _ in executor._robot.events if kind == "joint"]) == 1
     handle.succeed.assert_not_called()
     assert not executor._side_pen_returned

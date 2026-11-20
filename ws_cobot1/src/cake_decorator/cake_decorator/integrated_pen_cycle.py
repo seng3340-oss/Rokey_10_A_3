@@ -255,8 +255,9 @@ class IntegratedPenCycle:
             ):
                 raise RuntimeError("45도 펜 거치대 상공 이동 실패")
             self._check_cancel(cancelled)
-            if not self.robot.gripper_open(self.parameter("gripper_open_width")):
-                raise RuntimeError("45도 펜 그리퍼 열기 실패")
+            # PR23과 동일하게 파지 직전 열기 펄스를 반복하지 않는다.
+            # 앞선 도구 반납에서 열린 상태로 내려가 기울인 뒤 닫기만 실행한다.
+            self.robot._logger.info("SIDE 펜 파지: 추가 열기 없이 하강 → 기울임 → 닫기")
             for index, flange_pose in enumerate(geometry.flange_poses):
                 self._check_cancel(cancelled)
                 pose = flange_to_tcp(flange_pose, GRIP_CENTER_MM)
