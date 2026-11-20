@@ -38,6 +38,11 @@ class PlateWeightError(SafetyException):
 
     code = "CAKE_WEIGHT_FAILED"
 
+    def __init__(self, message, *, resume_allowed=False):
+        """실제 재집기 소진인지 구분한다. 안착 이후 측정 장애를 입고부터 반복하지 않는다."""
+        super().__init__(message)
+        self.resume_allowed = resume_allowed
+
 
 def require_pen_width(robot, parameter, stage):
     """파지 전 열림·인출 후 보유 폭을 검사한다. 실패 후 복구는 실행 노드가 맡는다."""

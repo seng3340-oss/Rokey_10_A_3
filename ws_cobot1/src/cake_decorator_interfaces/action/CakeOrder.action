@@ -4,12 +4,16 @@ cake_decorator_interfaces/DrawingPath[] drawing_paths
 cake_decorator_interfaces/CakeParams cake_params
 # 원문 후보: marker / cream / chocolate. 미지원 도구는 서버 구현에서 거절해야 한다.
 string tool_type
+# 빈 문자열은 새 주문이다. 재개는 같은 주문의 실패 단계·기준 자세 JSON(v1)을 전달한다.
+string resume_checkpoint
 ---
 # Result: 작업 종료 결과. 서버 저장 성공과 로봇 제작 완료를 구분한다.
 bool success
 string error_code
 string error_msg
 float64 elapsed_time_sec
+# 재개 가능한 도구·케이크 검사 실패에서만 채운다. 이미 그린 면을 반복하지 않는 기준이다.
+string resume_checkpoint
 ---
 # Feedback: 원문 상태 예시 VALIDATING, PICKING_CAKE, PLACING_CAKE,
 # GRASPING_TOOL, DRAWING_TOP, DRAWING_SIDE, RELEASING_TOOL, DELIVERING.

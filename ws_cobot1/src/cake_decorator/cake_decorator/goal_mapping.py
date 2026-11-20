@@ -1,10 +1,12 @@
 """백엔드 원본 데이터를 ROS Goal로 포장한다. 점 선별·로봇 이동은 수행하지 않는다."""
 
 import math
+import json
 
 from geometry_msgs.msg import Point32, Quaternion
 from cake_decorator_interfaces.action import CakeOrder
 from cake_decorator_interfaces.msg import CakeParams, DrawingPath, Stroke2D
+from .resume_checkpoint import parse_checkpoint
 
 
 def validate_reference(pose):
@@ -114,7 +116,16 @@ def build_goal(claim, reference):
         raise ValueError("주문 전체 획 한도 초과")
     if sum(len(stroke.points) for path in paths for stroke in path.strokes) > 20000:
         raise ValueError("주문 전체 좌표 한도 초과")
+    resume_raw = claim.get('resume_checkpoint')
+    encoded_resume = ''
+    if resume_raw:
+        checkpoint = parse_checkpoint(resume_raw, claim['order_id'])
+        pose = checkpoint['top_pose']
+        params.center.x, params.center.y, params.center.z = pose[:3]
+        params.tool_orientation = Quaternion(**dict(zip(('x', 'y', 'z', 'w'), pose[3:])))
+        encoded_resume = json.dumps(checkpoint, allow_nan=False)
     return CakeOrder.Goal(
+        resume_checkpoint=encoded_resume,
         order_id=claim["order_id"],
         drawing_paths=paths,
         cake_params=params,

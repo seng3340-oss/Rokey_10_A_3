@@ -73,6 +73,8 @@ def test_tm_bridge_api_hmi_contract(tmp_path, surface):
         event(claim, "accepted")
         bridge = bridge_type()
         bridge.active_order_id = order_id
+        bridge.active_attempt_token = claim["claim_token"]
+        bridge._resuming = False
         bridge.feedback = Queue(maxsize=1)
         bridge.backend = NS(event=event)
         tm = tm_type()
@@ -120,3 +122,37 @@ def test_tm_bridge_api_hmi_contract(tmp_path, surface):
         assert client.get("/api/orders/missing/monitor").status_code == 404
         assert client.post(f"/api/orders/{order_id}/monitor").status_code == 405
         assert client.get("/api/health").json()["ros_status_monitored"] is False
+
+
+def test_resumed_feedback_rejects_previous_attempt_for_same_order():
+    """같은 주문 재개 후 늦은 Action·토픽 피드백이 새 진행률을 덮지 못한다."""
+    bridge_type = load_methods(
+        "ros_bridge_node.py",
+        "RosBridgeNode",
+        {"_on_status", "_on_feedback", "_flush_feedback", "_flush_plan"},
+        {"SimpleNamespace": NS, "Empty": Empty, "Full": Full, "time": time},
+    )
+    bridge = bridge_type()
+    bridge.active_order_id = "same-order"
+    bridge.active_attempt_token = "new-attempt"
+    bridge._resuming = True
+    bridge.feedback = Queue(maxsize=1)
+    events = []
+    bridge.backend = NS(event=lambda *args, **values: events.append(values))
+    response = NS(feedback=NS(
+        current_phase="DRAWING", progress_pct=65.0, message="옆면 재개",
+    ))
+    claim = {"order_id": "same-order", "claim_token": "new-attempt"}
+
+    # 토픽에는 시도 토큰이 없어 재개 중 사용하지 않는다. 이전 Action도 차단한다.
+    bridge._on_status(NS(order_id="same-order"))
+    bridge._on_feedback("same-order", response, "old-attempt")
+    assert bridge.feedback.empty()
+    # 토큰 교체 전에 큐에 들어간 이전 시도의 값도 HTTP로 전송하지 않는다.
+    bridge.feedback.put_nowait(("same-order", "old-attempt", response.feedback))
+    bridge._flush_feedback(claim)
+    assert events == []
+    bridge._on_feedback("same-order", response, "new-attempt")
+    bridge._flush_feedback(claim)
+    assert len(events) == 1
+    assert events[0]["progress_pct"] == 65.0

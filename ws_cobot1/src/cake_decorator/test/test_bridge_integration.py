@@ -231,7 +231,7 @@ class BridgeIntegrationTests(unittest.TestCase):
         """확정된 Action 실패는 완료와 구분한다."""
         receipt = self.http("/api/drawing", DRAWING)
         self.start_nodes(success=False)
-        detail = self.wait_state(receipt["order_id"], "failed")
+        detail = self.wait_state(receipt["order_id"], "paused")
         self.assertEqual(detail["phase"], "FAILED")
         self.assertEqual(detail["error_code"], "TEST_ABORT")
         self.assertEqual(len(self.tm.goals), 1)

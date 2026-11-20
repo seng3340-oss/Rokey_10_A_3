@@ -10,7 +10,6 @@ import {
   isOrderFeedbackFresh,
   parsePage,
   readJson,
-  collectOrderChanges,
   orderLabels as labels,
   parseRobotStop,
   sendRobotStop,
@@ -26,6 +25,8 @@ import type {
 } from "../api/hmi";
 import type { DrawingPathPayload } from "../api/drawing";
 import { HmiCake3D } from "./HmiCake3D";
+import { WorkcellRecoveryPanel } from "./WorkcellRecovery";
+import { WorkcellLogs } from "./WorkcellLogs";
 import "../styles/hmi.css";
 
 /** 원본 픽셀 그대로 표시한다. 측면은 입력 캔버스이며 실제 원뿔대 전개도가 아니다. */
@@ -94,7 +95,6 @@ export function Hmi() {
   const [logs, setLogs] = useState<(OrderLog & { time: string })[]>([]);
   // 수동 선택은 유지하되 새 주문으로 자동 전환할 때만 원본의 면과 데모를 초기화한다.
   const displayedOrder = useRef("");
-  const seenOrders = useRef(new Map<string, string>());
   const lastError = useRef("");
 
   useEffect(() => {
@@ -171,17 +171,6 @@ export function Hmi() {
         setError("");
         setUpdated(new Date().toLocaleTimeString("ko-KR"));
         lastError.current = "";
-        const observed = collectOrderChanges(seenOrders.current, next.items);
-        seenOrders.current = observed.signatures;
-        if (observed.changes.length) {
-          const time = formatLogTime(new Date());
-          setLogs((old) =>
-            [
-              ...observed.changes.map((change) => ({ ...change, time })),
-              ...old,
-            ].slice(0, 50),
-          );
-        }
       } catch (cause) {
         if (!active) return;
         const message = cause instanceof Error ? cause.message : "조회 오류";
@@ -319,6 +308,8 @@ export function Hmi() {
           </button>
         </div>
       </header>
+      {/* 중단 단계 재개와 현장 초기화 확인을 소프트웨어 정지 해제와 구분한다. */}
+      <WorkcellRecoveryPanel />
       <div className="hmi-brand">
         <a href="/hmi">
           <b>CAKEBOT</b> <span>운영 모니터</span>
@@ -549,35 +540,10 @@ export function Hmi() {
               </p>
             </section>
           </div>
-          <section className="hmi-card" id="logs">
-            <h2>경고·오류 로그</h2>
-            <p>
-              이 브라우저에서 관측한 모든 표시 주문의 변화·조회 오류 최신
-              50건입니다. 새로고침 전 이력과 3초 사이의 중간 전환은 보존하지
-              않습니다.
-            </p>
-            {logs.map((log, i) => (
-              <div
-                className={`hmi-log ${log.severity}`}
-                key={`${log.time}-${i}`}
-              >
-                <time>{log.time}</time>
-                <span>
-                  {/* 각 로그의 정상·경고·오류 등급을 함께 표시한다. */}
-                  <b>
-                    {log.severity === "error"
-                      ? "오류"
-                      : log.severity === "warning"
-                        ? "경고"
-                        : "정상"}
-                  </b>{" "}
-                  · {log.message}
-                </span>
-              </div>
-            ))}
-          </section>
+          <WorkcellLogs localLogs={logs} />
           <footer>
-            주문·공정 정보는 읽기 전용입니다. 소프트웨어 정지만 로봇에 전달되며
+            주문·공정 조회는 읽기 전용입니다. 재개하기는 중단 단계부터 같은
+            주문을 이어가며, 초기 자세 세팅은 현장 확인 후 주문을 종료합니다.
             물리적 비상정지는 장비의 E-stop을 사용하세요.
           </footer>
         </main>

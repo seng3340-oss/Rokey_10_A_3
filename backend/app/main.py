@@ -18,6 +18,7 @@ from .drawings import router as drawing_router
 from .orders import router as order_router
 from .monitoring import router as monitoring_router, runtime_snapshot
 from .robot_stop import RobotStopState, router as robot_stop_router
+from .workcell import router as workcell_router
 
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data" / "orders.sqlite3"
@@ -101,6 +102,7 @@ def create_app(
     app.include_router(bridge_router)
     app.include_router(monitoring_router)
     app.include_router(robot_stop_router)
+    app.include_router(workcell_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
