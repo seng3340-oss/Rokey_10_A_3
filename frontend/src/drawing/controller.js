@@ -6,7 +6,8 @@ import { CAKE_DIMENSIONS, DRAWING_LAYOUT } from "./cakeDimensions";
  * React가 화면을 붙인 뒤 캔버스·미리보기·확인 창의 동작을 연결한다.
  * 그림은 면별 브라우저 메모리에 보관하며, 반환한 정리 함수는 화면 해제 시 호출한다.
  */
-export function mountDrawing() {
+/** @param {{existingOrderId?: string, onOrderReset?: () => void}} options 재개 주문은 조회만 연결한다. */
+export function mountDrawing(options = {}) {
   // 접수 응답을 기다리는 동안 연속 클릭으로 같은 그림이 중복 제출되지 않게 한다.
   let submitting = false;
   // 데모는 명시적인 주소에서만 사용하고 실제 주문 요청을 보내지 않는다.
@@ -16,6 +17,8 @@ export function mountDrawing() {
   let feedbackTimer = null;
   let orderActive = false;
   let disposed = false;
+  let resumeLoadController = null;
+  let resumeLoadTimer = null;
   let lastActivity = performance.now();
   // 마지막 조작 후 3초를 기다린 다음 공통 60초 카운트를 시작한다.
   function remainingIdle() {
@@ -37,12 +40,17 @@ export function mountDrawing() {
     orderActive = true;
     panel.setAttribute("aria-hidden", "false");
     dialog.classList.add("is-ordering");
+    // 이전 주문의 실패 강조·숨김 상태가 새 주문의 진행 화면으로 이어지지 않게 한다.
+    dialog.classList.remove("is-order-failed");
     if (idleInterval !== null) clearInterval(idleInterval);
     idleInterval = null;
     const message = document.querySelector("#order-message");
     const title = document.querySelector("#order-title");
     const percent = document.querySelector("#order-percent");
     const progress = document.querySelector("#order-progress");
+    progress.hidden = false;
+    percent.hidden = false;
+    panel.setAttribute("role", "status");
     const pickup = document.querySelector("#pickup");
     pickup.hidden = true;
     pickup.onclick = resetOrder;
@@ -105,6 +113,8 @@ export function mountDrawing() {
           );
           if (!response.ok) throw new Error("조회 실패");
           order = await response.json();
+          // 접수한 주문의 결과만 고객 화면에 반영한다. 다른 주문 응답은 재조회한다.
+          if (order.order_id !== orderId) throw new Error("주문 번호 불일치");
         }
         if (disposed || !dialog.open) return;
         if (
@@ -114,6 +124,7 @@ export function mountDrawing() {
         )
           throw new Error("진행률 오류");
         const terminalError = [
+          "paused",
           "failed",
           "rejected",
           "uncertain",
@@ -123,15 +134,21 @@ export function mountDrawing() {
           order.status === "completed"
             ? "케이크가 완성됐어요"
             : terminalError
-              ? "운영자에게 문의해주세요"
+              ? "제작 과정에서 문제가 발생했습니다"
               : "케이크를 준비하고 있어요";
         message.textContent = terminalError
-          ? "주문 상태를 확인하고 있어요."
+          ? "관리자에게 문의해주세요."
           : order.status === "completed"
             ? "완성된 케이크를 확인해주세요."
             : stageMessage(order);
         percent.textContent = `전체 공정 ${Math.round(order.progress_pct)}%`;
         progress.value = order.progress_pct;
+        // 최종 실패는 진행률·완성 미리보기와 구분해 관리자 문의 화면으로 고정한다.
+        // 서버가 재집기 중인 동안은 running이므로 이 화면으로 전환하지 않는다.
+        dialog.classList.toggle("is-order-failed", terminalError);
+        progress.hidden = terminalError;
+        percent.hidden = terminalError;
+        panel.setAttribute("role", terminalError ? "alert" : "status");
         if (order.status === "completed") {
           // 버튼 클릭 또는 실제 경과 60초 중 먼저 오는 시점에 초기화한다.
           pickup.hidden = false;
@@ -151,6 +168,8 @@ export function mountDrawing() {
           updatePickup();
           return;
         }
+        // 실패에는 픽업 버튼·자동 초기화·자동 재주문을 제공하지 않는다.
+        // 주문 번호와 안내를 남겨 관리자가 실제 장비 상태를 확인하도록 한다.
         if (terminalError) return;
       } catch {
         if (disposed || !dialog.open) return;
@@ -183,6 +202,7 @@ export function mountDrawing() {
       render();
       updateTextures();
       publishDraft();
+      options.onOrderReset?.();
     }
     updateStatus();
   }
@@ -234,6 +254,38 @@ export function mountDrawing() {
   // 오른쪽 미리보기는 즉시 생성하고, 확인 창의 3D는 처음 열릴 때 생성한다.
   const live = cakeView(document.querySelector("#live3d"), textures);
   let review = null;
+  /** 확인창이 열린 뒤 3D를 준비한다. 최초 제출과 경고 후 재개가 같은 경로를 쓴다. */
+  function prepareReview() {
+    if (!review)
+      review = cakeView(document.querySelector("#review3d"), textures);
+    review.update();
+    review.view("angle");
+    review.resize();
+  }
+
+  /** 저장된 두 면의 그림을 표시용 사본으로 복원하고 3D 텍스처를 다시 만든다.
+   * 원본 주문 좌표는 유지한다. 표시 사본만 입력기의 1024×768 기준으로 환산한다.
+   */
+  function restoreOrderPreview(drawing) {
+    drawings.top.length = 0;
+    drawings.side.length = 0;
+    for (const path of [drawing, ...(drawing.additional_paths || [])]) {
+      const face = path.drawing_surface;
+      if (face !== "top" && face !== "side")
+        throw new Error("재개 주문의 표면 정보 오류");
+      drawings[face] = path.strokes.map((stroke) =>
+        stroke.points.map((point) => ({
+          x: (point.x * 1024) / path.canvas_width,
+          y: (point.y * 768) / path.canvas_height,
+        })),
+      );
+    }
+    // 진행률 카드 배치가 정해진 뒤 렌더러를 만들고 원본의 두 면을 함께 입힌다.
+    // ResizeObserver가 태블릿의 줄어든 좌측 영역에 맞춰 버퍼 크기를 갱신한다.
+    prepareReview();
+    flushTextures();
+  }
+
   let textureTimer = null;
   // 2D 필기는 즉시 표시하고 3D 텍스처는 최대 초당 10번만 갱신한다.
   function scheduleTextures() {
@@ -554,11 +606,7 @@ export function mountDrawing() {
     document.querySelector("#confirm").disabled = false;
     document.querySelector("#confirm").textContent = "제작 요청";
     modal.showModal();
-    if (!review)
-      review = cakeView(document.querySelector("#review3d"), textures);
-    review.update();
-    review.view("angle");
-    review.resize();
+    prepareReview();
   };
   document.querySelector("#back").onclick = () => modal.close();
   // 요청 중에는 버튼으로 중복 제출을 막고 실패한 경우에만 알림을 표시한다.
@@ -703,9 +751,53 @@ export function mountDrawing() {
       ? setInterval(updateDrawingIdle, 100)
       : null;
 
+  // 재개 중인 기존 주문은 새 POST 없이 상태 화면만 다시 연결한다.
+  // 원본을 읽기 전에도 모달로 입력을 차단하고, 조회 실패 시 자동 재주문하지 않는다.
+  if (options.existingOrderId) {
+    orderActive = true;
+    modal.showModal();
+    modal.classList.add("is-ordering");
+    document
+      .querySelector("#order-status")
+      .setAttribute("aria-hidden", "false");
+    /** 통신 복구 시 같은 주문 조회만 재시도한다. 주문을 새로 생성하지 않는다. */
+    async function loadResumedOrder() {
+      resumeLoadController = new AbortController();
+      const timeout = setTimeout(() => resumeLoadController?.abort(), 5000);
+      try {
+        const response = await fetch(
+          `/api/orders/${encodeURIComponent(options.existingOrderId)}`,
+          {
+            cache: "no-store",
+            signal: resumeLoadController.signal,
+          },
+        );
+        if (!response.ok) throw new Error("기존 주문 조회 실패");
+        const order = await response.json();
+        if (disposed) return;
+        if (order.order_id !== options.existingOrderId || !order.drawing) {
+          throw new Error("재개 주문 정보 불일치");
+        }
+        reviewedPayload = order.drawing;
+        restoreOrderPreview(order.drawing);
+        showOrderStatus(order.order_id, false);
+      } catch {
+        if (!disposed) {
+          document.querySelector("#order-message").textContent =
+            "재개 주문을 확인하고 있습니다. 연결되면 자동으로 이어집니다.";
+          resumeLoadTimer = setTimeout(loadResumedOrder, 2000);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    void loadResumedOrder();
+  }
   // React 화면 해제 시 예약 작업과 전역 리스너, 두 WebGL 뷰의 자원을 정리한다.
   return () => {
     disposed = true;
+    resumeLoadController?.abort();
+    if (resumeLoadTimer !== null) clearTimeout(resumeLoadTimer);
     if (drawingInterval !== null) clearInterval(drawingInterval);
     for (const type of activityEvents)
       document.removeEventListener(type, recordActivity, { capture: true });

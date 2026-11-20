@@ -575,3 +575,38 @@
     grid-template-columns: max-content minmax(0, 1fr);
   }
 }
+
+/* 실패 잠금 안내는 고정 정지 헤더와 분리하고 태블릿 폭에서는 세로로 쌓는다. */
+.hmi-recovery {
+  margin: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.hmi-recovery button {
+  flex-shrink: 0;
+}
+/* 로그만 내부 스크롤한다. 새 페이지가 추가돼도 전체 HMI 화면은 길어지지 않는다. */
+.hmi-log-scroll {
+  max-height: min(52svh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 12px;
+  overflow-anchor: none;
+}
+@media (max-width: 700px) {
+  .hmi-recovery {
+    margin: 12px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* 재개와 주문 종료를 서로 다른 행동으로 표시한다. 좁은 화면에서는 위아래로 배치한다. */
+.hmi-recovery-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}

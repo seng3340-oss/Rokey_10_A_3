@@ -28,8 +28,8 @@ drawing_path_node:
     side_spline_tolerance_mm: 0.05
     side_diagonal_mode: spline
     side_pen_vertical_deg: 15.0
-    # 전체 지름 유격을 6.5에서 0.3mm 줄임: 6.2mm, 반지름 보정 +3.1mm.
-    side_diameter_allowance_mm: 6.2
+    # 전체 지름 유격을 6.2에서 0.5mm 줄임: 5.7mm, 반지름 보정 +2.85mm.
+    side_diameter_allowance_mm: 5.7
     side_y_inset_mm: 1.0
     # 웹 띠 좌우 끝이 이어진 옆면 링은 이음매를 지나 3mm 더 겹쳐 그린다. 0이면 끈다.
     side_seam_overlap_mm: 3.0
@@ -55,8 +55,9 @@ robot_executor_node:
     # 짧은 세그먼트에서는 길이의 0.45배까지 자동으로 줄어들고, 1mm(제어기 최소) 미만이 되는
     # 꼭짓점은 블렌딩 없이 정지 후 이어 간다. 1mm 미만(0 포함)이면 기존처럼 점마다 movel.
     top_blend_radius_mm: 1.5
-    # 하중은 팀 PR 기준 75g 초과 증가를 사용하며 실물 측정 전에는 OFF다.
-    plate_weight_check_enabled: false
+    # 입고함·스테이션에서 케이크를 뜬 뒤 따개 단독 대비 75g 초과 증가를 검사한다.
+    # 실물 전체 공정에서 누락을 검출하도록 켠다. virtual은 실행기가 별도로 끈다.
+    plate_weight_check_enabled: true
     plate_opener_weight_kg: 0.05
     plate_cake_weight_kg: 0.20
     plate_weight_tolerance_percent: 10.0

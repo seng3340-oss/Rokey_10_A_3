@@ -91,6 +91,7 @@ class DrawingReceipt(ContractModel):
 
 OrderState = Literal[
     "received",
+    "paused",
     "claimed",
     "dispatching",
     "running",

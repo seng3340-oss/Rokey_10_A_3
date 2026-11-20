@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import Field
 
 from .schemas import ContractModel
+from .workcell import RecoveryCheckpoint, recovery_required
 
 router = APIRouter(prefix="/internal/bridge", tags=["ROS 브릿지 내부 연결"])
 TERMINAL = {"completed", "failed", "rejected", "resolved"}
@@ -38,6 +39,7 @@ class BridgeEvent(ContractModel):
     message: Annotated[str, Field(max_length=2048)] = ""
     error_code: Annotated[str, Field(max_length=256)] = ""
     elapsed_time_sec: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    resume_checkpoint: RecoveryCheckpoint | None = None
 
 
 class ManualResolution(ContractModel):
@@ -74,9 +76,13 @@ def claim_order(request: Request):
         return Response(status_code=204)
     with request.app.state.database.connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        recovery = connection.execute('SELECT * FROM workcell_recovery WHERE id=1').fetchone()
+        if recovery_required(connection) and not recovery['resume_requested']:
+            return Response(status_code=204)
         row = connection.execute(
             "SELECT o.*,e.cake_json FROM orders o JOIN order_execution e USING(order_id) "
-            "WHERE e.state='received' ORDER BY o.id LIMIT 1"
+            "WHERE e.state='received' AND (?=0 OR o.order_id=?) ORDER BY o.id LIMIT 1",
+            (recovery['requires_reset'], recovery['order_id']),
         ).fetchone()
         if row is None:
             return Response(status_code=204)
@@ -85,19 +91,23 @@ def claim_order(request: Request):
             "UPDATE order_execution SET state='claimed',claim_token=?,updated_at=? WHERE order_id=?",
             (token, now(), row["order_id"]),
         )
+        connection_resume = connection.execute(
+            'SELECT resume_checkpoint FROM order_execution WHERE order_id=?', (row['order_id'],)
+        ).fetchone()['resume_checkpoint']
         connection.commit()
     return {
         "order_id": row["order_id"],
         "claim_token": token,
         "drawing": json.loads(row["drawing_json"]),
         "cake": json.loads(row["cake_json"]),
+        "resume_checkpoint": json.loads(connection_resume) if connection_resume else None,
     }
 
 
 @router.post("/orders/{order_id}/events", dependencies=[Depends(authorize)])
 def record_event(order_id: str, event: BridgeEvent, request: Request):
     """허용 순서만 저장하고 불명확한 전송은 활성 잠금을 유지한다."""
-    digest = hashlib.sha256(event.model_dump_json().encode()).hexdigest()
+    digest = hashlib.sha256(event.model_dump_json(exclude_none=True).encode()).hexdigest()
     with request.app.state.database.connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
@@ -123,26 +133,82 @@ def record_event(order_id: str, event: BridgeEvent, request: Request):
         }
         if event.kind not in allowed.get(row["state"], set()):
             raise HTTPException(409, "현재 상태에서 해당 이벤트를 적용할 수 없습니다.")
-        state = {"accepted": "running", "feedback": "running"}.get(
+        checkpoint = event.resume_checkpoint
+        if checkpoint is not None:
+            if event.kind != 'failed' or checkpoint.order_id != order_id:
+                raise HTTPException(422, '재개 지점의 주문 또는 결과 종류가 다릅니다.')
+            allowed_codes = (
+                {'PEN_GRASP_FAILED', 'PEN_GRASP_RECOVERY_FAILED', 'RESUME_NOT_SAFE'}
+                if checkpoint.stage == 'DRAWING' else
+                {'OPENER_MISSING', 'CAKE_WEIGHT_FAILED', 'RESUME_NOT_SAFE'}
+            )
+            if event.error_code not in allowed_codes:
+                raise HTTPException(422, '이 오류는 해당 단계부터 재개할 수 없습니다.')
+            if checkpoint.stage == 'DRAWING':
+                drawing = json.loads(connection.execute(
+                    'SELECT drawing_json FROM orders WHERE order_id=?', (order_id,)
+                ).fetchone()['drawing_json'])
+                paths = [drawing, *drawing.get('additional_paths', [])]
+                if checkpoint.path_index >= len(paths) or (
+                    paths[checkpoint.path_index]['drawing_surface'].upper() != checkpoint.surface
+                ):
+                    raise HTTPException(422, '재개할 면이 원본 주문과 다릅니다.')
+        state = {'accepted': 'running', 'feedback': 'running', 'failed': 'paused'}.get(
             event.kind, event.kind
         )
+        phase = checkpoint.stage if state == 'paused' and checkpoint else event.phase
+        progress = row['progress_pct'] if state == 'paused' else event.progress_pct
+        encoded_checkpoint = checkpoint.model_dump_json() if checkpoint else ''
         connection.execute(
             "UPDATE order_execution SET state=?,phase=?,progress_pct=?,message=?,result_json=?,updated_at=? "
             "WHERE order_id=?",
-            (
-                state,
-                event.phase,
-                event.progress_pct,
-                event.message,
-                event.model_dump_json(),
-                now(),
-                order_id,
-            ),
+            (state, phase, progress, event.message, event.model_dump_json(exclude_none=True), now(), order_id),
         )
+        if state == 'paused':
+            connection.execute(
+                'UPDATE order_execution SET resume_checkpoint=? WHERE order_id=?',
+                (encoded_checkpoint, order_id),
+            )
         connection.execute(
             "INSERT INTO bridge_events VALUES (?,?,?)",
             (event.event_id, order_id, digest),
         )
+        # 실패 확정과 접수 잠금을 같은 트랜잭션에 저장해 다음 주문과의 경쟁을 막는다.
+        if state == 'paused':
+            connection.execute(
+                'UPDATE workcell_recovery SET revision=revision+1,requires_reset=1,'
+                'order_id=?,error_code=?,message=?,updated_at=?,reset_at=NULL,'
+                'checkpoint_json=?,resume_requested=0 WHERE id=1',
+                (order_id, event.error_code, event.message, now(), encoded_checkpoint),
+            )
+        if state == 'completed':
+            connection.execute(
+                "UPDATE workcell_recovery SET requires_reset=0,checkpoint_json='' "
+                'WHERE id=1 AND order_id=?', (order_id,),
+            )
+            connection.execute(
+                "UPDATE order_execution SET resume_checkpoint='' WHERE order_id=?", (order_id,),
+            )
+        # 진행률만 변할 때는 생략하고 공정·상태·설명 변화를 영속 로그에 남긴다.
+        if (
+            event.kind != 'feedback' or event.phase != row['phase']
+            or event.message != row['message']
+        ):
+            severity = 'error' if state == 'paused' else (
+                'warning' if state in {'rejected', 'uncertain'} else 'info'
+            )
+            label = {
+                'dispatching': '주문 전송', 'running': '공정 진행',
+                'completed': '완료', 'paused': '복구 대기',
+                'rejected': '주문 거절', 'uncertain': '관리자 확인 필요',
+            }[state]
+            message = f'{label} · {event.message}'
+            if event.error_code:
+                message += f' · 오류 코드 {event.error_code}'
+            connection.execute(
+                'INSERT INTO workcell_logs(created_at,order_id,severity,message) VALUES (?,?,?,?)',
+                (now(), order_id, severity, message),
+            )
         connection.commit()
     return {"order_id": order_id, "status": state}
 
@@ -162,6 +228,12 @@ def resolve_order(order_id: str, resolution: ManualResolution, request: Request)
         connection.execute(
             "UPDATE order_execution SET state='resolved',message=?,updated_at=? WHERE order_id=?",
             (resolution.reason, now(), order_id),
+        )
+        # 재개 시도 결과까지 미확정이었다면 이전 체크포인트를 다시 실행하지 않는다.
+        # 현장 종료 확인 뒤 HMI의 초기 자세 세팅으로만 다음 주문 접수를 열 수 있다.
+        connection.execute(
+            "UPDATE workcell_recovery SET checkpoint_json='',resume_requested=0 "
+            'WHERE id=1 AND order_id=?', (order_id,),
         )
         connection.commit()
     return {"order_id": order_id, "status": "resolved"}

@@ -105,8 +105,13 @@ def resolve_pending_orders(database, backend_port, bridge_token, answer=input):
     with sqlite3.connect(f"file:{Path(database).resolve()}?mode=ro", uri=True) as connection:
         pending = connection.execute(
             "SELECT order_id,state FROM order_execution "
-            "WHERE state NOT IN ('completed','failed','rejected','resolved')"
+            "WHERE state NOT IN ('completed','failed','rejected','resolved','paused')"
         ).fetchall()
+        paused = connection.execute(
+            "SELECT order_id FROM order_execution WHERE state='paused'"
+        ).fetchall()
+    if paused:
+        print(f'복구 대기 주문 {paused}: HMI에서 재개하기 또는 초기 자세 세팅을 선택하세요.', flush=True)
     if not pending:
         return
     print(f"이전 미완료 주문: {pending}", flush=True)
@@ -883,6 +888,41 @@ def healthy(port):
         return False
 
 
+def print_web_addresses(port, *, ready=True):
+    """프론트 준비 후 HMI·키오스크 주소를 출력하며 장비나 브라우저를 조작하지 않는다.
+
+    태블릿에는 localhost 대신 노트북의 기본 경로 IPv4를 안내한다. ip route get은
+    로컬 라우팅 테이블만 조회하며 대상 IP로 패킷을 보내지 않는다. 주소 조회가
+    실패해도 실행은 유지하고 사용자가 Wi-Fi IP를 확인할 수 있도록 표시한다.
+    """
+    try:
+        route_json = subprocess.check_output(
+            ["ip", "-j", "-4", "route", "get", "1.1.1.1"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        routes = json.loads(route_json)
+        tablet_host = routes[0]["prefsrc"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError):
+        tablet_host = "<노트북의 Wi-Fi IPv4 주소>"
+
+    # 하나의 블록으로 출력해 자식 노드 로그 사이에서도 두 화면 주소를 쉽게 찾는다.
+    separator = "-" * 60
+    print(
+        f"\n{separator}\n"
+        f"{'웹 화면 준비 완료' if ready else '웹 접속 주소 (실행기 준비 완료 후 접속)'}\n"
+        f"{separator}\n"
+        f"HMI (노트북): http://localhost:{port}/hmi\n"
+        f"{separator}\n"
+        f"키오스크 (태블릿): http://{tablet_host}:{port}/\n"
+        "태블릿을 노트북과 같은 Wi-Fi에 연결해 접속하세요.\n"
+        f"{separator}\n"
+        "종료: Ctrl+C\n",
+        flush=True,
+    )
+
+
 def main():
     """의존성 확인 → 드라이버 → 영점 → 웹·업무 노드 → 브릿지 순서로 시작한다."""
     parser = argparse.ArgumentParser(
@@ -1081,11 +1121,15 @@ def main():
                 f"ROS 패키지가 없습니다: {module}. 빌드와 source를 확인하세요."
             )
     from cake_decorator_interfaces.srv import GenerateTrajectory
+    from cake_decorator_interfaces.action import CakeOrder
 
     if "strokes_2d" not in GenerateTrajectory.Request.get_fields_and_field_types():
         raise RuntimeError(
             "이전 인터페이스가 로드됐습니다. ws_cobot1을 다시 빌드하세요."
         )
+    if any('resume_checkpoint' not in message.get_fields_and_field_types()
+           for message in (CakeOrder.Goal, CakeOrder.Result)):
+        raise RuntimeError('재개 인터페이스가 이전 버전입니다. 두 cake 패키지를 빌드하고 전체 실행기를 재시작하세요.')
     if args.mode == "real" and not args.reuse_driver:
         if importlib.util.find_spec("pymodbus") is None:
             raise RuntimeError(
@@ -1129,6 +1173,16 @@ def main():
             f"Y inset 1mm, 지름 유격 {dp['side_diameter_allowance_mm']}mm",
             flush=True,
         )
+        # 설정 파일과 실제 기동 옵션이 달라 검사를 빠뜨리지 않도록 실행 예정 값을
+        # 노출한다. 이미 실행 중인 노드의 파라미터를 변경하거나 조회하는 로그는 아니다.
+        executor = runtime_parameters["robot_executor_node"]["ros__parameters"]
+        weight_enabled = executor.get("plate_weight_check_enabled", False)
+        weight_label = (
+            "ON · 입고함/스테이션 집기 후 따개 대비 "
+            f"{executor.get('plate_cake_min_delta_kg', 0.075) * 1000:g}g 초과 필요"
+            if weight_enabled else "OFF · 케이크 누락 검출 안 함"
+        )
+        print(f"실행 예정 케이크 무게 검사: {weight_label}", flush=True)
     if args.check:
         print(
             f"준비 검사 통과: {args.mode}, ROS_DOMAIN_ID={os.environ.get('ROS_DOMAIN_ID', '30')}"
@@ -1367,13 +1421,7 @@ def main():
             ROOT / "frontend",
         )
         processes.wait(lambda: healthy(args.frontend_port), 20)
-        print(
-            f"준비 완료: http://localhost:{args.frontend_port} / HMI: /hmi", flush=True
-        )
-        print(
-            "태블릿은 같은 Wi-Fi의 노트북 주소와 위 포트로 접속하세요. 종료: Ctrl+C",
-            flush=True,
-        )
+        print_web_addresses(args.frontend_port)
         if (
             not args.no_browser
             and os.environ.get("DISPLAY")

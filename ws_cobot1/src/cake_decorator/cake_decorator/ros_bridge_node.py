@@ -58,6 +58,8 @@ class RosBridgeNode(Node):
         self.feedback = Queue(maxsize=1)
         self.worker = None
         self.active_order_id = None
+        self.active_attempt_token = None
+        self._resuming = False
         self.plans = Queue(maxsize=1)
         self.last_tm_feedback_at = None
         self.last_command = ""
@@ -244,6 +246,10 @@ class RosBridgeNode(Node):
 
     def _on_status(self, status):
         """작업 상태 Topic도 활성 주문에 한해 같은 상태 기록 경로로 전달한다."""
+        # 같은 주문을 재개하면 이전 시도의 토픽이 늦게 도착할 수 있다. 토큰이
+        # 없는 토픽 대신 재개 시도에서는 해당 Action의 피드백만 사용한다.
+        if self._resuming:
+            return
         if status.order_id != self.active_order_id:
             return
         self.last_command = status.current_command
@@ -258,9 +264,11 @@ class RosBridgeNode(Node):
             ),
         )
 
-    def _on_feedback(self, order_id, response):
+    def _on_feedback(self, order_id, response, attempt_token=None):
         """가장 최근 상태만 큐에 넣어 ROS 콜백에서 HTTP 대기를 하지 않는다."""
         if order_id != self.active_order_id:
+            return
+        if attempt_token is not None and attempt_token != self.active_attempt_token:
             return
         self.last_tm_feedback_at = time.monotonic()
         try:
@@ -268,7 +276,7 @@ class RosBridgeNode(Node):
         except Empty:
             pass
         try:
-            self.feedback.put_nowait((order_id, response.feedback))
+            self.feedback.put_nowait((order_id, attempt_token, response.feedback))
         except Full:
             # 상태 큐가 이미 차 있으면 다음 상태로 갱신한다. 주문 실행에는 영향이 없다.
             pass
@@ -277,10 +285,12 @@ class RosBridgeNode(Node):
         """TM Feedback을 작업 스레드에서 백엔드에 전달한다."""
         self._flush_plan(claim)
         try:
-            order_id, feedback = self.feedback.get_nowait()
+            order_id, attempt_token, feedback = self.feedback.get_nowait()
         except Empty:
             return
         if order_id != claim["order_id"]:
+            return
+        if attempt_token is not None and attempt_token != claim['claim_token']:
             return
         self.backend.event(
             claim,
@@ -293,6 +303,8 @@ class RosBridgeNode(Node):
 
     def _dispatch(self, claim):
         """전송 시작을 DB에 먼저 남긴 뒤 정확히 한 번만 Goal 전송을 시도한다."""
+        self.active_attempt_token = claim['claim_token']
+        self._resuming = bool(claim.get('resume_checkpoint'))
         goal = build_goal(claim, self.reference)
         self.backend.event(claim, "dispatching")
         # 상태 기록 응답을 기다리는 중 종료됐다면 그 뒤에 새 Goal을 보내지 않는다.
@@ -303,7 +315,7 @@ class RosBridgeNode(Node):
             self.action_client.send_goal_async(
                 goal,
                 feedback_callback=lambda response: self._on_feedback(
-                    claim["order_id"], response
+                    claim["order_id"], response, claim['claim_token']
                 ),
             ),
             10.0,
@@ -336,9 +348,13 @@ class RosBridgeNode(Node):
         elapsed = float(result.result.elapsed_time_sec)
         if not math.isfinite(elapsed) or elapsed < 0:
             raise ValueError("TM 소요 시간이 유효하지 않습니다.")
+        # 원래 단계에서 멈춘 주문만 재개 정보가 있다. 서버는 이를 복구 대기로 저장한다.
+        raw_checkpoint = getattr(result.result, 'resume_checkpoint', '')
+        checkpoint = json.loads(raw_checkpoint) if raw_checkpoint else None
         self.backend.event(
             claim,
             "completed" if succeeded else "failed",
+            resume_checkpoint=checkpoint,
             # 최종 결과가 직전 공정 피드백을 덮을 때 단계·문구를 비우지 않는다.
             phase="COMPLETED" if succeeded else "FAILED",
             progress_pct=100.0 if succeeded else 0.0,
@@ -380,6 +396,8 @@ class RosBridgeNode(Node):
                             "상태 기록 실패. DB 인수 잠금을 유지합니다. 수동 확인이 필요합니다."
                         )
             self.active_order_id = None
+            self.active_attempt_token = None
+            self._resuming = False
             self.stop_event.wait(1.0)
 
     def close(self):

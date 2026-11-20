@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .database import Database
 from .cake import load_cake_settings
 from .schemas import DrawingRequest, OrderDetail, OrderPage, OrderSummary
+from .workcell import recovery_required
 
 router = APIRouter(prefix="/api/orders", tags=["주문 조회"])
 
@@ -39,6 +40,10 @@ def save_order(
                         409, "같은 요청 키로 다른 그림을 제출할 수 없습니다."
                     )
                 return previous["order_id"]
+        if recovery_required(connection):
+            raise HTTPException(
+                409, '제작 과정에서 문제가 발생했습니다. 관리자의 재설정 완료 전에는 주문할 수 없습니다.'
+            )
         active = connection.execute(
             "SELECT order_id FROM order_execution WHERE state NOT IN "
             "('completed','failed','rejected','resolved') LIMIT 1"
@@ -87,6 +92,8 @@ def save_order(
                 now.isoformat(),
             ),
         )
+        # 이전 재개 주문의 완료 화면 안내는 새 주문 접수 시 끝낸다.
+        connection.execute('UPDATE workcell_recovery SET resume_requested=0 WHERE requires_reset=0')
         connection.commit()
 
     return order_id
@@ -106,7 +113,7 @@ def summary_from_row(row: sqlite3.Row) -> OrderSummary:
         robot_dispatched=(
             None
             if row["execution_state"] in ("dispatching", "uncertain")
-            else row["execution_state"] in ("running", "completed", "failed")
+            else row["execution_state"] in ("running", "completed", "failed", "paused")
         ),
     )
 

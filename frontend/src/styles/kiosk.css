@@ -1043,6 +1043,25 @@ dialog {
   margin-top: 14px;
 }
 
+/* 최종 실패는 케이크 미리보기 대신 안내와 주문 번호를 전체 폭에 표시한다.
+   고정 폭 대신 가용 너비를 사용해 태블릿의 세로·가로 방향 모두 문구를 읽게 한다. */
+#modal.is-order-failed .review-model {
+  display: none;
+}
+#modal.is-order-failed .order-status {
+  width: 100%;
+  text-align: center;
+}
+#modal.is-order-failed .order-status h2 {
+  color: #a13e2c;
+  font-size: clamp(22px, 3vw, 30px);
+  line-height: 1.5;
+  word-break: keep-all;
+}
+#modal.is-order-failed .order-status [hidden] {
+  display: none;
+}
+
 /* 완료 시 팝업 중앙 하단에 픽업 버튼과 남은 시간을 표시한다. */
 #pickup[hidden] {
   display: none;
@@ -1151,4 +1170,32 @@ dialog {
   .drawing-idle {
     transition: none;
   }
+}
+
+/* 실패 잠금 화면은 태블릿 전체를 차지한다. 입력 화면을 렌더링하지 않아
+   세로·가로 방향과 새로고침 여부에 관계없이 관리자 확인 전 주문을 차단한다. */
+.kiosk-recovery {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: clamp(24px, 6vw, 80px);
+  text-align: center;
+  background: #fbf5ef;
+  color: #493a30;
+}
+.kiosk-recovery h1 {
+  max-width: 26ch;
+  margin: 0;
+  color: #a13e2c;
+  font-size: clamp(24px, 4vw, 42px);
+  line-height: 1.5;
+  word-break: keep-all;
+}
+.kiosk-recovery p {
+  margin: 0;
+  line-height: 1.7;
+  word-break: keep-all;
 }

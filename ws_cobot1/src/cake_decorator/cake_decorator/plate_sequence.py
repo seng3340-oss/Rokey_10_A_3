@@ -19,8 +19,33 @@ from .safety_exceptions import (
 )
 
 
+class CakeMissingAfterRetry(RuntimeError):
+    """원래 출발지에서 재집기까지 했지만 케이크가 없다는 검증된 결과다."""
+
+
 class PlateSequence:
     """플레이트 전용 이동 시퀀스를 관리합니다."""
+
+    # 케이크를 뜨는 구간만 공통 정의해 최초 집기와 1회 재시도의 경로·속도를 맞춘다.
+    # 각 항목은 (설정 좌표 이름, 이동 종류, 상대 모드 여부, 케이크 취급 여부)다.
+    # 모두 기존 티칭을 사용하며 마지막 목표는 각 공정의 무게 측정 안전 자세다.
+    _CAKE_PICK_STEPS = {
+        'prepare_both': (
+            ('move_cake_ps_l2', 'line', False, False),
+            ('move_cake_plate_ps1', 'joint', False, True),
+            ('move_cake_plate_ps2', 'joint', True, True),
+            ('move_cake_plate_ps3', 'joint', False, True),
+            ('move_cake_plate_ps4', 'line', True, True),
+            ('safe_position_2', 'joint', False, True),
+        ),
+        'finish_both': (
+            ('move_cake_ps_l2', 'line', False, False),
+            ('pickup_cake_station_ps2', 'joint', False, True),
+            ('pickup_cake_station_ps3', 'joint', False, True),
+            ('pickup_cake_station_ps4', 'joint', False, True),
+            ('safe_position_4', 'joint', False, True),
+        ),
+    }
 
     def __init__(self, robot, param):
         """실행 노드의 로봇·파라미터 조회기를 받아 단계별 이동을 준비한다."""
@@ -56,8 +81,77 @@ class PlateSequence:
             raise OpenerNotHeldError(reason + ', 안전 자세에서 대기중')
         raise OpenerMissingError(reason + ', 안전 자세에서 대기중')
 
+    def _plate_commands_blocked(self):
+        """정지 잠금·그리퍼 출력 이상 동안 새 집기와 복구 명령을 차단한다."""
+        return (
+            getattr(self._robot, 'stop_latched', False)
+            or getattr(self._robot, 'gripper_output_fault', False)
+        )
+
+    def _plate_pick_cake(self, stage):
+        """따개를 유지한 채 해당 출발지에서 집어 무게 측정 자세까지 이동한다.
+
+        최초 집기와 케이크 없음 재시도에서만 호출한다. 무게 기준값·검사 순서와
+        그리퍼 상태는 바꾸지 않는다. 한 이동이라도 실패하면 즉시 False를 반환해
+        알 수 없는 중간 자세에서 다음 이동이나 따개 반납을 강행하지 않는다.
+        """
+        for name, kind, relative, cake_carrying in self._CAKE_PICK_STEPS[stage]:
+            if self._plate_commands_blocked():
+                return False
+            move = self._plate_joint if kind == 'joint' else self._plate_line
+            if not move(name, relative, cake_carrying):
+                return False
+        return True
+
+    def _check_cake_with_retry(self, stage, result):
+        """유효한 무게로 케이크 없음을 판정했을 때만 같은 집기를 한 번 재실행한다.
+
+        검사기는 실패 시 단계 인덱스를 진행하지 않으므로 동일한 stage를 다시
+        검사한다. 빈손·따개 기준 무게는 재설정하지 않아 비교 기준이 유지된다.
+        센서 실패는 이 함수에 들어오기 전에 예외가 되며 재집기를 유발하지 않는다.
+        """
+        if result.passed:
+            return
+        if stage not in self._CAKE_PICK_STEPS or result.cake_delta_kg is None:
+            raise RuntimeError('케이크 무게 검사 기준값 또는 단계 오류')
+        if self._plate_commands_blocked():
+            raise PlateWeightError('케이크 무게 확인 실패: 재시도 명령 차단 중')
+        if not self._opener_held:
+            raise RuntimeError('케이크 재시도에 필요한 따개 보유 상태 없음')
+        source = '입고함' if stage == 'prepare_both' else '스테이션'
+        self._logger.warning(
+            f'케이크 없음: {source} 집기 재시도 1/1 시작 '
+            f'(무게 증가량 {result.cake_delta_kg:.4f}kg)'
+        )
+        # 이동 자체가 실패하면 안전 자세라고 가정할 수 없다. 별도 예외로 즉시
+        # 중단해 외부의 무게 실패 복구(따개 반납)를 실행하지 않게 한다.
+        try:
+            picked = self._plate_pick_cake(stage)
+        except (RuntimeError, ValueError, TypeError) as error:
+            raise PlateWeightError(
+                f'케이크 {source} 집기 재시도 1/1 이동 오류: {error}. '
+                '현재 자세에서 중단'
+            ) from error
+        if not picked:
+            raise PlateWeightError(
+                f'케이크 {source} 집기 재시도 1/1 이동 실패 또는 명령 차단, '
+                '현재 자세에서 중단'
+            )
+        time.sleep(float(self._param('plate_weight_wait_sec')))
+        if self._plate_commands_blocked():
+            raise PlateWeightError('케이크 무게 확인 실패: 재시도 후 명령 차단 중')
+        retry = self._weight_checker.check(stage)
+        self._logger.info(f'하중 재검사 {stage}: {retry}')
+        if not retry.passed:
+            raise CakeMissingAfterRetry(
+                f'{source} 집기 재시도 1/1 후에도 케이크 없음 '
+                f'(무게 증가량 {retry.cake_delta_kg:.4f}kg, '
+                f'기준 {retry.cake_min_delta_kg:.4f}kg 초과 필요)'
+            )
+        self._logger.info(f'케이크 {source} 집기 재시도 1/1 성공, 기존 공정 계속')
+
     def _weight_at_safe(self, stage):
-        """같은 안전 자세에서 하중을 측정하고 실패 시 감속 반납 후 안전 자세로 복귀한다."""
+        """하중을 검사하고 케이크 없음은 1회 재집기 후에도 실패할 때 감속 복귀한다."""
         if not self._option('plate_weight_check_enabled', False):
             return
         try:
@@ -79,10 +173,14 @@ class PlateSequence:
                 raise RuntimeError('하중 기준값 미설정')
             result = self._weight_checker.check(stage)
             self._logger.info(f'하중 검사 {stage}: {result}')
-            if not result.passed:
-                raise RuntimeError(f'케이크 무게 증가량 {result.cake_delta_kg:.4f}kg, 기준 {result.cake_min_delta_kg:.4f}kg 초과 필요')
+            self._check_cake_with_retry(stage, result)
+        except PlateWeightError:
+            # 재시도 이동 실패·정지 차단 뒤에는 새 복구 이동을 보내지 않는다.
+            raise
         except (RuntimeError, ValueError, TypeError) as error:
-            if getattr(self._robot, 'stop_latched', False) or getattr(self._robot, 'gripper_output_fault', False):
+            self._logger.error(f'케이크 무게 확인 최종 실패: {error}')
+            can_resume = isinstance(error, CakeMissingAfterRetry)
+            if self._plate_commands_blocked():
                 raise PlateWeightError(f'케이크 무게 확인 실패: {error}. 복구 명령 차단 중') from error
             if self._opener_held:
                 speed = self._param('free_line_speed_mm_s')
@@ -91,13 +189,22 @@ class PlateSequence:
                     speed_slow=speed * 0.5,
                     speed_retract=speed * 0.5,
                 ):
-                    raise PlateWeightError(f'케이크 무게 확인 실패: {error}. 따개 반납 실패, 현재 자세에서 중단') from error
+                    raise PlateWeightError(
+                        f'케이크 무게 확인 실패: {error}. 따개 반납 실패, 현재 자세에서 중단',
+                        resume_allowed=can_resume,
+                    ) from error
             if not self._plate_joint(
                 'safe_position_1',
                 speed_deg_s=self._param('free_joint_speed_deg_s') * 0.5,
             ):
-                raise PlateWeightError(f'케이크 무게 확인 실패: {error}. 안전 자세 복귀 실패') from error
-            raise PlateWeightError(f'케이크 무게 확인 실패: {error}. 안전 자세에서 대기중') from error
+                raise PlateWeightError(
+                    f'케이크 무게 확인 실패: {error}. 안전 자세 복귀 실패',
+                    resume_allowed=can_resume,
+                ) from error
+            raise PlateWeightError(
+                f'케이크 무게 확인 실패: {error}. 안전 자세에서 대기중',
+                resume_allowed=can_resume,
+            ) from error
 
 
     def _plate_joint(
@@ -305,18 +412,11 @@ class PlateSequence:
         self._weight_phase = 'prepare'
         if not self._plate_pick_opener():
             return False
-        # opener 거치대에서 벗어나 케이크 작업대 쪽으로 진입하기 위한 이동.
-        if not self._plate_line('move_cake_ps_l2'):
+        if not self._plate_pick_cake('prepare_both'):
             return False
-        # 원본 순서 정정: ps5 삭제, safe position 2 복원, station ps4 추가.
-        # 각 위치별 설명은 workspace_config.yaml의 원본 주석 참조.
-        # 마지막 값은 케이크 취급 구간 표시: ps1부터 station ps3까지 보수적으로 유지.
+        self._weight_at_safe('prepare_both')
+        # 집기·측정을 통과한 뒤에만 안착한다. 재시도 중에는 이 구간을 실행하지 않는다.
         for name, kind, relative, cake_carrying in (
-            ('move_cake_plate_ps1', 'joint', False, True),
-            ('move_cake_plate_ps2', 'joint', True, True),
-            ('move_cake_plate_ps3', 'joint', False, True),
-            ('move_cake_plate_ps4', 'line', True, True),
-            ('safe_position_2', 'joint', False, True),
             ('cake_station_ps1', 'joint', False, True),
             ('cake_station_ps2', 'joint', False, True),
             ('cake_station_ps3', 'joint', False, True),
@@ -326,14 +426,8 @@ class PlateSequence:
             move = self._plate_joint if kind == 'joint' else self._plate_line
             if not move(name, relative, cake_carrying):
                 return False
-            stages = {
-                'safe_position_2': 'prepare_both',
-                'safe_position_3': 'prepare_opener_after_cake',
-                'safe_position_4': 'finish_both',
-                'safe_position_5': 'finish_opener_after_cake',
-            }
-            if name in stages:
-                self._weight_at_safe(stages[name])
+            if name == 'safe_position_3':
+                self._weight_at_safe('prepare_opener_after_cake')
         # 드로잉 전에 그리퍼를 비워야 마커를 파지할 수 있으므로 opener를
         # 거치대에 내려놓는다. place()가 그리퍼 열기까지 처리한다.
         if not self._plate_place_opener():
@@ -352,15 +446,11 @@ class PlateSequence:
         self._weight_phase = 'finish'
         if not self._plate_pick_opener():
             return False
-        # 재파지 후 opener 거치대에서 벗어나기 위한 클리어런스 이동.
-        if not self._plate_line('move_cake_ps_l2'):
+        if not self._plate_pick_cake('finish_both'):
             return False
-        # 승인된 경유점 삭제: pickup ps1을 생략하고 ps2부터 출고 ps3까지 보호한다.
+        self._weight_at_safe('finish_both')
+        # 스테이션 회수·측정을 통과한 뒤에만 출고한다. 재시도는 출고를 반복하지 않는다.
         for name, kind, relative, cake_carrying in (
-            ('pickup_cake_station_ps2', 'joint', False, True),
-            ('pickup_cake_station_ps3', 'joint', False, True),
-            ('pickup_cake_station_ps4', 'joint', False, True),
-            ('safe_position_4', 'joint', False, True),
             ('deliver_cake_station_ps1', 'joint', False, True),
             ('deliver_cake_station_ps2', 'joint', False, True),
             ('deliver_cake_station_ps3', 'joint', False, True),
@@ -371,14 +461,8 @@ class PlateSequence:
             move = self._plate_joint if kind == 'joint' else self._plate_line
             if not move(name, relative, cake_carrying):
                 return False
-            stages = {
-                'safe_position_2': 'prepare_both',
-                'safe_position_3': 'prepare_opener_after_cake',
-                'safe_position_4': 'finish_both',
-                'safe_position_5': 'finish_opener_after_cake',
-            }
-            if name in stages:
-                self._weight_at_safe(stages[name])
+            if name == 'safe_position_5':
+                self._weight_at_safe('finish_opener_after_cake')
         # deliver_opener_ps1/ps2는 pick_opener1/2와 동일 좌표: 공통값 재사용.
         # 기존 place()는 접근 위치로 후퇴한다(원본은 해제 직후 종료).
         # [변경 2026-11-19] 전용 plate_place 대신 기존 place()을 그대로 재사용한다.

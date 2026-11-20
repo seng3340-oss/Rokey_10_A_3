@@ -98,6 +98,17 @@ def test_standalone_virtual_side_parameters_are_preserved(config_files):
     assert "integrated_side_cycle" not in executor
 
 
+def test_real_workspace_keeps_cake_missing_detection_enabled():
+    """실물 실행용 설정이 케이크 검사를 끄거나 실행용 YAML 생성 중 잃지 않게 한다."""
+    args = SimpleNamespace(
+        integrated_side_cycle=True, side_y_inset_mm=0, mode="real",
+    )
+    runtime = launcher.load_runtime_parameters(args)
+    executor = runtime["robot_executor_node"]["ros__parameters"]
+    assert executor["plate_weight_check_enabled"] is True
+    assert executor["plate_cake_min_delta_kg"] == 0.075
+
+
 @pytest.fixture
 def isolated_launcher(config_files, tmp_path, monkeypatch):
     """ROS·서비스·프로세스는 전부 가짜로 바꾸고 실제 main의 배선만 실행한다."""
@@ -304,8 +315,9 @@ def test_bridge_preserves_config_bypass_and_local_start_pose_guard(
     assert state.poses == (0 if source == "config" else 1)
 
 
-def test_start_real_shell_enables_integrated_workflow_without_prompt(tmp_path):
-    """환경 진입점을 가짜로 바꿔 셸 옵션·기능 플래그만 검증한다."""
+@pytest.mark.parametrize("profile_args", [[], ["--recovery-dev"]])
+def test_start_real_shell_enables_integrated_workflow_without_prompt(tmp_path, profile_args):
+    """기본 실행과 이전 개발 옵션 모두 최신 공정의 환경·인자를 전달한다."""
     script = tmp_path / "start_real.sh"
     shutil.copyfile(ROOT / "scripts/start_real.sh", script)
     (tmp_path / "_system_environment.sh").write_text(
@@ -317,15 +329,31 @@ def test_start_real_shell_enables_integrated_workflow_without_prompt(tmp_path):
         'PY\n'
     )
     result = subprocess.run(
-        ["bash", str(script), "--check", "--host", "192.0.2.1"],
+        ["bash", str(script), *profile_args, "--check", "--host", "192.0.2.1"],
         input="", capture_output=True, text=True, check=True,
     )
     payload = json.loads(result.stdout)
     assert payload["args"] == [
-        "real", "--cake-center-from-config", "--integrated-side-cycle",
+        "real", "--cake-center-from-config", "--integrated-side-cycle", "--no-browser",
         "--check", "--host", "192.0.2.1",
     ]
     assert payload["pen"] == payload["plate"] == "1"
+
+
+def test_start_real_explicitly_selects_isolated_stop_on_exception_version(tmp_path):
+    """기존 중단 전용 버전은 명시적으로 선택한 경우에만 별도 실행본을 사용한다."""
+    script = tmp_path / "start_real.sh"
+    shutil.copyfile(ROOT / "scripts/start_real.sh", script)
+    (tmp_path / "start_real_stop_on_exception.sh").write_text(
+        'printf "%s\\n" "$@"\n'
+    )
+    result = subprocess.run(
+        ["bash", str(script), "--stop-on-exception", "--check", "--frontend-port", "8081"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["--check", "--frontend-port", "8081"]
 
 
 def test_top_calibration_does_not_move_verified_side_center(config_files):

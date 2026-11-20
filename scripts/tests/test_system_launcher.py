@@ -505,3 +505,18 @@ def test_repository_real_robot_config_builds_reference():
     """저장소의 실제 real_robot.json으로 기준점을 만들 수 있어야 한다."""
     reference = launcher.load_config_cake_reference()
     assert len(reference) == 6
+
+
+def test_paused_order_keeps_hmi_recovery_path_without_cli_reset(tmp_path):
+    """복구 대기 주문 때문에 HMI 기동을 막거나 시작 시 실패 종료하지 않는다."""
+    import sqlite3
+    database = tmp_path / 'paused.sqlite3'
+    with sqlite3.connect(database) as connection:
+        connection.execute('CREATE TABLE order_execution(order_id TEXT,state TEXT)')
+        connection.execute("INSERT INTO order_execution VALUES ('PAUSED-1','paused')")
+    def forbidden(_):
+        """복구 대기는 HMI 결정 대상이므로 터미널 RESET을 요구하면 실패한다."""
+        raise AssertionError('복구 대기 주문에 CLI RESET을 요청했습니다.')
+    launcher.resolve_pending_orders(database, 5000, 'test', forbidden)
+    with sqlite3.connect(database) as connection:
+        assert connection.execute('SELECT state FROM order_execution').fetchone()[0] == 'paused'
