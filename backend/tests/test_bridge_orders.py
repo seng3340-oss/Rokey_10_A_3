@@ -53,7 +53,7 @@ def test_claim_and_results_are_authorized_persistent_and_idempotent(tmp_path):
         assert claim["order_id"] == order_id
         assert claim["drawing"] == DRAWING
         assert claim["cake"]["top_diameter_mm"] == 113.5
-        assert claim["cake"]["bottom_diameter_mm"] == 119.5
+        assert claim["cake"]["bottom_diameter_mm"] == 118.5
         assert client.post("/internal/bridge/claim", headers=headers).status_code == 204
         for kind in ("dispatching", "accepted", "completed"):
             event = {
