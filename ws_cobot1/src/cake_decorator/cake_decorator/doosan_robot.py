@@ -530,8 +530,8 @@ class DoosanRobotClient:
         except (RuntimeError, ValueError) as error:
             self._logger.error(f"옆면 J6 분기 선택 실패: {error}")
             return False
-        # 기존 movejx 자세 전환과 같은 관절 속도·가속도를 유지한다.
-        return self.move_joint(target, speed_deg_s=10.0, acc_deg_s2=20.0) and self.verify_pose(
+        # PR26에서 설정한 공중 전환 속도를 사용하고 PR27의 J6 분기 선택은 유지한다.
+        return self.move_joint(target, speed_deg_s=30.0, acc_deg_s2=60.0) and self.verify_pose(
             commands[2].pos.to_list()
         )
 

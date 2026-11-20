@@ -101,6 +101,39 @@ def test_two_letters_travel_outside_frustum(node):
             assert (radius - radius_at_z) / math.hypot(1, 3.25 / 79) >= 10 - 1e-6
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_side_air_transfer_raises_rotation_speed_without_changing_contact(node, reverse):
+    """양방향 획 사이 곡선은 빠르게 돌고, 접촉·이탈에는 기존 제한을 전달한다."""
+    from rclpy.parameter import Parameter
+    from cake_decorator.drawing_motion import Phase
+
+    node.set_parameters([
+        Parameter("side_pen_45", value=True),
+        Parameter("travel_speed", value=120.0),
+    ])
+    strokes = [[(736, 384), (800, 384)], [(160, 384), (224, 384)]]
+    if reverse:
+        strokes.reverse()
+    _, plan = convert(node, strokes)
+    robot = RequestRecorder()
+    air_transfers = 0
+    contacts = 0
+    for command in plan.commands:
+        assert robot.execute_drawing_command(command)
+        _, request = robot.requests[-1]
+        if command.motion_type == MotionType.MOVE_SPLINE and not command.pen_down:
+            air_transfers += 1
+            # 각속도 제한 때문에 긴 공중 원호가 느려지지 않도록 API까지 전달한다.
+            assert list(request.vel) == pytest.approx([120.0, 60.0])
+            assert list(request.acc) == pytest.approx([100.0, 120.0])
+        elif command.phase in (Phase.PEN_DOWN, Phase.PEN_UP):
+            contacts += 1
+            assert request.vel[1] == pytest.approx(30.0)
+            assert request.acc[1] == pytest.approx(30.0)
+    assert air_transfers > 0
+    assert contacts == 4
+
+
 def test_top_taught_orientation_is_separate_from_cake_yaw(node):
     """케이크를90도 회전해도 영점 펜 자세는 그대로이고 글자 위치만 회전한다."""
     response, _ = convert(node, [[(512,384),(800,384)]], surface="TOP", yaw=math.pi/2)
@@ -305,3 +338,22 @@ def test_side_start_j6_branch_rejects_rotation_beyond_joint_range():
     commands = _yaw_path_commands(0., 720.)
     with pytest.raises(RuntimeError, match="J6 회전량"):
         choose_side_start_joints(commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse)
+
+
+def test_side_start_keeps_branch_selection_and_pr26_motion_speed():
+    """PR27의 J6 선택을 거친 목표도 PR26의30도/s·60도/s²로 이동해야 한다."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from cake_decorator.doosan_robot import DoosanRobotClient
+
+    commands = _yaw_path_commands(348., 0.)
+    robot = Mock()
+    robot._side_inverse.return_value = (
+        SimpleNamespace(pos=[0., 0., 90., 0., 90., 0.]), None, _wrapped_j6_inverse,
+    )
+    robot.move_joint.return_value = True
+    robot.verify_pose.return_value = True
+    assert DoosanRobotClient.move_side_start(robot, commands)
+    target = robot.move_joint.call_args.args[0]
+    assert target[5] == pytest.approx(-348.)
+    assert robot.move_joint.call_args.kwargs == dict(speed_deg_s=30.0, acc_deg_s2=60.0)

@@ -47,6 +47,10 @@ DEFAULT_VEL_ANGULAR = 30.0  # °/s
 SIDE_DRAW_ACC_LINEAR = 300.0  # mm/s²
 SIDE_DRAW_VEL_ANGULAR = 60.0  # °/s
 SIDE_DRAW_ACC_ANGULAR = 120.0  # °/s²
+# 획 사이 공중 곡선은 선속도보다 펜 방향의 회전 제한에 먼저 걸릴 수 있다.
+# 그 구간만 회전을 빠르게 하고, 접촉·이탈과 첫 접근의 제한은 유지한다.
+SIDE_TRAVEL_VEL_ANGULAR = 60.0  # °/s
+SIDE_TRAVEL_ACC_ANGULAR = 120.0  # °/s²
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +517,14 @@ def plan_drawing_motion(
             acceleration = SIDE_DRAW_ACC_LINEAR
             angular_vel = SIDE_DRAW_VEL_ANGULAR
             angular_acc = SIDE_DRAW_ACC_ANGULAR
+        elif (
+            drawing_surface == "SIDE"
+            and phase == Phase.REPOSITIONING
+            and kind == 2
+        ):
+            # 두 획 사이의 비접촉 스플라인에만 적용한다. PEN_UP/DOWN은 제외한다.
+            angular_vel = SIDE_TRAVEL_VEL_ANGULAR
+            angular_acc = SIDE_TRAVEL_ACC_ANGULAR
 
         # 획 완료 카운트: pen_down → pen_up 전환 시
         if prev_pen and not pen:
