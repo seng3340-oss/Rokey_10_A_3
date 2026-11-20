@@ -211,7 +211,7 @@ class BridgeIntegrationTests(unittest.TestCase):
         self.assertAlmostEqual(goal.cake_params.center.z, 0.07525)
         # HTTP 주문의 실측 형상이 브릿지와 ROS 직렬화를 거쳐도 보존된다.
         self.assertAlmostEqual(goal.cake_params.radius, 0.05675)
-        self.assertAlmostEqual(goal.cake_params.bottom_radius, 0.06)
+        self.assertAlmostEqual(goal.cake_params.bottom_radius, 0.05925)
         self.assertAlmostEqual(goal.cake_params.height, 0.079)
         self.assertEqual(goal.drawing_paths[0].strokes[0].points[0].x, 500.5)
         self.assertTrue(

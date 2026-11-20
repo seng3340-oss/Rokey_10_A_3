@@ -4,10 +4,10 @@
 # 아직 측정하지 않은 픽업·거치대·출고 좌표는 임의의 0으로 채우지 않는다.
 drawing_path_node:
   ros__parameters:
-    # 확정 원뿔대: 윗지름113.5mm, 밑지름120mm, 높이79mm.
+    # 경로 기준 원뿔대: 윗지름113.5mm, 밑지름118.5mm, 높이79mm.
     # 실제 경로 치수는 주문 요청이 전달하며 이 값은 문서용 기본 치수다.
     cake_radius: 0.05675
-    cake_bottom_radius: 0.06
+    cake_bottom_radius: 0.05925
     cake_height: 0.079
     cake_orientation: 0.0
     # 아래 접근·속도 설정은 PR #16의 실행 계약을 유지한다.
@@ -15,7 +15,9 @@ drawing_path_node:
     drawing_speed: 40.0
     # 옆면 접촉 후의 원호·스플라인만 60mm/s로 높인다. 기울기는 아래 15도를 유지한다.
     side_drawing_speed: 60.0
-    travel_speed: 80.0
+    travel_speed: 180.0
+    # 펜촉이 표면에서 빠지는 단계는 기존 속도로 유지한다.
+    pen_up_speed: 120.0
     # DP 내부 접근 거리 단위는 mm다. RE의 m 파라미터와 구분한다.
     approach_height: 10.0
     simplify_tolerance_mm: 0.15
@@ -23,8 +25,8 @@ drawing_path_node:
     side_path_error_mm: 0.1
     side_diagonal_mode: spline
     side_pen_vertical_deg: 15.0
-    # 실물 검증 확정: 지름 기준 유격 8.1mm, 반지름 +4.05mm.
-    side_diameter_allowance_mm: 8.0
+    # 지름 기준 유격을 8.0에서 1.5mm 줄임: 6.5mm, 반지름 보정 +3.25mm.
+    side_diameter_allowance_mm: 6.5
     side_y_inset_mm: 1.0
     # 웹 띠 좌우 끝이 이어진 옆면 링은 이음매를 지나 3mm 더 겹쳐 그린다. 0이면 끈다.
     side_seam_overlap_mm: 3.0
@@ -40,15 +42,21 @@ robot_executor_node:
   ros__parameters:
     service_timeout: 5.0
     # 펜 인출·케이크 공중 이동·거치대 반납 전용(mm/s, mm/s²).
-    pen_travel_speed_mm_s: 120.0
-    pen_lift_speed_mm_s: 100.0
-    pen_rack_speed_mm_s: 80.0
-    pen_motion_acc_mm_s2: 250.0
-    # 케이크 운반·그리기 구간은 기존 속도 유지. 나머지 공중 이동만 1.5배.
-    free_joint_speed_deg_s: 45.0
-    free_joint_acc_deg_s2: 45.0
-    free_line_speed_mm_s: 75.0
-    free_line_acc_mm_s2: 150.0
+    pen_travel_speed_mm_s: 180.0
+    pen_lift_speed_mm_s: 150.0
+    pen_rack_speed_mm_s: 120.0
+    pen_motion_acc_mm_s2: 400.0
+    # 도구 자세의 회전 제한도 함께 올려 선속도만 높여도 느린 현상을 줄인다.
+    pen_rotation_speed_deg_s: 90.0
+    pen_rotation_acc_deg_s2: 180.0
+    # 옆면 펜의 45도 기울임·수직 복귀: 기존 45도/s의 70%인 31.5도/s.
+    pen_tilt_speed_deg_s: 31.5
+    pen_tilt_acc_deg_s2: 90.0
+    # 케이크 운반·그리기 구간은 기존 속도 유지. 빈손·도구 이동만 가속한다.
+    free_joint_speed_deg_s: 60.0
+    free_joint_acc_deg_s2: 120.0
+    free_line_speed_mm_s: 150.0
+    free_line_acc_mm_s2: 300.0
     # 케이크를 실제 들어올리거나 안착시키는 개별 동작은 감속한다.
     cake_lift_speed_mm_s: 25.0
     cake_lift_acc_mm_s2: 50.0
@@ -68,7 +76,7 @@ robot_executor_node:
     pen_drop_after_pose: [248.91, 244.76, 548.06, 37.07, -179.99, 36.84] # 펜을 놓은 후 상공
     cake_center_approach_pose: [-8.65, 8.16, 63.77, 0.00, 108.71, -9.48] # 케이크 중심 상공 위치
     # 윗면 누름을 줄이기 위해 기존 티칭 Z=510.39mm에서 총 3.09mm 올린다.
-    cake_center_pose: [401.80, -55.57, 513.48, 179.76, 179.35, 179.02] # 기본 TCP 기준 윗면 그리기 자세
+    cake_center_pose: [401.80, -55.57, 511.68, 179.76, 179.35, 179.02] # 기본 TCP 기준 윗면 그리기 자세: 직전 Z에서 -1.5mm
     # [변경 2026-11-18] move cakeplate_update.txt 기준 좌표/주석 정정(기존 잘못된 매핑 수정).
     # 기존 드로잉 파라미터는 유지. 신규 시퀀스는 명시적 활성화 전 실행 금지.
     # 실물 테스트 메모: TCP/툴, 동작 경로, 충돌 가능성은 장비에서 확인.

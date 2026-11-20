@@ -34,6 +34,13 @@ def make_executor(robot):
     """노드 생성 없이 필요한 속성만 가진 실행기 대역을 만든다."""
     failures = []
     params = {
+        # 자유 이동 설정을 명시해 실제 노드처럼 공중 이동만 빠르게 실행한다.
+        "free_joint_speed_deg_s": 60.0,
+        "free_joint_acc_deg_s2": 120.0,
+        "pen_travel_speed_mm_s": 180.0,
+        "pen_motion_acc_mm_s2": 400.0,
+        "pen_rotation_speed_deg_s": 90.0,
+        "pen_rotation_acc_deg_s2": 180.0,
         "cake_center_approach_pose": [-8.65, 8.16, 63.77, 0.0, 108.71, -9.48],
         "cake_center_pose": [401.8, -55.57, 510.39, 179.76, 179.35, 179.02],
     }

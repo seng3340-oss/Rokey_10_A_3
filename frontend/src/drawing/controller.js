@@ -64,8 +64,8 @@ export function mountDrawing() {
     // 로봇에서는 이음매에 약 4mm 빈틈이 생기므로 좌우는 띠 경계까지 허용한다.
     return surface === "top"
       ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.drawableRadius - 3
-      : p.x >= side.x + 5 &&
-          p.x <= side.x + side.width - 5 &&
+      : p.x >= side.x &&
+          p.x <= side.x + side.width &&
           p.y >= side.y + 5 &&
           p.y <= side.drawableBottomY - 5;
   }

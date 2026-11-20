@@ -220,6 +220,8 @@ test("옆면 경계에서 떨어진 끝점과 위아래 이탈은 이음매로 �
   const strokes = await submitSide(ui);
   assert.deepEqual(strokes[0].points, [{ x: 200, y: 380 }, { x: 300, y: 380 }]);
   assert.deepEqual(strokes[1].points, [{ x: 400, y: 380 }, { x: 400, y: 330 }]);
+});
+
 test("윗면 바깥 5mm 띠에는 획을 시작하지 않는다", (t) => {
   const ui = setup(t);
   ui.draw(815, 384);

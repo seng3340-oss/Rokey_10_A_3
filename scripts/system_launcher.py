@@ -479,7 +479,7 @@ def load_runtime_parameters(args, workspace_path=WORKSPACE_CONFIG):
     dp.update(
         side_pen_45=True,
         side_drawing_speed=40.0,
-        travel_speed=120.0,
+        travel_speed=180.0,
         side_y_inset_mm=1.0 if args.integrated_side_cycle else args.side_y_inset_mm,
     )
     if args.integrated_side_cycle:

@@ -53,6 +53,8 @@ class DrawingPathNode(Node):
         self.declare_parameter("drawing_speed", 30.0)  # mm/s, 테스트2 종이 검증 기준
         self.declare_parameter("side_drawing_speed", 60.0)  # 옆면 접촉 후 그리기 mm/s
         self.declare_parameter("travel_speed", 80.0)  # mm/s (펜 올린 상태)
+        # 접촉면에서 펜을 떼는 속도는 공중 이동과 분리해 기존 값을 유지한다.
+        self.declare_parameter("pen_up_speed", 120.0)  # mm/s (PEN_UP 전용)
         self.declare_parameter("approach_height", 10.0)  # mm (펜 접근 높이)
         self.declare_parameter("side_diameter_allowance_mm", 3.5)  # 옆면 경로 지름 보정(mm)
         self.declare_parameter("drawing_z_offset", 0.0)  # mm (표면 접촉 보정)
@@ -337,13 +339,17 @@ class DrawingPathNode(Node):
         x, y, z = cake.top_to_abs(*points[0])
         waypoints.append(self._wp(x, y, z + clearance, quat, travel_speed, force))
         states.append(False)
+        lift_speed = min(
+            travel_speed,
+            self._param("pen_up_speed") * draw_speed / self._param("drawing_speed"),
+        )
         waypoints.append(self._wp(x, y, z + offset, quat, draw_speed * 0.5, force, pen_down=True))
         states.append(True)
         for point in points[1:]:
             x, y, z = cake.top_to_abs(*point)
             waypoints.append(self._wp(x, y, z + offset, quat, draw_speed, force, pen_down=True))
             states.append(True)
-        waypoints.append(self._wp(x, y, z + clearance, quat, travel_speed, force))
+        waypoints.append(self._wp(x, y, z + clearance, quat, lift_speed, force))
         states.append(False)
 
     def _side_leg(
@@ -525,7 +531,9 @@ class DrawingPathNode(Node):
                 )
         x, y, z = cake.side_abs_with_offset(*last, clearance)
         quat = pen_quat_side(last[0], last[1], cake, tilt_deg=tilt, reference_quat=reference_quat)
-        waypoints.append(self._wp(x, y, z, quat, travel_speed, force))
+        # 잉크가 끝난 직후의 이탈은 기존 속도다. 다음 획의 공중 이동만 가속한다.
+        lift_speed = min(travel_speed, self._param("pen_up_speed") * speed_ratio)
+        waypoints.append(self._wp(x, y, z, quat, lift_speed, force))
         states.append(False)
         return last
 
