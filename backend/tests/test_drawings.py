@@ -60,6 +60,27 @@ def finish_order(client):
         assert response.status_code == 200
 
 
+def test_order_counts_today_independently_of_page(client, database_path, drawing):
+    """오늘 총계는 페이지 제한·오프셋과 무관하며 전날 주문은 누적에만 포함한다."""
+    import sqlite3
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    first = client.post("/api/drawing", json=drawing).json()["order_id"]
+    finish_order(client)
+    client.post("/api/drawing", json=drawing)
+    finish_order(client)
+    client.post("/api/drawing", json=drawing)
+    yesterday = (datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(days=1)).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("UPDATE orders SET created_at=? WHERE order_id=?", (yesterday, first))
+    for offset in (0, 1, 2):
+        page = client.get(f"/api/orders?limit=1&offset={offset}").json()
+        assert page["total"] == 3
+        assert page["today_total"] == 2
+        assert len(page["items"]) == 1
+
+
 @pytest.mark.parametrize("surface", ["top", "side"])
 def test_accept_and_read_original_drawing(client, drawing, surface):
     """윗면과 옆면 모두 원본이 저장되고 로봇 미전송 상태로 조회되는지 확인한다."""

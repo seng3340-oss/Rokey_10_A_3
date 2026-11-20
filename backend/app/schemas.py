@@ -130,5 +130,7 @@ class OrderPage(ContractModel):
 
     items: list[OrderSummary]
     total: int
+    # 페이지에 보이지 않는 주문도 포함한 한국 날짜 기준 오늘 접수 건수다.
+    today_total: int
     limit: int
     offset: int

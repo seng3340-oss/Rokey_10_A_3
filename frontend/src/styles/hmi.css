@@ -1,612 +1,1122 @@
-/* 고객 화면의 베이지·화이트 분위기를 유지하고 HMI 내부에만 스타일을 한정한다. */
+/* 확정된 대시보드 시안을 실제 HMI에 적용한다. 모든 선택자는 HMI 안으로 제한한다. */
 .hmi-app {
-  --ink: #51483d;
-  --line: #e7dfd3;
-  background: #f8f5ef;
-  color: var(--ink);
-  min-height: 100vh;
-  font-size: 14px;
+  font-family:
+    "Noto Sans CJK KR", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+  color: #20372f;
+  background: #f0f3f2;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  font-synthesis: none;
+  --teal: #006f64;
+  --line: #e2e9e5;
+  --muted: #586b5e;
 }
 .hmi-app * {
   box-sizing: border-box;
 }
-.hmi-app button,
-.hmi-app a {
-  -webkit-tap-highlight-color: transparent;
+.hmi-app {
+  margin: 0;
 }
 .hmi-app button {
+  min-height: 0;
   font: inherit;
-  border: 1px solid var(--line);
-  background: #fffdf9;
-  color: var(--ink);
-  padding: 10px 15px;
-  border-radius: 10px;
   cursor: pointer;
+  border: 1px solid #dce5df;
+  background: white;
+  color: #304e3e;
+  border-radius: 6px;
+  padding: 8px 13px;
+}
+/* 비활성 여부는 유지하면서도 버튼의 기능명을 읽을 수 있도록 불투명도를 낮추지 않는다. */
+.hmi-app button:disabled {
+  cursor: default;
+  opacity: 1;
+  color: #687363;
+  background: #edf1eb;
+  border-color: #d5ded2;
 }
 .hmi-app button:focus-visible,
-.hmi-app a:focus-visible {
-  outline: 3px solid #93774d;
-  outline-offset: 3px;
+.hmi-app [tabindex]:focus-visible {
+  outline: 3px solid #70c5b4;
+  outline-offset: 2px;
 }
-.hmi-app button[aria-pressed="true"] {
-  background: #eee4d4;
-  border-color: #b29b77;
+.hmi-app [hidden] {
+  display: none !important;
 }
-.hmi-app button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.hmi-app h1,
+.hmi-app h2,
+.hmi-app h3,
+.hmi-app p,
+.hmi-app figure {
+  margin: 0;
 }
-.hmi-app a {
-  color: inherit;
-  text-decoration: none;
+.hmi-app svg {
+  display: block;
 }
-/* 스크롤 위치와 무관하게 상단 안전 상태와 정지 안내에 접근할 수 있다. */
-.hmi-safety {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: #fff4ef;
-  border-bottom: 1px solid #dcaaa0;
+.hmi-app .icon-defs {
+  position: absolute;
+}
+.hmi-app .icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.hmi-app .mono {
+  font-variant-numeric: tabular-nums;
+}
+.hmi-app .muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+.hmi-app .teal {
+  color: var(--teal);
+}
+.hmi-app .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0ba58b;
+  margin-right: 6px;
+}
+/* 작은 요약 카드와 별도의 정지 영역 아래에 기록·공정·원본을 함께 배치한다. */
+.hmi-app .dashboard-app {
+  height: 100dvh;
+  min-height: 650px;
+  display: grid;
+  grid-template-rows: 58px 108px auto minmax(0, 1fr);
+  gap: 11px;
+  padding: 14px 20px 10px;
+}
+.hmi-app .topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+.hmi-app .brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.hmi-app .logo-symbol {
+  background: #168b7c;
+  color: white;
+  /* 사용자 UI의 심벌과 같은 글꼴·자간·패딩을 사용해 글자의 중심도 일치시킨다. */
+  font: bold 39px Georgia;
+  letter-spacing: -0.8px;
+  width: 45px;
+  height: 45px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  padding-bottom: 8px;
+}
+.hmi-app .brand h1 {
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.35;
+  letter-spacing: -0.65px;
+}
+.hmi-app .brand h1 span {
+  display: block;
+  color: #405e4d;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.4px;
+}
+.hmi-app .topbar-status {
+  display: flex;
+  gap: 17px;
+  align-items: center;
+  font-size: 11px;
+  color: #526b5a;
+}
+.hmi-app .preview-badge {
+  border: 1px solid #cfe1d8;
+  background: #e9f4ed;
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: #37684c;
+  font-size: 10px;
+}
+.hmi-app .overview-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+}
+.hmi-app .summary-grid {
+  display: grid;
+  grid-template-columns: 174px 160px 210px;
+  gap: 11px;
+}
+.hmi-app .summary-card {
+  position: relative;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding: 12px 28px;
+  min-width: 0;
 }
-.hmi-safety b {
-  color: #932f28;
+.hmi-app .summary-card .label {
+  color: #536b59;
+  font-size: 12px;
   display: block;
+  line-height: 1.3;
 }
-.hmi-safety span {
+.hmi-app .summary-card strong {
   display: block;
+  font-size: 23px;
+  font-weight: 650;
+  letter-spacing: -0.6px;
+  line-height: 1.35;
+}
+.hmi-app .summary-card p {
+  color: #5a6f5d;
+  font-size: 11px;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.hmi-app .unit {
+  font-size: 12px;
+  color: #536d5b;
+  margin-left: 4px;
+}
+.hmi-app .stat-icon {
+  padding: 7px;
+  border-radius: 9px;
+  background: #f0f7f2;
+  color: #82ae9d;
+}
+.hmi-app .stat-icon .icon {
+  width: 21px;
+  height: 21px;
+}
+.hmi-app .tiny-chart {
+  width: 48px;
+  height: 30px;
+  color: #5baf95;
+}
+.hmi-app .state-pill,
+.hmi-app .status-tag {
+  border-radius: 4px;
+  background: #e7f5ee;
+  color: #176348;
+  padding: 4px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.hmi-app .summary-card .state-pill {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 10px;
+  padding: 3px 6px;
+}
+.hmi-app .recovery-card {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 10px;
+}
+.hmi-app .recovery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.hmi-app .recovery-state {
+  color: #667363;
+  font-size: 11px;
+}
+.hmi-app .recovery-actions {
+  display: flex;
+  gap: 6px;
+}
+.hmi-app .recovery-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.hmi-app .recovery-actions button:first-child {
+  flex: 1;
+}
+.hmi-app .recovery-actions button:last-child {
+  flex: 1.4;
+}
+.hmi-app .recovery-actions .icon {
+  width: 13px;
+  height: 13px;
+}
+.hmi-app .recovery-point {
+  font-size: 11px;
+  color: #845b20;
+}
+/* 완만한 테두리 펄스는 재개 가능한 예외 대기일 때만 사용한다. */
+.hmi-app .recovery-card.available {
+  border-color: #cca45c;
+  animation: recovery-pulse 1.8s ease-in-out infinite;
+  background: #fffdf7;
+}
+.hmi-app .recovery-card.available .recovery-state {
+  color: #83591a;
+  font-weight: 600;
+}
+@keyframes recovery-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 #d4a24800,
+      inset 0 0 0 0 #d4a24800;
+    border-color: #e4cda0;
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px #d4a2482a,
+      inset 0 0 0 1px #d4a24835;
+    border-color: #c49136;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hmi-app .recovery-card.available {
+    animation: none;
+    border-color: #c49136;
+    box-shadow: 0 0 0 2px #d4a24822;
+  }
+}
+.hmi-app .stop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  min-width: 154px;
+}
+.hmi-app .stop-button {
+  background: #b44d40;
+  border: 2px solid #a34237;
+  color: white;
+  min-height: 56px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  box-shadow: 0 3px 0 #8d3a31;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.hmi-app .stop-button:active {
+  box-shadow: none;
+  transform: translateY(2px);
+}
+.hmi-app .stop-button.is-stopped {
+  background: #80372f;
+  border-color: #6e2e28;
+}
+.hmi-app .stop-square {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: white;
+}
+.hmi-app .primary {
+  background: #168b7c;
+  border-color: #168b7c;
+  color: white;
+}
+.hmi-app .workspace {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(230px, 0.82fr) minmax(320px, 1.2fr) minmax(
+      330px,
+      1.12fr
+    );
+  grid-template-rows: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 11px;
+}
+.hmi-app .card {
+  min-width: 0;
+  min-height: 0;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 13px 15px;
+  display: flex;
+  flex-direction: column;
+}
+.hmi-app .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 11px;
+  flex-shrink: 0;
+}
+.hmi-app .card-head h2 {
+  font-size: 14px;
+  letter-spacing: -0.2px;
+  font-weight: 700;
+}
+.hmi-app .history-card {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+.hmi-app .history-caption {
+  display: flex;
+  justify-content: space-between;
+  color: #5c705e;
+  font-size: 11px;
+  padding: 0 9px 9px;
+  border-bottom: 1px solid #edf1eb;
+  flex-shrink: 0;
+}
+.hmi-app .order-list {
+  overflow: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd9ce transparent;
+}
+.hmi-app .order {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 3px 0;
+  padding: 12px 9px;
+  border: 1px solid transparent;
+  border-bottom-color: #eef2ec;
+  border-radius: 5px;
+  text-align: left;
+}
+.hmi-app .order[aria-pressed="true"] {
+  background: #eff8f2;
+  border-color: #a8cfbc;
+  box-shadow: inset 3px 0 #29977b;
+}
+.hmi-app .order b {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+}
+.hmi-app .order small {
+  display: block;
+  color: #536b54;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.hmi-app .status-tag.completed {
+  color: #496b4b;
+  background: #eff5ed;
+}
+.hmi-app .status-tag.paused {
+  color: #81591b;
+  background: #fff0d0;
+}
+.hmi-app .status-tag.failed {
+  color: #87452f;
+  background: #f9ebe4;
+}
+.hmi-app .history-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  padding-top: 9px;
+  color: #506e54;
+  font-size: 11px;
+  min-height: 31px;
+  flex-shrink: 0;
+}
+.hmi-app .history-footer button {
+  border: 0;
+  padding: 3px 0;
+  font-size: 10px;
+  color: #21664c;
+}
+.hmi-app .process-card {
+  grid-column: 2;
+  grid-row: 1;
+}
+.hmi-app .process-summary {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: center;
+  gap: 15px;
+  min-height: 0;
+  flex: 1;
+}
+.hmi-app .ring {
+  width: 170px;
+  height: 170px;
+  position: relative;
+}
+.hmi-app .ring > svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.hmi-app .ring circle {
+  fill: none;
+  stroke-width: 7;
+}
+.hmi-app .ring .track {
+  stroke: #edf2ec;
+}
+.hmi-app .ring .value {
+  stroke: #159b80;
+  stroke-dasharray: 251.33;
+  stroke-dashoffset: 90.48;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s;
+}
+.hmi-app .ring-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+}
+.hmi-app .ring-label strong {
+  font-size: 44px;
+  font-weight: 650;
+  letter-spacing: -1px;
+}
+.hmi-app .ring-label strong span {
+  font-size: 17px;
+  margin-left: 2px;
+}
+.hmi-app .ring-label small {
+  font-size: 12px;
+  color: #536f57;
+  margin-top: 1px;
+}
+.hmi-app .process-meta h3 {
+  font-size: 18px;
+  letter-spacing: -0.6px;
+}
+.hmi-app .process-meta > p {
+  color: #516b53;
   font-size: 12px;
   margin-top: 4px;
 }
-.hmi-safety button {
-  background: #a73e34;
-  color: #fff;
-  border: 0;
-  flex-shrink: 0;
-}
-.hmi-brand {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 24px 28px;
-  border-bottom: 1px solid var(--line);
-  background: #fffdf9;
-}
-.hmi-brand b {
-  font-size: 23px;
-  letter-spacing: 3px;
-}
-.hmi-brand span {
-  margin-left: 14px;
-  color: #85745c;
-}
-/* 노트북은 사이드바와 본문, 비교 영역은 두 열로 충분한 시각적 간격을 둔다. */
-.hmi-shell {
+.hmi-app .command {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
-}
-.hmi-shell aside {
-  padding: 32px 24px;
-  border-right: 1px solid var(--line);
-  background: #f0e9dd;
-}
-.hmi-shell aside h2 {
-  font-size: 19px;
-  margin: 18px 0 32px;
-}
-.hmi-shell nav {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 48px;
-}
-.hmi-shell nav a {
-  border-radius: 10px;
-  padding: 14px 10px;
-  background: #ffffff85;
-}
-.hmi-shell main {
-  padding: 32px;
-  min-width: 0;
-  width: 100%;
-  max-width: 1500px;
-  margin: 0 auto;
-}
-.hmi-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.hmi-title h1 {
-  font-size: 30px;
-  margin: 10px 0;
-}
-.hmi-app p {
-  line-height: 1.7;
-}
-.hmi-app small,
-.hmi-muted {
-  color: #827564;
-}
-.hmi-banner {
-  padding: 15px 18px;
-  background: #eee9df;
-  border-radius: 12px;
-  margin: 20px 0;
-  line-height: 1.7;
-}
-.hmi-banner.warning {
-  background: #fff0e7;
-  border: 1px solid #cf9586;
-  color: #8b352c;
-}
-/* 상태 요약 카드 3장(주문 API·저장 주문·선택 공정)을 한 줄에 둔다. */
-.hmi-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin: 22px 0;
-}
-.hmi-stats article,
-.hmi-card {
-  background: #fffefa;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 22px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.hmi-stats strong {
-  display: block;
-  font-size: 23px;
-  margin: 15px 0;
-}
-.hmi-stats span {
+  grid-template-columns: 65px minmax(0, 1fr);
+  gap: 5px 0;
+  margin: 10px 0 0;
   font-size: 12px;
 }
-.hmi-panels {
+.hmi-app .command dt {
+  color: #5b7056;
+}
+.hmi-app .command dd {
+  margin: 0;
+  color: #3e5d43;
+  overflow-wrap: anywhere;
+}
+.hmi-app .steps {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.hmi-app .step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #65755e;
+}
+.hmi-app .step i {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  place-items: center;
+  font-size: 8px;
+  font-style: normal;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  background: #f0f4ed;
+  color: #5d7056;
 }
-.hmi-card h2 {
-  font-size: 18px;
-  margin: 0 0 16px;
+.hmi-app .step.done i {
+  background: #86b69c;
+  color: white;
 }
-.hmi-card h3 {
-  font-size: 16px;
+.hmi-app .step.current {
+  color: #15654c;
+  font-weight: 700;
 }
-.hmi-card progress {
-  width: 100%;
-  accent-color: #9a835f;
-  height: 14px;
-  margin-top: 14px;
+.hmi-app .step.current i {
+  background: #168b7c;
+  color: white;
 }
-.hmi-orders {
-  display: grid;
-  max-height: 330px;
+.hmi-app .logs-card {
+  grid-column: 2;
+  grid-row: 2;
+  padding-bottom: 8px;
+}
+.hmi-app .logs-card .card-head {
+  margin-bottom: 5px;
+}
+.hmi-app .live-label {
+  display: flex;
+  align-items: center;
+  color: #376b48;
+  font-size: 11px;
+}
+.hmi-app .log-caption {
+  color: #62745a;
+  font-size: 10px;
+  padding-bottom: 8px;
+}
+.hmi-app .log-list {
+  min-height: 0;
+  flex: 1;
   overflow: auto;
-  gap: 9px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd9ce transparent;
 }
-.hmi-orders button {
-  text-align: left;
+.hmi-app .log {
   display: grid;
-  gap: 7px;
+  grid-template-columns: 69px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid #edf1e9;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.hmi-app .log time {
+  color: #5d7155;
+  font-size: 11px;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+}
+.hmi-app .log time span {
+  display: block;
+}
+.hmi-app .log-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+}
+.hmi-app .log-head .log-order {
+  color: #586c4f;
+  font-size: 10px;
+}
+.hmi-app .level {
+  color: #3d6747;
+  background: #edf5e9;
+  border-radius: 3px;
+  font-size: 10px;
+  padding: 1px 5px;
+}
+.hmi-app .log.warning .level {
+  color: #805b1d;
+  background: #fff1d9;
+}
+.hmi-app .log.error .level {
+  color: #8c4732;
+  background: #fbece1;
+}
+.hmi-app .message {
+  color: #36533b;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.hmi-app .log.error .message {
+  color: #8a452f;
+}
+.hmi-app .log.warning .message {
+  color: #795c1d;
+}
+.hmi-app .log-older {
   width: 100%;
+  border: 0;
+  padding: 9px 6px;
+  color: #526c47;
+  font-size: 10px;
 }
-.hmi-orders b {
-  font-size: 14px;
+.hmi-app .original-card {
+  grid-column: 3;
+  grid-row: 1 / 3;
 }
-.hmi-card dl {
+.hmi-app .cake3d {
+  position: relative;
+  min-height: 100px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: radial-gradient(ellipse at 50% 80%, #e9ede2, #f8faf5 72%);
+}
+.hmi-app .cake3d > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hmi-app .model-loading,
+.hmi-app .model-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  padding: 20px;
+  text-align: center;
+  color: #5e7353;
+  font-size: 11px;
+}
+.hmi-app .original-note {
+  display: flex;
+  gap: 7px;
+  justify-content: space-between;
+  padding: 9px 0 12px;
+  color: #5e7251;
+  font-size: 10px;
+}
+.hmi-app .original-faces {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  height: clamp(105px, 19vh, 200px);
+  flex-shrink: 0;
+}
+.hmi-app .original-faces figure {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e7ece1;
+  border-radius: 5px;
+  background: #fbfcf8;
+  padding: 8px;
+}
+.hmi-app .original-faces figcaption {
+  display: flex;
+  justify-content: space-between;
+  color: #5c6e4e;
+  font-size: 11px;
+}
+.hmi-app .original-faces figcaption b {
+  color: #3e5f38;
+  font-size: 12px;
+  font-weight: 500;
+}
+.hmi-app .face-canvas {
+  min-height: 0;
+  flex: 1;
+  position: relative;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.hmi-app .face-canvas canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  object-fit: contain;
+  width: 100%;
+  height: 100%;
+}
+.hmi-app .footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #5a6f4f;
+  font-size: 10px;
+  align-items: center;
+}
+.hmi-app .toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: #254a3c;
+  color: white;
+  padding: 11px 18px;
+  border-radius: 7px;
+  box-shadow: 0 6px 25px #18382c22;
+  z-index: 20;
   font-size: 12px;
 }
-.hmi-card dd {
-  margin: 0;
-  text-align: right;
+.hmi-app dialog {
+  border: 1px solid #d5e1d4;
+  border-radius: 12px;
+  padding: 25px;
+  width: min(440px, 90vw);
+  color: #3c5b46;
+  box-shadow: 0 15px 60px #17312730;
 }
-#logs {
-  margin-top: 22px;
-  scroll-margin-top: 125px;
+.hmi-app dialog::backdrop {
+  background: #19352f66;
 }
-/* 사이드바 "고객 원본" 링크로 이동할 때 고정 안전 띠 아래에서 카드 제목이 보이게 한다. */
-.hmi-original {
-  scroll-margin-top: 125px;
+.hmi-app dialog h2 {
+  font-size: 18px;
+  margin-bottom: 12px;
 }
-.hmi-controls {
+.hmi-app dialog p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #52684a;
+}
+.hmi-app .dialog-actions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: end;
+  margin-top: 20px;
   gap: 8px;
 }
-.hmi-drawing {
-  display: block;
-  width: 100%;
-  height: 290px;
-  color: #9a7450;
+/* 720px 높이에서는 카드의 간격을 줄여 조작부와 원본 두 면까지 함께 유지한다. */
+@media (max-height: 780px) and (min-width: 1001px) {
+  .hmi-app .dashboard-app {
+    padding: 10px 16px 8px;
+    grid-template-rows: 51px 104px auto minmax(0, 1fr);
+    gap: 9px;
+  }
+  .hmi-app .card {
+    padding: 11px 13px;
+  }
+  .hmi-app .summary-card {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .hmi-app .card-head {
+    margin-bottom: 8px;
+  }
+  .hmi-app .original-faces {
+    height: 112px;
+  }
+  .hmi-app .steps {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+  .hmi-app .order {
+    padding: 10px 9px;
+  }
+  /* 낮은 노트북에서는 카드 안에 들어오는 범위에서 원을 최대한 크게 유지한다. */
+  .hmi-app .process-summary {
+    grid-template-columns: clamp(144px, 20.3vh, 156px) minmax(0, 1fr);
+  }
+  .hmi-app .ring {
+    width: clamp(144px, 20.3vh, 156px);
+    height: clamp(144px, 20.3vh, 156px);
+  }
+  .hmi-app .ring-label strong {
+    font-size: clamp(36px, 5.2vh, 41px);
+  }
 }
-.hmi-placeholder {
-  min-height: 290px;
+/* 태블릿 가로에서는 글을 숨기지 않고 각 열의 최소 폭과 원형 진행률만 줄인다. */
+@media (max-width: 1200px) and (min-width: 1001px) {
+  .hmi-app .workspace {
+    grid-template-columns: minmax(215px, 0.8fr) minmax(310px, 1.2fr) minmax(
+        300px,
+        1.1fr
+      );
+  }
+  .hmi-app .process-summary {
+    grid-template-columns: 124px minmax(0, 1fr);
+    gap: 9px;
+  }
+  .hmi-app .ring {
+    width: 124px;
+    height: 124px;
+  }
+  .hmi-app .ring-label strong {
+    font-size: 34px;
+  }
+  .hmi-app .ring-label small {
+    font-size: 10px;
+  }
+  .hmi-app .summary-grid {
+    grid-template-columns: 150px 140px 188px;
+    gap: 9px;
+  }
+  .hmi-app .summary-card {
+    padding: 10px;
+  }
+  .hmi-app .summary-card strong {
+    font-size: 21px;
+  }
+  .hmi-app .overview-row {
+    gap: 15px;
+  }
+  .hmi-app .stop-zone {
+    min-width: 150px;
+  }
+  .hmi-app .stop-button {
+    padding: 12px;
+    font-size: 12px;
+  }
+}
+/* 작은 세로 화면은 내용이 잘리지 않도록 문서 스크롤로 바꾼다. */
+@media (max-width: 1000px) {
+  .hmi-app .dashboard-app {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    padding: 12px;
+  }
+  .hmi-app .topbar {
+    min-height: 55px;
+  }
+  .hmi-app .topbar-status {
+    flex-wrap: wrap;
+    justify-content: end;
+    gap: 6px 10px;
+  }
+  .hmi-app .overview-row {
+    flex-wrap: wrap;
+  }
+  .hmi-app .summary-grid {
+    grid-template-columns: repeat(2, 180px);
+    grid-auto-rows: 108px;
+  }
+  .hmi-app .stop-zone {
+    align-self: start;
+    padding-top: 25px;
+  }
+  .hmi-app .workspace {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1.2fr);
+    grid-template-rows: 240px 290px 440px;
+  }
+  .hmi-app .original-card {
+    grid-row: 3;
+    grid-column: 1 / 3;
+  }
+  .hmi-app .history-card {
+    grid-row: 1 / 3;
+  }
+  .hmi-app .logs-card {
+    grid-column: 2;
+  }
+  .hmi-app .original-faces {
+    height: 115px;
+  }
+}
+@media (max-width: 620px) {
+  .hmi-app .brand h1 {
+    font-size: 15px;
+  }
+  .hmi-app .brand h1 span {
+    font-size: 13px;
+  }
+  .hmi-app .topbar-status {
+    font-size: 9px;
+  }
+  .hmi-app .preview-badge {
+    font-size: 8px;
+  }
+  .hmi-app .overview-row {
+    display: block;
+  }
+  .hmi-app .summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .hmi-app .summary-card {
+    padding: 10px;
+  }
+  .hmi-app .summary-card strong {
+    font-size: 21px;
+  }
+  .hmi-app .summary-card .tiny-chart {
+    width: 40px;
+  }
+  .hmi-app .recovery-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .hmi-app .recovery-actions button {
+    padding: 5px;
+    font-size: 10px;
+  }
+  .hmi-app .recovery-card {
+    gap: 6px;
+  }
+  .hmi-app .stop-zone {
+    padding-top: 12px;
+  }
+  .hmi-app .workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .hmi-app .history-card {
+    height: 370px;
+  }
+  .hmi-app .process-card {
+    min-height: 245px;
+  }
+  .hmi-app .logs-card {
+    height: 330px;
+  }
+  .hmi-app .original-card {
+    height: 470px;
+  }
+  .hmi-app .footer {
+    font-size: 8px;
+    align-items: start;
+  }
+  .hmi-app .footer span:last-child {
+    white-space: nowrap;
+  }
+}
+
+/* 사용자 UI와 같은 420px 전환점과 38px 심벌 규격을 사용한다. */
+@media (max-width: 420px) {
+  .hmi-app .logo-symbol {
+    width: 38px;
+    height: 38px;
+    font-size: 32px;
+    border-radius: 12px;
+  }
+}
+
+/* 실제 통신·정지 오류는 요약 카드와 분리해 온전한 문장으로 표시한다. */
+.hmi-app .hmi-notices {
+  min-height: 0;
+}
+.hmi-app .hmi-notices p {
+  margin: 0 0 4px;
+  padding: 8px 12px;
+  border: 1px solid #dbb7a8;
+  border-radius: 6px;
+  background: #fff1eb;
+  color: #813e2f;
+  font-size: 12px;
+}
+.hmi-app .hmi-notices p:last-child {
+  margin-bottom: 0;
+}
+.hmi-app .empty-state {
   display: grid;
   place-content: center;
   text-align: center;
-  color: #8c7f6e;
-  font-size: 13px;
-  line-height: 2;
   padding: 18px;
-}
-.hmi-demo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 0;
-}
-.hmi-demo input {
-  width: 18px;
-  height: 18px;
-}
-.hmi-log {
-  display: grid;
-  grid-template-columns: 175px minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px 0;
-  border-top: 1px solid var(--line);
-  line-height: 1.6;
-}
-.hmi-log time {
-  color: #897c6b;
+  color: #596d5b;
   font-size: 12px;
 }
-.hmi-shell footer {
-  font-size: 12px;
-  color: #877865;
-  padding: 24px 0;
-  line-height: 1.8;
-}
-.hmi-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: #302b2566;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-}
-.hmi-modal section {
-  max-width: 540px;
-  width: 100%;
-  max-height: 90vh;
-  overflow: auto;
-  background: #fffdf9;
-  border-radius: 20px;
-  padding: 28px;
-}
-.hmi-modal button {
-  margin: 5px;
-}
-/* 태블릿은 메뉴를 본문 위로 옮기고 상태 카드를 두 열로 줄인다. */
-@media (max-width: 1100px) {
-  .hmi-shell {
-    grid-template-columns: 1fr;
-  }
-  .hmi-shell aside {
-    display: none;
-  }
-  /* 카드가 3장이라 태블릿에서도 3열을 유지해 한 장만 다음 줄로 밀리지 않게 한다. */
-}
-/* 휴대폰은 모든 비교·공정 패널을 한 열로 읽고 고정 안전 띠에 두 줄을 허용한다. */
-@media (max-width: 650px) {
-  .hmi-shell main {
-    padding: 18px 12px;
-  }
-  .hmi-brand {
-    padding: 20px 14px;
-  }
-  .hmi-brand span {
-    display: none;
-  }
-  .hmi-safety {
-    padding: 12px;
-  }
-  .hmi-safety span {
-    font-size: 10px;
-    max-width: 220px;
-  }
-  /* 휴대폰 폭에서는 3열이 너무 좁아 공정 이름이 잘리므로 한 열로 쌓는다. */
-  .hmi-stats {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-  }
-  .hmi-stats article,
-  .hmi-card {
-    padding: 16px;
-    border-radius: 14px;
-  }
-  .hmi-stats strong {
-    font-size: 19px;
-  }
-  .hmi-panels {
-    grid-template-columns: 1fr;
-  }
-  .hmi-log {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-  .hmi-drawing,
-  .hmi-placeholder {
-    height: 240px;
-    min-height: 240px;
-  }
-}
-
-/* 실패·불명확 상태는 선택 주문과 무관하게 관측 로그에서 구분한다. */
-.hmi-log.error {
-  color: #97382e;
-}
-.hmi-log.warning {
-  color: #89621e;
-}
-
-/* 실제 수신 경로는 원본과 분리하며 같은 픽셀 좌표계에서 계획·가상 TCP만 겹친다. */
-.hmi-path-layers {
-  position: relative;
-  height: 290px;
-  color: #256eb4;
-}
-.hmi-path-layers > .hmi-drawing {
-  color: #256eb4;
+.hmi-app .face-empty {
   height: 100%;
+  display: grid;
+  place-content: center;
+  color: #66775f;
+  font-size: 11px;
 }
-.hmi-measured-path {
+.hmi-app .face-canvas .hmi-drawing {
   position: absolute;
   inset: 0;
-}
-.hmi-measured-path .hmi-drawing {
-  color: #20805b;
-  height: 100%;
-}
-.hmi-path-metrics {
-  color: #356858;
-  font-size: 12px;
-}
-@media (max-width: 650px) {
-  .hmi-path-layers {
-    height: 240px;
-  }
-}
-
-/* 작성 중 두 면을 주문 이력 위에 나란히 표시하고, 작은 화면에서는 높이를 줄인다. */
-.hmi-live {
-  margin-bottom: 20px;
-  border-color: #ccb991;
-}
-.hmi-live-faces {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-.hmi-live-faces figure {
-  margin: 0;
-  padding: 10px;
-  background: #faf7f1;
-  border-radius: 12px;
-}
-.hmi-live-faces .hmi-drawing {
   width: 100%;
-  height: 140px;
+  height: 100%;
+  color: #926f53;
 }
-.hmi-live figcaption {
-  font-size: 13px;
-  font-weight: 700;
+.hmi-app .process-meta {
+  min-width: 0;
+  max-height: 100%;
+  overflow: auto;
+  scrollbar-width: thin;
 }
-
-/* 주문과 별개인 연결 관측을 항상 표시하여 저장된 과거 상태를 실시간으로 오인하지 않게 한다. */
-.hmi-runtime {
-  margin-bottom: 20px;
-}
-.hmi-runtime p {
+.hmi-app .process-meta > p {
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
-/* 소프트웨어 정지 버튼 영역: 정지(가장 강조) · 안내를 한 줄에 둔다.
-   좁은 화면에서는 줄바꿈해 버튼이 화면 밖으로 밀리지 않게 한다. */
-.hmi-stop-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-shrink: 0;
-}
-/* 정지 버튼은 다른 버튼보다 크고 진한 빨강으로 두어 위급 시 바로 찾게 한다. */
-.hmi-safety .hmi-stop,
-.hmi-modal .hmi-stop {
-  background: #c62828;
-  color: #fff;
-  border: 0;
-  font-weight: 700;
-  padding: 10px 18px;
-}
-.hmi-safety .hmi-guide {
-  background: transparent;
-  color: #932f28;
-  border: 1px solid #dcaaa0;
-}
-/* 정지 중에는 헤더 전체를 진한 빨강으로 바꿔 상태를 즉시 알 수 있게 한다. */
-.hmi-safety.stopped {
-  background: #b71c1c;
-  border-bottom-color: #7f1010;
-  color: #fff;
-}
-.hmi-safety.stopped b {
-  color: #fff;
-}
-.hmi-safety.stopped .hmi-stop {
-  background: #7f1010;
-}
-.hmi-safety.stopped .hmi-guide {
-  color: #fff;
-  border-color: #ffffff99;
-}
-@media (max-width: 720px) {
-  .hmi-safety {
-    flex-wrap: wrap;
-  }
-  .hmi-stop-actions {
-    width: 100%;
-    justify-content: stretch;
-  }
-  .hmi-stop-actions button {
-    flex: 1;
-  }
-}
-
-/* 선택 주문 피드백: TM 연결 관측 아래의 작은 요약 띠.
-   제목·주문번호·메시지 → 진행률 → 상세 4항목을 한 줄 흐름으로 두고 좁으면 줄바꿈한다. */
-.hmi-feedback {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: 10px 20px;
-  padding: 14px 18px;
-  margin-bottom: 20px;
-}
-.hmi-feedback-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
+.hmi-app .recovery-card {
   min-width: 0;
 }
-.hmi-feedback .hmi-feedback-head h2 {
-  font-size: 14px;
-  margin: 0;
+.hmi-app .recovery-point {
+  overflow-wrap: anywhere;
+  font-size: 10px;
 }
-.hmi-feedback-head b {
-  font-size: 13px;
-}
-.hmi-feedback-head span {
-  font-size: 12px;
-  color: #6f6252;
+.hmi-app .phase-summary {
+  font-size: 21px;
   overflow-wrap: anywhere;
 }
-.hmi-feedback-progress {
-  display: grid;
-  gap: 4px;
-  font-size: 12px;
-  align-content: center;
-}
-.hmi-feedback-progress progress {
-  margin-top: 0;
-  height: 10px;
-}
-/* 상세 항목은 라벨·값 4쌍을 한 줄에 놓는다. 값은 왼쪽 정렬로 라벨 바로 옆에 붙인다. */
-.hmi-card.hmi-feedback dl {
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, max-content minmax(0, 1fr));
-  gap: 4px 10px;
-  margin: 0;
-  font-size: 11.5px;
-}
-.hmi-feedback dt {
-  color: #8c7f6e;
-}
-.hmi-card.hmi-feedback dd {
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
-/* 고객 원본 카드: 제목과 상단/측면/3D 전환 버튼을 한 줄에 둔다. */
-.hmi-original-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  margin-bottom: 12px;
-}
-.hmi-original-head h2 {
-  margin: 0;
-}
-.hmi-original .hmi-drawing,
-.hmi-original .hmi-placeholder,
-.hmi-cake3d {
-  background: #faf7f1;
-  border: 1px dashed #d6c9b4;
-  border-radius: 14px;
-}
-/* 3D 캔버스는 원본 2D와 같은 높이를 써서 전환해도 카드 크기가 흔들리지 않게 한다.
-   드래그 회전을 위해 터치 스크롤 제스처를 막는다. */
-.hmi-cake3d {
+/* 비모달 복구 확인창이 떠 있어도 독립 정지 버튼은 가려지거나 비활성화되지 않는다. */
+.hmi-app .stop-zone {
   position: relative;
-  height: 290px;
-  overflow: hidden;
-  touch-action: none;
-  cursor: grab;
+  z-index: 40;
 }
-.hmi-cake3d canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+.hmi-app .hmi-decision-confirm {
+  position: fixed;
+  z-index: 30;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  max-height: 80dvh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #bfcfc4;
+  border-radius: 12px;
+  background: #fffefa;
+  box-shadow: 0 10px 70px #20372f40;
+  color: #294532;
+  text-align: left;
 }
-.hmi-cake3d .model-error {
-  padding: 18px;
+.hmi-app .hmi-decision-confirm h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.hmi-app .hmi-decision-confirm p {
   font-size: 13px;
-  color: #8c7f6e;
+  line-height: 1.7;
+  margin: 8px 0;
 }
-/* 태블릿 이하: 피드백 요약은 위아래로, 상세 항목은 2쌍씩 둔다. */
-@media (max-width: 1100px) {
-  .hmi-feedback {
+
+/* 복구 카드와 정지 버튼은 같은 우측 그룹에 두고 실제 누름 영역 사이에 간격을 둔다. */
+.hmi-app .stop-zone {
+  gap: 22px;
+}
+.hmi-app .stop-zone .recovery-card {
+  width: 268px;
+  flex: 0 0 268px;
+  align-self: stretch;
+}
+@media (max-width: 1200px) and (min-width: 1001px) {
+  .hmi-app .stop-zone {
+    gap: 16px;
+  }
+  .hmi-app .stop-zone .recovery-card {
+    width: 250px;
+    flex-basis: 250px;
+  }
+}
+@media (max-width: 1000px) {
+  .hmi-app .stop-zone {
+    padding-top: 0;
+    align-self: stretch;
+    min-height: 108px;
+  }
+}
+@media (max-width: 620px) {
+  .hmi-app .stop-zone {
+    width: 100%;
+    display: grid;
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
-  .hmi-card.hmi-feedback dl {
-    grid-template-columns: repeat(2, max-content minmax(0, 1fr));
+  .hmi-app .stop-zone .recovery-card {
+    width: 100%;
+    min-height: 108px;
   }
-}
-@media (max-width: 650px) {
-  .hmi-cake3d {
-    height: 240px;
+  .hmi-app .stop-zone .stop-button {
+    justify-self: end;
   }
-  .hmi-card.hmi-feedback dl {
-    grid-template-columns: max-content minmax(0, 1fr);
-  }
-}
-
-/* 실패 잠금 안내는 고정 정지 헤더와 분리하고 태블릿 폭에서는 세로로 쌓는다. */
-.hmi-recovery {
-  margin: 16px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-.hmi-recovery button {
-  flex-shrink: 0;
-}
-/* 로그만 내부 스크롤한다. 새 페이지가 추가돼도 전체 HMI 화면은 길어지지 않는다. */
-.hmi-log-scroll {
-  max-height: min(52svh, 520px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding-right: 12px;
-  overflow-anchor: none;
-}
-@media (max-width: 700px) {
-  .hmi-recovery {
-    margin: 12px;
-    align-items: stretch;
-    flex-direction: column;
-  }
-}
-
-/* 재개와 주문 종료를 서로 다른 행동으로 표시한다. 좁은 화면에서는 위아래로 배치한다. */
-.hmi-recovery-actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
 }

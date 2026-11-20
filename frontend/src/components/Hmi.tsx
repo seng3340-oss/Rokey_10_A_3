@@ -1,16 +1,11 @@
-import { DRAFT_CHANNEL, parseDraft } from "../api/draftPreview";
-import type { DraftPreview } from "../api/draftPreview";
 import { useEffect, useRef, useState } from "react";
 import {
   phaseLabel,
   formatLogTime,
-  koreanLogMessage,
   parseDetail,
-  parseRuntime,
-  isOrderFeedbackFresh,
   parsePage,
   readJson,
-  orderLabels as labels,
+  orderLabels,
   parseRobotStop,
   sendRobotStop,
   surfaceDrawing,
@@ -20,36 +15,42 @@ import type {
   OrderDetail,
   OrderPage,
   OrderLog,
-  RuntimeMonitor,
   RobotStop,
 } from "../api/hmi";
+import {
+  dashboardOrder,
+  dashboardSurface,
+  dashboardTimestamp,
+  dashboardToday,
+} from "../api/hmiDashboard";
 import type { DrawingPathPayload } from "../api/drawing";
 import { HmiCake3D } from "./HmiCake3D";
 import { WorkcellRecoveryPanel } from "./WorkcellRecovery";
 import { WorkcellLogs } from "./WorkcellLogs";
 import "../styles/hmi.css";
 
-/** 원본 픽셀 그대로 표시한다. 측면은 입력 캔버스이며 실제 원뿔대 전개도가 아니다. */
+/** 좌표를 변경하지 않고 선택 주문의 한 면을 별도 2D 원본으로 표시한다. */
 function Drawing({
   drawing,
-  faded = false,
-  label = "고객 원본 그림",
+  label,
 }: {
-  drawing: DrawingPathPayload;
-  faded?: boolean;
-  label?: string;
+  drawing: DrawingPathPayload | null;
+  label: string;
 }) {
+  if (!drawing) return <div className="face-empty">이 면의 그림 없음</div>;
   return (
     <svg
       viewBox={`0 0 ${drawing.canvas_width} ${drawing.canvas_height}`}
       role="img"
       aria-label={label}
-      className={faded ? "hmi-drawing faded" : "hmi-drawing"}
+      className="hmi-drawing"
     >
-      {drawing.strokes.map((stroke, index) => (
+      {drawing.strokes.map((stroke) => (
         <polyline
-          key={index}
-          points={stroke.points.map((p) => `${p.x},${p.y}`).join(" ")}
+          key={stroke.stroke_id}
+          points={stroke.points
+            .map((point) => `${point.x},${point.y}`)
+            .join(" ")}
           fill="none"
           stroke="currentColor"
           strokeWidth="3"
@@ -62,69 +63,53 @@ function Drawing({
   );
 }
 
-/** 주문은 3초마다 순차 조회한다. 이전 요청 종료 뒤 예약하여 응답 역전·중복을 막는다. */
+/** 상태와 TM 경로 순번이 확인된 경우에만 상세 공정의 면 이름을 표시한다. */
+function detailPhase(order: OrderDetail | null): string {
+  if (!order) return "주문 미선택";
+  if (order.status === "paused") return "복구 대기";
+  if (order.status === "completed") return "제작 완료";
+  const surface = dashboardSurface(order);
+  return order.phase === "DRAWING" && surface
+    ? `${surface === "top" ? "윗면" : "옆면"} 드로잉`
+    : phaseLabel(order.phase);
+}
+
+/** 실제 주문·제어 계약을 유지하며 한 화면에 기록·상세·원본·로그를 함께 표시한다. */
 export function Hmi() {
-  const [draft, setDraft] = useState<DraftPreview | null>(null);
-  // 작성 중 그림은 주문과 분리해 보여준다. 수신만 하며 제작 요청을 만들지 않는다.
-  useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
-    const channel = new BroadcastChannel(DRAFT_CHANNEL);
-    channel.onmessage = (event) => {
-      const preview = parseDraft(event.data);
-      if (preview) setDraft(preview);
-    };
-    channel.postMessage({ kind: "request-draft" });
-    return () => channel.close();
-  }, []);
   const [page, setPage] = useState<OrderPage>({ items: [], total: 0 });
+  // 빈 선택은 자동 모드다. 수동으로 고른 과거 주문은 1초 갱신에도 유지한다.
   const [selected, setSelected] = useState("");
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [monitor, setMonitor] = useState<Monitor | null>(null);
-  const [runtime, setRuntime] = useState<RuntimeMonitor | null>(null);
-  const [surface, setSurface] = useState<"top" | "side">("top");
-  // 고객 원본 카드의 보기 방식. true면 두 면을 입힌 3D 케이크, false면 선택 면(surface)의 2D 원본.
-  const [view3d, setView3d] = useState(false);
   const [error, setError] = useState("");
   const [health, setHealth] = useState(false);
   const [updated, setUpdated] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [guide, setGuide] = useState(false);
-  // 소프트웨어 정지 상태. 주문 조회(3초)와 별도로 1초마다 갱신해 정지 반영을 빨리 보여준다.
   const [stopState, setStopState] = useState<RobotStop | null>(null);
   const [stopError, setStopError] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
   const [logs, setLogs] = useState<(OrderLog & { time: string })[]>([]);
-  // 수동 선택은 유지하되 새 주문으로 자동 전환할 때만 원본의 면과 데모를 초기화한다.
-  const displayedOrder = useRef("");
   const lastError = useRef("");
 
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    let pendingController: AbortController | null = null;
+    let pending: AbortController | null = null;
+    /** 같은 시도의 목록·상세를 연결한다. 요청을 겹치지 않고 시작 간격을 1초로 맞춘다. */
     async function poll() {
+      const started = performance.now();
       const controller = new AbortController();
-      pendingController = controller;
-      // 연결이 끊겨도 무한 대기하지 않으며 화면 종료 시 전체 요청을 중단한다.
+      pending = controller;
       const timeout = setTimeout(() => controller.abort(), 10000);
       try {
-        const next = parsePage(
-          await readJson("/api/orders?limit=100", controller.signal),
-        );
-        const server = (await readJson("/api/health", controller.signal)) as {
-          status?: string;
-        };
-        if (server?.status !== "ok")
+        const [rawPage, server] = await Promise.all([
+          readJson("/api/orders?limit=100", controller.signal),
+          readJson("/api/health", controller.signal),
+        ]);
+        const next = parsePage(rawPage);
+        if ((server as { status?: string })?.status !== "ok") {
           throw new Error("서버 상태 응답을 확인할 수 없습니다.");
-        let connection: RuntimeMonitor | null = null;
-        // 이전 백엔드에서도 주문 조회는 유지하고 연결 미관측을 명확히 표시한다.
-        try {
-          connection = parseRuntime(
-            await readJson("/api/monitor", controller.signal),
-          );
-        } catch {
-          if (controller.signal.aborted) throw new Error("조회 시간 초과");
         }
-        const id = selected || next.items[0]?.order_id;
+        const id = dashboardOrder(next.items, selected);
         let order: OrderDetail | null = null;
         let meta: Monitor | null = null;
         if (id) {
@@ -134,7 +119,6 @@ export function Hmi() {
               controller.signal,
             ),
           );
-          // 이 확장 조회가 없는 이전 서버에서도 기존 주문 API와 원본 비교는 사용할 수 있다.
           try {
             const raw = (await readJson(
               `/api/orders/${encodeURIComponent(id)}/monitor`,
@@ -147,70 +131,68 @@ export function Hmi() {
             )
               meta = raw;
           } catch {
-            // 확장 계약 미지원은 허용하되 시간 초과는 전체 조회 오류로 알린다.
+            // 확장 계약이 없는 이전 서버에서도 주문과 원본은 계속 조회한다.
             if (controller.signal.aborted) throw new Error("조회 시간 초과");
           }
         }
         if (!active) return;
-        // 목록 뒤에 받은 상세가 더 최신일 수 있으므로 선택 행과 상세의 상태를 맞춘다.
         if (order) {
           const { drawing: _drawing, ...summary } = order;
           next.items = next.items.map((item) =>
             item.order_id === summary.order_id ? summary : item,
           );
         }
-        if ((order?.order_id || "") !== displayedOrder.current) {
-          displayedOrder.current = order?.order_id || "";
-          setSurface(order?.drawing_surface || "top");
-        }
         setPage(next);
         setDetail(order);
         setMonitor(meta);
-        setRuntime(connection);
         setHealth(true);
         setError("");
-        setUpdated(new Date().toLocaleTimeString("ko-KR"));
+        setUpdated(dashboardTimestamp(new Date()));
         lastError.current = "";
       } catch (cause) {
         if (!active) return;
-        const message = cause instanceof Error ? cause.message : "조회 오류";
-        setError(
-          controller.signal.aborted
-            ? "조회 시간 초과 · 3초 뒤 다시 확인합니다."
-            : message,
-        );
+        const message = controller.signal.aborted
+          ? "조회 시간 초과 · 자동으로 다시 확인합니다."
+          : cause instanceof Error
+            ? cause.message
+            : "조회 오류";
+        setError(message);
         setHealth(false);
         if (lastError.current !== message) {
           lastError.current = message;
-          setLogs((old) =>
+          setLogs((previous) =>
             [
               {
                 time: formatLogTime(new Date()),
-                message: koreanLogMessage(message),
+                message,
                 severity: "warning" as const,
               },
-              ...old,
+              ...previous,
             ].slice(0, 50),
           );
         }
       } finally {
         clearTimeout(timeout);
-        if (active) timer = setTimeout(poll, 3000);
+        if (active)
+          timer = setTimeout(
+            poll,
+            Math.max(100, 1000 - (performance.now() - started)),
+          );
       }
     }
     void poll();
     return () => {
       active = false;
-      pendingController?.abort();
+      pending?.abort();
       clearTimeout(timer);
     };
-  }, [selected, refresh]);
+  }, [selected]);
 
-  // 정지 상태는 1초마다 순차 조회한다. 이전 요청이 끝난 뒤 다음 조회를 예약한다.
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     let pending: AbortController | null = null;
+    /** 정지 상태는 주문 선택과 독립적으로 조회해 어느 기록을 보더라도 최신 요청을 표시한다. */
     async function pollStop() {
       const controller = new AbortController();
       pending = controller;
@@ -224,13 +206,14 @@ export function Hmi() {
           setStopError("");
         }
       } catch (reason) {
-        // 조회 실패 시 마지막 상태를 정상으로 간주하지 않도록 오류를 함께 표시한다.
-        if (active && !controller.signal.aborted)
+        if (active)
           setStopError(
-            reason instanceof Error ? reason.message : "정지 상태 조회 실패",
+            controller.signal.aborted
+              ? "정지 상태 조회 시간 초과"
+              : reason instanceof Error
+                ? reason.message
+                : "정지 상태 조회 실패",
           );
-        if (active && controller.signal.aborted)
-          setStopError("정지 상태 조회 시간 초과");
       } finally {
         clearTimeout(timeout);
         if (active) timer = setTimeout(pollStop, 1000);
@@ -244,7 +227,7 @@ export function Hmi() {
     };
   }, []);
 
-  /** 정지 버튼: 확인 없이 즉시 전송한다. 여러 번 눌러도 매번 정지를 다시 보낸다. */
+  /** 확인창을 거치지 않고 즉시 정지 POST를 보낸다. 조회 실패 중에도 버튼은 사용 가능하다. */
   async function requestStop() {
     try {
       setStopState(await sendRobotStop());
@@ -256,343 +239,270 @@ export function Hmi() {
     }
   }
 
-  // 헤더 문구: 정지 여부 → 로봇 적용 여부 → 브릿지 연결 순으로 가장 중요한 정보를 고른다.
   const stopped = stopState?.stopped === true;
-  const stopTitle = stopped
+  const current = page.items.find(
+    (order) => order.order_id === dashboardOrder(page.items),
+  );
+  const currentPhase =
+    current?.order_id === detail?.order_id
+      ? detailPhase(detail)
+      : current
+        ? phaseLabel(current.phase)
+        : "주문 대기";
+  const top = surfaceDrawing(detail?.drawing, "top");
+  const side = surfaceDrawing(detail?.drawing, "side");
+  const selectedSurface = dashboardSurface(detail);
+  const step =
+    detail?.phase === "COMPLETED"
+      ? 4
+      : detail?.phase === "FINISHING"
+        ? 3
+        : detail?.phase === "PREPARING"
+          ? 0
+          : detail?.phase === "DRAWING" && selectedSurface
+            ? selectedSurface === "top"
+              ? 1
+              : 2
+            : -1;
+  const stopLabel = stopped
     ? stopState.applied
-      ? "소프트웨어 정지 중 · 로봇 정지 적용됨"
-      : stopState.bridge_listening
-        ? "소프트웨어 정지 중 · 로봇 적용 확인 대기"
-        : "소프트웨어 정지 요청됨 · 브릿지 미연결"
-    : "안전 상태: 확인 불가";
-  // 정지 해제 기능은 두지 않는다. 다시 운용하려면 현장 정리 후 실행기를 재시작한다.
-  const stopDetail =
-    stopError ||
-    (stopped
-      ? stopState.bridge_listening
-        ? `${stopState.message} · 재개: 현장 정리 후 실행기 재시작`
-        : "정지 요청이 로봇에 전달되지 않았습니다. 물리 E-stop을 사용하세요."
-      : stopState && !stopState.bridge_listening
-        ? "물리 E-stop 신호 미수신 · 브릿지 미연결: 소프트웨어 정지가 로봇에 전달되지 않습니다."
-        : "물리 E-stop 신호 미수신 · 소프트웨어 정지는 인증된 안전 기능이 아닙니다.");
-
-  // 한 주문에는 윗면만, 옆면만, 또는 윗면+옆면(additional_paths)이 들어올 수 있다.
-  // 선택 면의 원본을 주문 안에서만 찾고, 없는 면을 만들거나 다른 주문과 섞지 않는다.
-  const drawing = surfaceDrawing(detail?.drawing, surface);
-  const stale = !health && Boolean(updated);
+      ? "정지 중 · 적용됨"
+      : "정지 요청 · 확인 대기"
+    : "소프트웨어 정지";
 
   return (
     <div className="hmi-app">
-      {/* 모든 화면에 안전 상태를 고정하며 HTTP 성공을 안전 확인으로 해석하지 않는다. */}
-      {/* 정지 중에는 헤더 전체를 강조색으로 바꿔 어느 화면에서든 정지 상태를 알 수 있게 한다. */}
-      <header
-        className={stopped ? "hmi-safety stopped" : "hmi-safety"}
-        aria-label="안전 상태"
-        aria-live="assertive"
-      >
-        <div>
-          <b>{stopTitle}</b>
-          <span>{stopDetail}</span>
-        </div>
-        <div className="hmi-stop-actions">
-          {/* 정지 버튼은 상태 조회 실패·정지 중에도 항상 누를 수 있다. */}
-          <button type="button" className="hmi-stop" onClick={requestStop}>
-            소프트웨어 정지
-          </button>
-          <button
-            type="button"
-            className="hmi-guide"
-            onClick={() => setGuide(true)}
-          >
-            정지 안내
-          </button>
-        </div>
-      </header>
-      {/* 중단 단계 재개와 현장 초기화 확인을 소프트웨어 정지 해제와 구분한다. */}
-      <WorkcellRecoveryPanel />
-      <div className="hmi-brand">
-        <a href="/hmi">
-          <b>CAKEBOT</b> <span>운영 모니터</span>
-        </a>
-        <a href="/">고객 화면 ↗</a>
-      </div>
-      <div className="hmi-shell">
-        <aside>
-          <h2>제작을 한눈에.</h2>
-          <nav>
-            <a href="#overview">주문·공정</a>
-            <a href="#drawing">고객 원본</a>
-            <a href="#logs">경고·로그</a>
-          </nav>
-          <p>M0609 / RG2</p>
-          <small>
-            주문·공정 조회 전용
-            <br />
-            로봇 제어는 소프트웨어 정지만
-          </small>
-        </aside>
-        <main>
-          {draft && (
-            <section
-              className="hmi-card hmi-live"
-              aria-label="실시간 작성 미리보기"
-            >
-              <small>LIVE DRAFT · 작성 중 미리보기</small>
-              <h2>고객이 그리고 있어요</h2>
-              <p>
-                미접수 초안 · 실행 안 함. 고객 화면에서 제작 요청을 전송하면
-                주문으로 접수됩니다.
-              </p>
-              <div className="hmi-live-faces">
-                {draft.drawings.map((drawing) => (
-                  <figure key={drawing.drawing_surface}>
-                    <figcaption>
-                      {drawing.drawing_surface === "top" ? "상단" : "측면"} ·{" "}
-                      {drawing.strokes.length}획
-                    </figcaption>
-                    <Drawing
-                      drawing={drawing}
-                      label={`작성 중 ${drawing.drawing_surface === "top" ? "상단" : "측면"}`}
-                    />
-                  </figure>
-                ))}
-              </div>
-            </section>
-          )}
-          <div className="hmi-title" id="overview">
-            <div>
-              <small>OPERATIONS</small>
-              <h1>제작 현황</h1>
-            </div>
-            <div className="hmi-controls">
-              <button onClick={() => setRefresh((n) => n + 1)}>
-                다시 조회
-              </button>
-              <button aria-pressed={!selected} onClick={() => setSelected("")}>
-                최신 주문 따라가기
-              </button>
-            </div>
+      <main className="dashboard-app">
+        <header className="topbar">
+          <div className="brand">
+            <span className="logo-symbol" aria-hidden="true">
+              c.
+            </span>
+            <h1>
+              케이크 드로잉<span>대시보드</span>
+            </h1>
           </div>
-          {/* 조회 오류가 있을 때만 경고 띠를 표시한다. 정상일 때는 안내 문구 없이 비워 둔다. */}
-          {error && (
-            <div className="hmi-banner warning" role="status">
-              {`${error} ${stale ? "이전 조회 값을 표시 중 · 최신 상태가 아닙니다." : ""}`}
-            </div>
-          )}
-          <section className="hmi-stats" aria-label="상태 요약">
-            <article>
-              <small>주문 API</small>
-              <strong>{health ? "응답 있음" : "미확인"}</strong>
-              <span>마지막 조회 {updated || "—"}</span>
-            </article>
-            <article>
-              <small>저장 주문</small>
-              <strong>{page.total}건</strong>
-              <span>최신 100건 표시</span>
-            </article>
-            <article>
-              <small>선택 공정</small>
-              <strong>{detail ? phaseLabel(detail.phase) : "—"}</strong>
-              <span>{detail ? labels[detail.status] : "주문 미선택"}</span>
-            </article>
-          </section>
-          <section className="hmi-card hmi-runtime" aria-label="TM 연결 관측">
-            <h2>TM 연결 관측</h2>
-            <p>
-              {runtime?.bridge_fresh && health
-                ? runtime.task_server_ready
-                  ? "TM 액션 서버 확인"
-                  : "브릿지 응답 있음 · TM 서버 미확인"
-                : "브릿지 갱신 없음 · 연결 상태 미확인"}
-            </p>
-            <p>
-              최근 수신 {runtime?.updated_at || "없음"} ·{" "}
-              {runtime?.active_order_id || "활성 주문 없음 / 미제공"}
-            </p>
-            <p>
-              {runtime?.task_feedback_fresh && health
-                ? "TM 작업 피드백 수신 중"
-                : runtime?.active_order_id
-                  ? "TM 작업 피드백 갱신 대기 / 지연"
-                  : "작업 피드백 대기"}
-            </p>
-          </section>
-          {/* 선택 주문 피드백: TM 연결 관측 바로 아래에 한 줄 요약 형태로 작게 둔다. */}
-          <section
-            className="hmi-card hmi-feedback"
-            aria-label="선택 주문 피드백"
-          >
-            <div className="hmi-feedback-head">
-              <h2>선택 주문 피드백</h2>
-              <b>{detail?.order_id || "—"}</b>
-              <span>{detail?.message || "공정 메시지가 없습니다."}</span>
-            </div>
-            <div className="hmi-feedback-progress">
-              <label htmlFor="hmi-feedback-progress">
-                TM 공정 진행률 {detail?.progress_pct.toFixed(1) ?? "—"}%
-              </label>
-              <progress
-                id="hmi-feedback-progress"
-                max="100"
-                value={detail?.progress_pct || 0}
-              />
-            </div>
-            <dl>
-              <dt>상태 갱신</dt>
-              <dd>{monitor?.updated_at || "미제공"}</dd>
-              <dt>오류 코드</dt>
-              <dd>{monitor?.error_code || "기록 없음"}</dd>
-              <dt>현재 명령</dt>
-              <dd>{monitor?.current_command || "미수신 / 작업 종료"}</dd>
-              <dt>TM 피드백</dt>
-              <dd>
-                {isOrderFeedbackFresh(runtime, detail?.order_id) && health
-                  ? "수신 중"
-                  : detail &&
-                      ["completed", "failed", "rejected", "resolved"].includes(
-                        detail.status,
-                      )
-                    ? "종료된 주문"
-                    : "대기 / 미확인"}
-              </dd>
-            </dl>
-          </section>
-          <div className="hmi-panels">
-            <section className="hmi-card">
-              <h2>주문·공정 상태 {stale && "· 이전 조회 값"}</h2>
-              {page.items.length === 0 ? (
-                <p>주문 데이터가 없습니다.</p>
-              ) : (
-                <div className="hmi-orders">
-                  {page.items.map((order) => (
-                    <button
-                      key={order.order_id}
-                      aria-pressed={detail?.order_id === order.order_id}
-                      onClick={() => {
-                        setSelected(order.order_id);
-                        setDetail(null);
-                        setMonitor(null);
-                        setSurface(order.drawing_surface);
-                      }}
-                    >
-                      <b>{order.order_id}</b>
-                      <span>
-                        {order.drawing_surface === "top" ? "상단" : "측면"} ·{" "}
-                        {labels[order.status]}
-                      </span>
-                      <small>
-                        {phaseLabel(order.phase)} ·{" "}
-                        {order.progress_pct.toFixed(1)}%
-                      </small>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-            {/* 고객 원본 그림: 주문 목록 옆에서 선택 주문의 그림을 바로 확인한다.
-                상단/측면은 해당 면의 2D 원본, 3D는 두 면을 한 케이크에 입혀 보여준다. */}
-            <section className="hmi-card hmi-original" id="drawing">
-              <div className="hmi-original-head">
-                <h2>고객 원본 그림</h2>
-                <div className="hmi-controls">
-                  <button
-                    aria-pressed={!view3d && surface === "top"}
-                    onClick={() => {
-                      setSurface("top");
-                      setView3d(false);
-                    }}
-                  >
-                    상단
-                  </button>
-                  <button
-                    aria-pressed={!view3d && surface === "side"}
-                    onClick={() => {
-                      setSurface("side");
-                      setView3d(false);
-                    }}
-                  >
-                    측면
-                  </button>
-                  <button aria-pressed={view3d} onClick={() => setView3d(true)}>
-                    3D
-                  </button>
-                </div>
-              </div>
-              {view3d ? (
-                detail ? (
-                  <HmiCake3D drawing={detail.drawing} />
-                ) : (
-                  <div className="hmi-placeholder">주문을 선택하세요</div>
-                )
-              ) : drawing ? (
-                <Drawing drawing={drawing} />
-              ) : (
-                <div className="hmi-placeholder">
-                  {detail
-                    ? "이 주문에는 이 면의 그림이 없습니다"
-                    : "주문을 선택하세요"}
-                </div>
-              )}
-              <p className="hmi-muted">
-                {view3d
-                  ? "드래그해서 돌려 볼 수 있습니다. 원본 그림이며 실제 필기 결과가 아닙니다."
-                  : `${surface === "top" ? "상단" : "측면"} 원본 · 고객이 제출한 좌표 그대로`}
-              </p>
-            </section>
+          <div className="topbar-status">
+            <time className="mono">{updated || "연결 확인 중"}</time>
           </div>
-          <WorkcellLogs localLogs={logs} />
-          <footer>
-            주문·공정 조회는 읽기 전용입니다. 재개하기는 중단 단계부터 같은
-            주문을 이어가며, 초기 자세 세팅은 현장 확인 후 주문을 종료합니다.
-            물리적 비상정지는 장비의 E-stop을 사용하세요.
-          </footer>
-        </main>
-      </div>
-      {guide && (
-        <div className="hmi-modal" onClick={() => setGuide(false)}>
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="stop-title"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setGuide(false);
-            }}
-          >
-            <h2 id="stop-title">정지 안내</h2>
-            <p>
-              위험 시 장비의 물리 E-stop을 조작하고 현장 안전 절차를 따르세요.
-            </p>
-            <p>
-              소프트웨어 정지는 로봇의 현재 이동을 Quick stop으로 멈추고, 이후
-              이동·그리퍼 명령과 새 주문을 차단합니다. 진행 중 주문은 실패로
-              끝나며 이어서 실행되지 않습니다.
-            </p>
-            <p>
-              정지 해제 기능은 없습니다. 펜던트로 들고 있는 오프너·마커와
-              케이크를 정리한 뒤 실행기를 재시작해야 다시 주문을 받습니다.
-            </p>
-            <p>
-              소프트웨어 정지는 인증된 안전 기능이 아니며 물리 E-stop을 대체하지
-              않습니다. 브릿지가 연결되지 않았거나 통신이 끊기면 전달되지
-              않습니다.
-            </p>
+        </header>
+        <div className="overview-row">
+          <section className="summary-grid" aria-label="상태 요약">
+            <article className="summary-card">
+              <div>
+                <span className="label">주문 API</span>
+                <strong className="teal">
+                  {health ? "응답 있음" : "미확인"}
+                </strong>
+                <p>마지막 조회 {updated.split(" ")[1] || "—"}</p>
+              </div>
+            </article>
+            <article className="summary-card">
+              <div>
+                <span className="label">오늘 주문</span>
+                <strong className="mono">
+                  {dashboardToday(page)}
+                  <span className="unit">건</span>
+                </strong>
+                <p>누적 {page.total}건</p>
+              </div>
+            </article>
+            <article className="summary-card">
+              <div>
+                <span className="label">현재 공정</span>
+                <strong className="phase-summary">{currentPhase}</strong>
+                <p>{current?.order_id || "접수된 주문 없음"}</p>
+              </div>
+            </article>
+          </section>
+          <div className="stop-zone">
+            <WorkcellRecoveryPanel
+              stopped={stopped}
+              onError={setRecoveryError}
+            />
             <button
               type="button"
-              className="hmi-stop"
-              onClick={() => {
-                void requestStop();
-                setGuide(false);
-              }}
+              className={`stop-button${stopped ? " is-stopped" : ""}`}
+              onClick={() => void requestStop()}
+              title="소프트웨어 정지 · 물리 E-stop 신호와 별개"
             >
-              소프트웨어 정지
+              <span className="stop-square" />
+              {stopLabel}
             </button>
-            <button autoFocus onClick={() => setGuide(false)}>
-              닫기
-            </button>
+          </div>
+        </div>
+        <div className="hmi-notices" aria-live="polite">
+          {error && (
+            <p role="alert">
+              {error}
+              {updated && " · 이전 조회 값을 표시 중입니다."}
+            </p>
+          )}
+          {stopError && <p role="alert">{stopError}</p>}
+          {recoveryError && <p role="alert">{recoveryError}</p>}
+          {stopped && (
+            <p role="status">
+              {stopState.applied ? "로봇 정지 적용됨" : "로봇 적용 미확정"} ·{" "}
+              {stopState.message} · 현장 정리 후 실행기를 재시작하세요.
+            </p>
+          )}
+        </div>
+        <div className="workspace">
+          <section
+            className="card history-card"
+            aria-labelledby="hmi-history-title"
+          >
+            <div className="card-head">
+              <h2 id="hmi-history-title">주문 기록</h2>
+              <span className="muted">최근 100건</span>
+            </div>
+            <div className="history-caption">
+              <span>주문 ID · 접수 일시</span>
+              <span>상태</span>
+            </div>
+            <div
+              className="order-list hmi-orders"
+              tabIndex={0}
+              aria-label="주문 기록"
+            >
+              {page.items.map((order) => (
+                <button
+                  type="button"
+                  className="order"
+                  key={order.order_id}
+                  aria-pressed={detail?.order_id === order.order_id}
+                  onClick={() => {
+                    setSelected(order.order_id);
+                    setDetail(null);
+                    setMonitor(null);
+                  }}
+                >
+                  <div>
+                    <b>{order.order_id}</b>
+                    <small className="mono">
+                      {dashboardTimestamp(order.created_at)}
+                    </small>
+                  </div>
+                  <span className={`status-tag ${order.status}`}>
+                    {orderLabels[order.status]}
+                  </span>
+                </button>
+              ))}
+              {!page.items.length && (
+                <p className="empty-state">주문 데이터가 없습니다.</p>
+              )}
+            </div>
+            {selected && (
+              <div className="history-footer">
+                <span>선택한 주문 기록 표시 중</span>
+                <button type="button" onClick={() => setSelected("")}>
+                  현재 주문 보기 ↗
+                </button>
+              </div>
+            )}
+          </section>
+          <section className="card process-card" aria-label="선택 주문 상세">
+            <div className="card-head">
+              <h2 className="mono">{detail?.order_id || "주문 미선택"}</h2>
+              {detail && (
+                <span className={`status-tag ${detail.status}`}>
+                  {orderLabels[detail.status]}
+                </span>
+              )}
+            </div>
+            <div className="process-summary">
+              <div className="ring">
+                <svg viewBox="0 0 100 100" aria-hidden="true">
+                  <circle className="track" cx="50" cy="50" r="40" />
+                  <circle
+                    className="value"
+                    cx="50"
+                    cy="50"
+                    r="40"
+                    style={{
+                      strokeDashoffset:
+                        251.33 * (1 - (detail?.progress_pct || 0) / 100),
+                    }}
+                  />
+                </svg>
+                <div className="ring-label">
+                  <strong className="mono">
+                    {detail ? Number(detail.progress_pct.toFixed(1)) : "—"}
+                    <span>%</span>
+                  </strong>
+                  <small>전체 공정 진행률</small>
+                </div>
+              </div>
+              <div className="process-meta">
+                <h3>{detailPhase(detail)}</h3>
+                <p>{detail?.message || "공정 메시지 대기"}</p>
+                <dl className="command">
+                  <dt>현재 명령</dt>
+                  <dd>{monitor?.current_command || "미수신 / 작업 종료"}</dd>
+                  <dt>오류 코드</dt>
+                  <dd>
+                    {monitor?.error_code || detail?.error_code || "기록 없음"}
+                  </dd>
+                  <dt>상태 갱신</dt>
+                  <dd className="mono">
+                    {monitor
+                      ? dashboardTimestamp(monitor.updated_at)
+                      : "미제공"}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+            <div className="steps" aria-label="선택 주문 공정 단계">
+              {["케이크 준비", "윗면", "옆면", "회수·출고"].map(
+                (label, index) => (
+                  <span
+                    className={`step${index < step ? " done" : index === step ? " current" : ""}`}
+                    key={label}
+                  >
+                    <i>{index < step ? "✓" : index + 1}</i>
+                    {label}
+                  </span>
+                ),
+              )}
+            </div>
+          </section>
+          <WorkcellLogs localLogs={logs} />
+          <section
+            className="card original-card"
+            aria-labelledby="hmi-original-title"
+          >
+            <div className="card-head">
+              <h2 id="hmi-original-title">고객 원본 그림</h2>
+            </div>
+            {detail ? (
+              <HmiCake3D drawing={detail.drawing} />
+            ) : (
+              <div className="cake3d empty-state">주문을 선택하세요</div>
+            )}
+            <div className="original-note">
+              <span className="mono">{detail?.order_id || "—"}</span>
+            </div>
+            <div className="original-faces">
+              {(["top", "side"] as const).map((surface) => (
+                <figure key={surface}>
+                  <figcaption>
+                    <b>{surface === "top" ? "윗면 원본" : "옆면 원본"}</b>
+                    <span>
+                      {(surface === "top" ? top : side)?.strokes.length || 0}획
+                    </span>
+                  </figcaption>
+                  <div className="face-canvas">
+                    <Drawing
+                      drawing={surface === "top" ? top : side}
+                      label={`${surface === "top" ? "윗면" : "옆면"} 고객 원본`}
+                    />
+                  </div>
+                </figure>
+              ))}
+            </div>
           </section>
         </div>
-      )}
+      </main>
     </div>
   );
 }

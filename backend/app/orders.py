@@ -128,6 +128,13 @@ def list_orders(
     with request.app.state.database.connection() as connection:
         connection.execute("BEGIN")
         total = connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        # 접수 시각은 Asia/Seoul ISO로 저장한다. 페이지 크기와 무관하게 오늘의
+        # 전체 건수를 같은 읽기 스냅샷에서 세어 최신 100건을 오늘 총계로 오인하지 않는다.
+        today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+        today_total = connection.execute(
+            "SELECT COUNT(*) FROM orders WHERE substr(created_at,1,10)=?",
+            (today,),
+        ).fetchone()[0]
         rows = connection.execute(
             "SELECT o.order_id,o.drawing_surface,o.created_at,e.state AS execution_state,e.phase,e.progress_pct,e.message,e.result_json FROM orders o "
             "JOIN order_execution e USING(order_id) ORDER BY o.id DESC LIMIT ? OFFSET ?",
@@ -137,6 +144,7 @@ def list_orders(
     return OrderPage(
         items=[summary_from_row(row) for row in rows],
         total=total,
+        today_total=today_total,
         limit=limit,
         offset=offset,
     )

@@ -30,6 +30,8 @@ export interface Order {
 export interface OrderPage {
   items: Order[];
   total: number;
+  /** 한국 날짜 기준 전체 오늘 주문 수. 확장 필드가 없는 이전 서버에서는 생략된다. */
+  today_total?: number;
 }
 export interface OrderDetail extends Order {
   drawing: DrawingPayload;
@@ -163,11 +165,21 @@ export function parsePage(value: unknown): OrderPage {
     !Array.isArray(page.items) ||
     page.items.length > 100 ||
     !Number.isInteger(page.total) ||
-    page.total < page.items.length
+    page.total < page.items.length ||
+    (page.today_total !== undefined &&
+      (!Number.isSafeInteger(page.today_total) ||
+        page.today_total < 0 ||
+        page.today_total > page.total))
   ) {
     throw new Error("주문 목록 응답 형식을 확인할 수 없습니다.");
   }
-  return { items: page.items.map(parseOrder), total: page.total };
+  return {
+    items: page.items.map(parseOrder),
+    total: page.total,
+    ...(page.today_total === undefined
+      ? {}
+      : { today_total: page.today_total }),
+  };
 }
 
 /** 기존 API 상태를 운영자에게 보여주는 명칭이다. 로봇 안전 판정과는 분리한다. */

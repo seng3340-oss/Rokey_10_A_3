@@ -1,12 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  formatLogTime,
-  koreanLogMessage,
-  mergeWorkcellLogs,
-  parseWorkcellLogs,
-  readJson,
-} from "../api/hmi";
+import { mergeWorkcellLogs, parseWorkcellLogs, readJson } from "../api/hmi";
 import type { OrderLog, StoredWorkcellLog } from "../api/hmi";
+import { dashboardTimestamp } from "../api/hmiDashboard";
 
 /** 제한 높이의 로그창에서 최신 이벤트를 갱신하고 아래 스크롤로 이전 기록을 조회한다. */
 export function WorkcellLogs({
@@ -77,7 +72,7 @@ export function WorkcellLogs({
           setError("로그를 불러오지 못했습니다. 자동으로 다시 확인합니다.");
       } finally {
         clearTimeout(timeout);
-        if (mounted.current) timer = setTimeout(poll, backlog ? 0 : 3000);
+        if (mounted.current) timer = setTimeout(poll, backlog ? 0 : 1000);
       }
     }
     void poll();
@@ -120,12 +115,20 @@ export function WorkcellLogs({
   }
 
   return (
-    <section className="hmi-card" id="logs">
-      <h2>공정·경고·오류 로그</h2>
-      <p>최신 기록부터 표시합니다. 아래로 스크롤하면 이전 기록을 불러옵니다.</p>
+    <section className="card logs-card" id="logs">
+      <div className="card-head">
+        <h2>공정 · 경고 · 오류 로그</h2>
+        <span className="live-label">
+          <i className="dot" />
+          전체 기록
+        </span>
+      </div>
+      <div className="log-caption">
+        모든 주문의 원문 메시지 · 아래로 스크롤해 이전 기록 보기
+      </div>
       <div
         ref={viewport}
-        className="hmi-log-scroll"
+        className="hmi-log-scroll log-list"
         tabIndex={0}
         aria-label="공정 로그, 아래로 스크롤해 이전 기록 보기"
         onScroll={(event) => {
@@ -136,29 +139,33 @@ export function WorkcellLogs({
       >
         {localLogs.map((log, index) => (
           <div
-            className={`hmi-log ${log.severity}`}
+            className={`hmi-log log ${log.severity}`}
             key={`local-${log.time}-${index}`}
           >
             <time>{log.time}</time>
-            <span>{log.message}</span>
+            <span className="message">{log.message}</span>
           </div>
         ))}
         {rows.map((log) => (
-          <div className={`hmi-log ${log.severity}`} key={log.id}>
-            <time>{formatLogTime(new Date(log.created_at))}</time>
-            <span>
-              <b>
-                {log.severity === "error"
-                  ? "오류"
-                  : log.severity === "warning"
-                    ? "경고"
-                    : "정상"}
-              </b>
-              {" · "}
-              {log.order_id}
-              {" · "}
-              {koreanLogMessage(log.message)}
-            </span>
+          <div className={`hmi-log log ${log.severity}`} key={log.id}>
+            <time dateTime={log.created_at}>
+              {dashboardTimestamp(log.created_at).split(" ")[0]}
+              <span>{dashboardTimestamp(log.created_at).split(" ")[1]}</span>
+            </time>
+            <div>
+              <div className="log-head">
+                <span className="level">
+                  {log.severity === "error"
+                    ? "오류"
+                    : log.severity === "warning"
+                      ? "경고"
+                      : "정상"}
+                </span>
+                <span className="log-order mono">{log.order_id}</span>
+              </div>
+              {/* 원문을 요약·치환하지 않아 단위·오류 코드·좌표·동작 이름도 확인할 수 있다. */}
+              <p className="message">{log.message}</p>
+            </div>
           </div>
         ))}
         {!rows.length && !error && <p>저장된 공정 로그가 없습니다.</p>}
@@ -166,6 +173,7 @@ export function WorkcellLogs({
         {hasOlder && (
           <button
             type="button"
+            className="log-older"
             disabled={loading}
             onClick={() => void loadOlder()}
           >
