@@ -9,6 +9,8 @@ import {
   parsePage,
   readJson,
   collectOrderChanges,
+  parseRobotStop,
+  sendRobotStop,
 } from "../src/api/hmi.ts";
 
 const order = {
@@ -191,4 +193,35 @@ test("최신 플레이트 공정과 미정 상태를 구분한다", () => {
   assert.equal(phaseLabel("PREPARING"), "플레이트 준비");
   assert.equal(phaseLabel("FINISHING"), "회수·출고");
   assert.equal(phaseLabel("CUSTOM_PHASE"), "CUSTOM_PHASE");
+});
+
+/** 정지 상태는 형식을 검사하고, 정지 요청만 POST한다(해제 API 없음). */
+test("robot stop contract validates state and posts to stop endpoints", async () => {
+  const state = {
+    seq: 1,
+    stopped: true,
+    requested_at: "2026-11-20T02:00:00+00:00",
+    applied: false,
+    applied_at: null,
+    message: "정지 요청 전달 대기",
+    bridge_listening: true,
+  };
+  assert.equal(parseRobotStop(state).stopped, true);
+  assert.throws(() => parseRobotStop({ ...state, stopped: "yes" }));
+  assert.throws(() => parseRobotStop({ ...state, seq: -1 }));
+
+  const original = globalThis.fetch;
+  const calls: { url: string; method?: string }[] = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), method: options?.method });
+    return new Response(JSON.stringify(state), { status: 200 });
+  };
+  try {
+    assert.equal((await sendRobotStop()).seq, 1);
+    assert.deepEqual(calls, [{ url: "/api/robot/stop", method: "POST" }]);
+    globalThis.fetch = async () => new Response("{}", { status: 503 });
+    await assert.rejects(sendRobotStop(), /503/);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

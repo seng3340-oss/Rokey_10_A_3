@@ -1,4 +1,7 @@
-"""TM 연결 메타데이터와 DP 계획의 표시 전용 계약. 로봇 제어 API는 제공하지 않는다."""
+"""TM 연결 메타데이터와 DP 계획의 표시 전용 계약.
+
+이 모듈은 로봇 제어 API를 제공하지 않는다. HMI 소프트웨어 정지는 robot_stop.py가 담당한다.
+"""
 
 from datetime import datetime, timezone
 import json
@@ -99,7 +102,7 @@ def heartbeat(report: RuntimeReport, request: Request):
 
 @router.get("/api/monitor")
 def read_runtime(request: Request):
-    """브라우저는 연결 관측값만 읽는다. 명령·정지 요청은 제공하지 않는다."""
+    """브라우저는 연결 관측값만 읽는다. 정지 요청은 /api/robot/stop(robot_stop.py)을 사용한다."""
     return runtime_snapshot(request.app.state.database)
 
 

@@ -291,3 +291,65 @@ export function phaseLabel(phase: string): string {
   };
   return labels[phase] ?? (phase || "공정 미수신");
 }
+
+/**
+ * HMI 소프트웨어 정지 상태(백엔드 /api/robot/stop 응답).
+ * 물리 E-stop 신호가 아니며, 브릿지가 로봇에 적용했는지를 applied로 구분한다.
+ * - seq: 정지 요청마다 1씩 증가하는 순번(해제 없음, 재시작 시 0)
+ * - applied: 현재 순번을 브릿지가 로봇 쪽(move_stop·래치)에 적용했는지
+ * - bridge_listening: 브릿지가 최근(약 8초 이내) 정지 요청을 수신 대기했는지
+ */
+export interface RobotStop {
+  seq: number;
+  stopped: boolean;
+  requested_at: string | null;
+  applied: boolean;
+  applied_at: string | null;
+  message: string;
+  bridge_listening: boolean;
+}
+
+/** 정지 상태 응답을 검사한다. 형식이 다르면 정지 여부를 추측하지 않고 오류로 처리한다. */
+export function parseRobotStop(value: unknown): RobotStop {
+  const row = value as RobotStop;
+  const optionalText = (v: unknown) => v === null || typeof v === "string";
+  if (
+    !row ||
+    typeof row !== "object" ||
+    !Number.isInteger(row.seq) ||
+    row.seq < 0 ||
+    typeof row.stopped !== "boolean" ||
+    typeof row.applied !== "boolean" ||
+    typeof row.bridge_listening !== "boolean" ||
+    typeof row.message !== "string" ||
+    !optionalText(row.requested_at) ||
+    !optionalText(row.applied_at)
+  ) {
+    throw new Error("정지 상태 응답 형식을 확인할 수 없습니다.");
+  }
+  return row;
+}
+
+/**
+ * HMI에서 유일하게 허용하는 쓰기 요청: 소프트웨어 정지.
+ * 정지 해제 API는 없으며, 재개는 현장 정리 후 실행기 재시작으로만 한다.
+ * 본문 없이 POST하며 응답으로 갱신된 정지 상태를 돌려받는다.
+ * 정지 요청은 즉시성이 중요하므로 3초 안에 응답이 없으면 실패로 알린다.
+ */
+export async function sendRobotStop(): Promise<RobotStop> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await fetch("/api/robot/stop", {
+      method: "POST",
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`정지 요청 실패 (HTTP ${response.status})`);
+    }
+    return parseRobotStop(await response.json());
+  } finally {
+    clearTimeout(timeout);
+  }
+}

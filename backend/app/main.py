@@ -17,6 +17,7 @@ from .bridge import router as bridge_router
 from .drawings import router as drawing_router
 from .orders import router as order_router
 from .monitoring import router as monitoring_router, runtime_snapshot
+from .robot_stop import RobotStopState, router as robot_stop_router
 
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data" / "orders.sqlite3"
@@ -92,11 +93,14 @@ def create_app(
     )
     app.state.database = database
     app.state.bridge_token = bridge_token or os.environ.get("CAKE_BRIDGE_TOKEN", "")
+    # HMI 소프트웨어 정지 상태. 프로세스 메모리에만 두며 재시작 시 해제 상태로 시작한다.
+    app.state.robot_stop = RobotStopState()
     app.add_middleware(BodyLimitMiddleware, max_bytes=max_body_bytes)
     app.include_router(drawing_router)
     app.include_router(order_router)
     app.include_router(bridge_router)
     app.include_router(monitoring_router)
+    app.include_router(robot_stop_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):

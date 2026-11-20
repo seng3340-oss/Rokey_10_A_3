@@ -11,6 +11,8 @@ import {
   readJson,
   collectOrderChanges,
   orderLabels as labels,
+  parseRobotStop,
+  sendRobotStop,
 } from "../api/hmi";
 import type {
   Monitor,
@@ -19,6 +21,7 @@ import type {
   OrderLog,
   TaskPlan,
   RuntimeMonitor,
+  RobotStop,
 } from "../api/hmi";
 import type { DrawingPayload } from "../api/drawing";
 import "../styles/hmi.css";
@@ -84,6 +87,9 @@ export function Hmi() {
   const [updated, setUpdated] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [guide, setGuide] = useState(false);
+  // 소프트웨어 정지 상태. 주문 조회(3초)와 별도로 1초마다 갱신해 정지 반영을 빨리 보여준다.
+  const [stopState, setStopState] = useState<RobotStop | null>(null);
+  const [stopError, setStopError] = useState("");
   const [logs, setLogs] = useState<(OrderLog & { time: string })[]>([]);
   // 수동 선택은 유지하되 새 주문으로 자동 전환할 때만 원본의 면과 데모를 초기화한다.
   const displayedOrder = useRef("");
@@ -231,6 +237,76 @@ export function Hmi() {
     };
   }, [selected, refresh]);
 
+  // 정지 상태는 1초마다 순차 조회한다. 이전 요청이 끝난 뒤 다음 조회를 예약한다.
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let pending: AbortController | null = null;
+    async function pollStop() {
+      const controller = new AbortController();
+      pending = controller;
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      try {
+        const next = parseRobotStop(
+          await readJson("/api/robot/stop", controller.signal),
+        );
+        if (active) {
+          setStopState(next);
+          setStopError("");
+        }
+      } catch (reason) {
+        // 조회 실패 시 마지막 상태를 정상으로 간주하지 않도록 오류를 함께 표시한다.
+        if (active && !controller.signal.aborted)
+          setStopError(
+            reason instanceof Error ? reason.message : "정지 상태 조회 실패",
+          );
+        if (active && controller.signal.aborted)
+          setStopError("정지 상태 조회 시간 초과");
+      } finally {
+        clearTimeout(timeout);
+        if (active) timer = setTimeout(pollStop, 1000);
+      }
+    }
+    void pollStop();
+    return () => {
+      active = false;
+      pending?.abort();
+      clearTimeout(timer);
+    };
+  }, []);
+
+  /** 정지 버튼: 확인 없이 즉시 전송한다. 여러 번 눌러도 매번 정지를 다시 보낸다. */
+  async function requestStop() {
+    try {
+      setStopState(await sendRobotStop());
+      setStopError("");
+    } catch (reason) {
+      setStopError(
+        `${reason instanceof Error ? reason.message : "정지 요청 실패"} · 물리 E-stop을 사용하세요.`,
+      );
+    }
+  }
+
+  // 헤더 문구: 정지 여부 → 로봇 적용 여부 → 브릿지 연결 순으로 가장 중요한 정보를 고른다.
+  const stopped = stopState?.stopped === true;
+  const stopTitle = stopped
+    ? stopState.applied
+      ? "소프트웨어 정지 중 · 로봇 정지 적용됨"
+      : stopState.bridge_listening
+        ? "소프트웨어 정지 중 · 로봇 적용 확인 대기"
+        : "소프트웨어 정지 요청됨 · 브릿지 미연결"
+    : "안전 상태: 확인 불가";
+  // 정지 해제 기능은 두지 않는다. 다시 운용하려면 현장 정리 후 실행기를 재시작한다.
+  const stopDetail =
+    stopError ||
+    (stopped
+      ? stopState.bridge_listening
+        ? `${stopState.message} · 재개: 현장 정리 후 실행기 재시작`
+        : "정지 요청이 로봇에 전달되지 않았습니다. 물리 E-stop을 사용하세요."
+      : stopState && !stopState.bridge_listening
+        ? "물리 E-stop 신호 미수신 · 브릿지 미연결: 소프트웨어 정지가 로봇에 전달되지 않습니다."
+        : "물리 E-stop 신호 미수신 · 소프트웨어 정지는 인증된 안전 기능이 아닙니다.");
+
   // 한 주문에 한 면만 존재한다. 없는 반대 면을 자동 생성하거나 다른 주문과 섞지 않는다.
   const drawing =
     detail?.drawing.drawing_surface === surface ? detail.drawing : null;
@@ -240,14 +316,29 @@ export function Hmi() {
   return (
     <div className="hmi-app">
       {/* 모든 화면에 안전 상태를 고정하며 HTTP 성공을 안전 확인으로 해석하지 않는다. */}
-      <header className="hmi-safety" aria-label="안전 상태">
+      {/* 정지 중에는 헤더 전체를 강조색으로 바꿔 어느 화면에서든 정지 상태를 알 수 있게 한다. */}
+      <header
+        className={stopped ? "hmi-safety stopped" : "hmi-safety"}
+        aria-label="안전 상태"
+        aria-live="assertive"
+      >
         <div>
-          <b>안전 상태: 확인 불가</b>
-          <span>물리 E-stop 신호 미수신 · TM 연결은 안전 확인이 아닙니다.</span>
+          <b>{stopTitle}</b>
+          <span>{stopDetail}</span>
         </div>
-        <button type="button" onClick={() => setGuide(true)}>
-          정지 안내
-        </button>
+        <div className="hmi-stop-actions">
+          {/* 정지 버튼은 상태 조회 실패·정지 중에도 항상 누를 수 있다. */}
+          <button type="button" className="hmi-stop" onClick={requestStop}>
+            소프트웨어 정지
+          </button>
+          <button
+            type="button"
+            className="hmi-guide"
+            onClick={() => setGuide(true)}
+          >
+            정지 안내
+          </button>
+        </div>
       </header>
       <div className="hmi-brand">
         <a href="/hmi">
@@ -536,8 +627,8 @@ export function Hmi() {
             ))}
           </section>
           <footer>
-            API → HMI 읽기 전용. 소프트웨어 정지 요청은 미연결입니다. 물리적
-            비상정지는 장비의 E-stop을 사용하세요.
+            주문·공정 정보는 읽기 전용입니다. 소프트웨어 정지만 로봇에 전달되며
+            물리적 비상정지는 장비의 E-stop을 사용하세요.
           </footer>
         </main>
       </div>
@@ -557,10 +648,29 @@ export function Hmi() {
               위험 시 장비의 물리 E-stop을 조작하고 현장 안전 절차를 따르세요.
             </p>
             <p>
-              이 버튼은 안내를 엽니다. 정지 명령을 보내지 않았습니다. 소프트웨어
-              정지 요청과 물리 E-stop은 별도 기능입니다.
+              소프트웨어 정지는 로봇의 현재 이동을 Quick stop으로 멈추고, 이후
+              이동·그리퍼 명령과 새 주문을 차단합니다. 진행 중 주문은 실패로
+              끝나며 이어서 실행되지 않습니다.
             </p>
-            <button disabled>소프트웨어 정지 요청 (미연결)</button>
+            <p>
+              정지 해제 기능은 없습니다. 펜던트로 들고 있는 오프너·마커와
+              케이크를 정리한 뒤 실행기를 재시작해야 다시 주문을 받습니다.
+            </p>
+            <p>
+              소프트웨어 정지는 인증된 안전 기능이 아니며 물리 E-stop을 대체하지
+              않습니다. 브릿지가 연결되지 않았거나 통신이 끊기면 전달되지
+              않습니다.
+            </p>
+            <button
+              type="button"
+              className="hmi-stop"
+              onClick={() => {
+                void requestStop();
+                setGuide(false);
+              }}
+            >
+              소프트웨어 정지
+            </button>
             <button autoFocus onClick={() => setGuide(false)}>
               닫기
             </button>
