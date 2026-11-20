@@ -198,8 +198,19 @@ class IntegratedPenCycle:
         if cancelled():
             raise RuntimeError("통합 펜 순환 취소 요청")
 
-    def pick_side(self, cancelled=lambda: False, *, reuse_rack_position=False, preserve_speed=False, extra_lift_mm=0.0):
-        """220mm 피벗으로 파지 후 Pen_Side_45를 선택하고 되감기 관절을 반환한다."""
+    def pick_side(
+        self,
+        cancelled=lambda: False,
+        *,
+        reuse_rack_position=False,
+        preserve_speed=False,
+        extra_lift_mm=0.0,
+    ):
+        """220mm 피벗으로 파지 후 Pen_Side_45를 선택하고 되감기 관절을 반환한다.
+
+        preserve_speed는 기존 호출과의 호환을 위해 받는다. 연속 주문 여부와
+        무관하게 현재 펜 이동 설정을 사용해 느린 고정값이 다시 적용되지 않게 한다.
+        """
         self.rack = self._rack()
         geometry = pick_geometry(self.rack)
         if not math.isfinite(extra_lift_mm) or not 0 <= extra_lift_mm <= 50:
@@ -239,8 +250,8 @@ class IntegratedPenCycle:
                 self.robot._logger.info("TOP 반납 위치 확인: 상공 이동 없이 제자리 45도 재파지")
             elif not self.robot.move_joint(
                 geometry.approach_joints,
-                speed_deg_s=30.0 if preserve_speed else self.parameter("free_joint_speed_deg_s"),
-                acc_deg_s2=60.0 if preserve_speed else self.parameter("free_joint_acc_deg_s2"),
+                speed_deg_s=self.parameter("free_joint_speed_deg_s"),
+                acc_deg_s2=self.parameter("free_joint_acc_deg_s2"),
             ):
                 raise RuntimeError("45도 펜 거치대 상공 이동 실패")
             self._check_cancel(cancelled)
@@ -254,8 +265,8 @@ class IntegratedPenCycle:
                     # 펜 전용 속도를 사용한다. 실제 잉크 경로 속도는 별도다.
                     speed_mm_s=self.parameter("pen_rack_speed_mm_s") if index == 0 else self.parameter("pen_lift_speed_mm_s"),
                     acc_mm_s2=self.parameter("pen_motion_acc_mm_s2"),
-                    angular_speed_deg_s=45.,
-                    angular_acc_deg_s2=90.,
+                    angular_speed_deg_s=self.parameter("pen_rotation_speed_deg_s"),
+                    angular_acc_deg_s2=self.parameter("pen_rotation_acc_deg_s2"),
                 ) or not self.robot.verify_pose(pose):
                     raise RuntimeError(f"45도 펜 파지 이동/도달 실패: {index}")
                 if index == 1:
@@ -291,4 +302,5 @@ class IntegratedPenCycle:
             rack=getattr(self, "rack", None) or self._rack(),
             open_gripper=lambda: self.robot.gripper_open(self.parameter("gripper_open_width")),
             reset_tcp=self.ensure_default,
+            parameter=self.parameter,
         )

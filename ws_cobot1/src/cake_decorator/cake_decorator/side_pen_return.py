@@ -19,6 +19,7 @@ def return_pen(
     rack=None,
     open_gripper=None,
     reset_tcp=None,
+    parameter=None,
 ):
     """이탈 → J6 되감기 → 기울여 반납한다.
 
@@ -28,6 +29,20 @@ def return_pen(
     """
     from dsr_msgs2.srv import GetCurrentPosj, GetCurrentPosx
     from onrobot_rg_msgs.srv import SetCommand
+
+    # 통합 실행은 현재 이동 설정을 받으며, 독립 시험도 같은 속도 기준을 쓴다.
+    # 회전 제한만 낮게 남으면 선속도를 높여도 반납이 느리므로 함께 적용한다.
+    defaults = {
+        "free_joint_speed_deg_s": 60.0,
+        "free_joint_acc_deg_s2": 120.0,
+        "pen_travel_speed_mm_s": 180.0,
+        "pen_lift_speed_mm_s": 150.0,
+        "pen_rack_speed_mm_s": 120.0,
+        "pen_motion_acc_mm_s2": 400.0,
+        "pen_rotation_speed_deg_s": 90.0,
+        "pen_rotation_acc_deg_s2": 180.0,
+    }
+    setting = parameter if parameter is not None else defaults.__getitem__
 
     def require(success, stage):
         """실패·취소 시 이후 이동과 그리퍼 열기를 수행하지 않는다."""
@@ -46,15 +61,23 @@ def return_pen(
     def movej(target, label):
         """절대 관절값으로 이동해 회전수가 남은 상태를 그대로 되감는다."""
         check_cancel()
-        require(robot.move_joint(target, speed_deg_s=45., acc_deg_s2=90.), label)
+        require(robot.move_joint(
+            target,
+            speed_deg_s=setting("free_joint_speed_deg_s"),
+            acc_deg_s2=setting("free_joint_acc_deg_s2"),
+        ), label)
         actual = joints()
         require(max(abs(a-b) for a,b in zip(target,actual)) < .5, label+" 도달")
 
-    def line(pose, label):
+    def line(pose, label, speed_name="pen_travel_speed_mm_s"):
+        """반납 하강·인출·공중 이동을 같은 파라미터 체계로 실행한다."""
         check_cancel()
         require(robot.move_line(
-            DsrPos(*pose), speed_mm_s=90., acc_mm_s2=300.,
-            angular_speed_deg_s=45., angular_acc_deg_s2=90.,
+            DsrPos(*pose),
+            speed_mm_s=setting(speed_name),
+            acc_mm_s2=setting("pen_motion_acc_mm_s2"),
+            angular_speed_deg_s=setting("pen_rotation_speed_deg_s"),
+            angular_acc_deg_s2=setting("pen_rotation_acc_deg_s2"),
         ), label)
         require(robot.verify_pose(pose),label+" 도달")
 
@@ -62,7 +85,7 @@ def return_pen(
     require(current is not None and current.success and bool(current.task_pos_info),"현재 펜촉 조회")
     raised = list(current.task_pos_info[0].data[:6])
     raised[2] += 100.
-    line(raised,"케이크 밖 상공으로 추가 이탈")
+    line(raised,"케이크 밖 상공으로 추가 이탈", "pen_lift_speed_mm_s")
 
     # DRL에서 사용한 높은 경유 관절 자세. 먼저 현재 회전수를 유지한 채 이동하고
     # 그 자세에서 J6만 집기 완료 시점의 값으로 되감는다.
@@ -113,7 +136,7 @@ def return_pen(
     above = list(drop)
     above[2] += clearance
     line(above,"펜을 수직으로 맞추는 기울임 자세 상공")
-    line(list(drop),"거치대 반납 위치로 하강")
+    line(list(drop),"거치대 반납 위치로 하강", "pen_rack_speed_mm_s")
     check_cancel()
     if open_gripper is None:
         response = robot._call("gripper", SetCommand.Request(command="o"))
@@ -126,5 +149,5 @@ def return_pen(
         reset_tcp()
         above = [*flange_position, *angles]
         above[2] += clearance
-    line(above,"반납 후 수직 인출")
+    line(above,"반납 후 수직 인출", "pen_lift_speed_mm_s")
     robot._logger.info("J6 되감기와 펜 반납 완료")

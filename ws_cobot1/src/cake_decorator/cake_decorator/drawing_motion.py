@@ -38,7 +38,7 @@ WORKSPACE_RADIUS_MAX = 900.0  # BASE에서 최대 도달 거리 (mm)
 # 기본 가감속 값
 DEFAULT_ACC_LINEAR = 100.0  # mm/s²
 # 윗면의 짧은 직선에서 감속·재가속에 걸리는 시간을 줄인다.
-# 접촉·이탈·공중 이동과 옆면에는 기본 가속도를 유지한다.
+# 접촉·이탈은 기본 가속도를 유지한다. 공중 이동은 별도 정책을 적용한다.
 TOP_DRAW_ACC_LINEAR = 300.0  # mm/s²
 DEFAULT_ACC_ANGULAR = 30.0  # °/s²
 DEFAULT_VEL_ANGULAR = 30.0  # °/s
@@ -47,10 +47,11 @@ DEFAULT_VEL_ANGULAR = 30.0  # °/s
 SIDE_DRAW_ACC_LINEAR = 300.0  # mm/s²
 SIDE_DRAW_VEL_ANGULAR = 60.0  # °/s
 SIDE_DRAW_ACC_ANGULAR = 120.0  # °/s²
-# 획 사이 공중 곡선은 선속도보다 펜 방향의 회전 제한에 먼저 걸릴 수 있다.
-# 그 구간만 회전을 빠르게 하고, 접촉·이탈과 첫 접근의 제한은 유지한다.
-SIDE_TRAVEL_VEL_ANGULAR = 60.0  # °/s
-SIDE_TRAVEL_ACC_ANGULAR = 120.0  # °/s²
+# 펜이 닿지 않은 이동은 선속도뿐 아니라 가속도·회전 제한도 함께 올린다.
+# PEN_DOWN/PEN_UP과 실제 잉크 경로에는 적용하지 않는다.
+TRAVEL_ACC_LINEAR = 300.0  # mm/s²
+TRAVEL_VEL_ANGULAR = 90.0  # °/s
+TRAVEL_ACC_ANGULAR = 180.0  # °/s²
 
 
 # ---------------------------------------------------------------------------
@@ -517,14 +518,11 @@ def plan_drawing_motion(
             acceleration = SIDE_DRAW_ACC_LINEAR
             angular_vel = SIDE_DRAW_VEL_ANGULAR
             angular_acc = SIDE_DRAW_ACC_ANGULAR
-        elif (
-            drawing_surface == "SIDE"
-            and phase == Phase.REPOSITIONING
-            and kind == 2
-        ):
-            # 두 획 사이의 비접촉 스플라인에만 적용한다. PEN_UP/DOWN은 제외한다.
-            angular_vel = SIDE_TRAVEL_VEL_ANGULAR
-            angular_acc = SIDE_TRAVEL_ACC_ANGULAR
+        elif phase == Phase.REPOSITIONING:
+            # 접근 상공·획 사이 이동만 가속한다. 접촉·이탈은 별도 단계라 제외된다.
+            acceleration = TRAVEL_ACC_LINEAR
+            angular_vel = TRAVEL_VEL_ANGULAR
+            angular_acc = TRAVEL_ACC_ANGULAR
 
         # 획 완료 카운트: pen_down → pen_up 전환 시
         if prev_pen and not pen:

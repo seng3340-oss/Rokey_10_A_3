@@ -464,7 +464,11 @@ def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
     cycle = IntegratedPenCycle(robot, rack.__getitem__)
     cycle.pick_side(preserve_speed=continuing)
     speeds = [call.kwargs['speed_mm_s'] for call in robot.move_line.call_args_list]
-    assert speeds == [80., 100., 100., 100.]
+    assert speeds == [120., 150., 150., 150.]
+    # 제자리 재파지에서도 느린 고정 회전값으로 돌아가지 않아야 한다.
+    for call in robot.move_line.call_args_list:
+        assert call.kwargs['angular_speed_deg_s'] == 90.0
+        assert call.kwargs['angular_acc_deg_s2'] == 180.0
 
 
 @pytest.mark.parametrize('has_more', [False, True])
@@ -478,9 +482,9 @@ def test_top_intermediate_return_keeps_speed_and_final_return_is_faster(monkeypa
     handle = draw_handle('TOP')
     handle.request.has_more_surfaces = has_more
     assert executor._do_returning_tool(handle, handle.request)
-    assert executor._robot.move_joint.call_args.kwargs['speed_deg_s'] == 45.
+    assert executor._robot.move_joint.call_args.kwargs['speed_deg_s'] == 60.
     assert [call.kwargs['speed_mm_s'] for call in executor._robot.move_line.call_args_list] == (
-        [80.] if has_more else [80., 100.]
+        [120.] if has_more else [120., 150.]
     )
 
 

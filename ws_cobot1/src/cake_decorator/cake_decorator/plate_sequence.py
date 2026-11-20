@@ -74,27 +74,30 @@ class PlateSequence:
         return DsrPos(*(a + b for a, b in zip(approach, delta)))
 
     def _plate_pick_opener(self) -> bool:
-        """opener 거치대로 이동해 opener를 파지한다.
+        """공통 pick()을 재사용해 케이크가 없는 오프너를 파지한다.
 
-        safe position 1을 거친 뒤 기존 pick()을 재사용한다. pick() 내부에서
-        접근 위치의 그리퍼 열기, 목표 위치의 그리퍼 닫기, 접근 위치 복귀까지
-        수행하므로 이 함수는 파지 성공 여부만 반환한다. 거치대를 벗어나는
-        클리어런스 이동은 호출부에서 상황에 맞게 추가한다.
+        접근은 자유 속도, 랙 진입과 파지 후 후퇴는 동일한 제한 속도를 쓴다.
+        그리퍼 명령과 닫힘·안정화 대기는 공통 pick()에 맡겨 보존한다.
+        거치대를 벗어나는 클리어런스 이동은 호출부에서 추가한다.
         """
         # safe position 1 == 시작후 첫번째 안전자세 무게측정 필요(기준무게)
         # TODO: 기준 무게 측정 기능은 주석만 유지(미구현).
         if not self._plate_joint('safe_position_1'):
             return False
-        # [변경 2026-11-19] 전용 plate_pick 대신 기존 pick()을 그대로 재사용한다.
-        # 기존 대기 시간과 오프너 전용 속도를 pick()의 인수로 전달한다.
-        self._logger.info('plate pick_opener: approach=120 slow=45 lift=45mm/s')
+        # 랙 진입은 최대 90mm/s로 제한하고, 더 낮은 자유 속도 설정도 존중한다.
+        speed = self._param('free_line_speed_mm_s')
+        rack_speed = min(90.0, speed)
+        self._logger.info(
+            f'plate pick_opener: approach={speed:g} slow={rack_speed:g} '
+            f'retract={rack_speed:g}mm/s'
+        )
         return self._robot.pick(
             target=self._plate_opener_target(),
             approach=DsrPos(*self._param('plate_pick_opener1')),
             grip_width=self._param('opener_grip_width_mm'),
             grip_force=self._param('opener_grip_force_n'),
-            speed_approach=120.0,
-            speed_slow=45.0,
+            speed_approach=speed,
+            speed_slow=rack_speed,
             open_width=self._param('opener_open_width_mm'),
             close_wait_sec=self._param('opener_close_wait_sec'),
             close_settle_sec=self._param('opener_close_settle_sec'),
@@ -108,14 +111,20 @@ class PlateSequence:
         opener를 해제하고 다시 접근 위치로 후퇴한다. 따라서 호출부는 별도의
         그리퍼 열기 명령을 보내지 않는다.
         """
-        self._logger.info('plate place_opener: approach=120 slow=45 retract=75mm/s')
+        # 오프너만 반환하는 구간이므로 접근·후퇴는 자유 속도, 랙 진입은 상한 적용.
+        speed = self._param('free_line_speed_mm_s')
+        rack_speed = min(90.0, speed)
+        self._logger.info(
+            f'plate place_opener: approach={speed:g} slow={rack_speed:g} '
+            f'retract={speed:g}mm/s'
+        )
         return self._robot.place(
             target=self._plate_opener_target(),
             approach=DsrPos(*self._param('plate_pick_opener1')),
             open_width=self._param('opener_open_width_mm'),
-            speed_approach=120.0,
-            speed_slow=45.0,
-            speed_retract=75.0,
+            speed_approach=speed,
+            speed_slow=rack_speed,
+            speed_retract=speed,
             open_wait_sec=self._param('opener_open_wait_sec'),
         )
 
@@ -152,7 +161,7 @@ class PlateSequence:
         """작업대 ps2부터 케이크를 회수·출고하고 오프너 반납 후 안전 자세로 간다."""
         # 스테이션에서 케이크를 들어 올린 뒤 출고하고 오프너를 반환한다.
         # 드로잉으로 그리퍼가 빈 상태이므로 케이크를 옮기기 전에 opener를
-        # 다시 파지한다. pick()가 그리퍼 열기/닫기를 모두 처리한다.
+        # 다시 파지한다. 공통 pick()이 닫힘과 안정화 대기를 처리한다.
         if not self._plate_pick_opener():
             return False
         # 재파지 후 opener 거치대에서 벗어나기 위한 클리어런스 이동.

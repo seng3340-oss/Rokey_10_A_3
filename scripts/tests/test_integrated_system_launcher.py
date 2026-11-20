@@ -78,7 +78,7 @@ def test_runtime_enables_surface_specific_executor_and_preserves_yaml(config_fil
     assert dp["side_pen_45"] is True
     assert dp["side_y_inset_mm"] == 1.0
     assert dp["side_drawing_speed"] == 40.0
-    assert dp["travel_speed"] == 120.0
+    assert dp["travel_speed"] == 180.0
     assert dp["side_diameter_allowance_mm"] == 9.25
     assert executor["integrated_side_cycle"] is True
     assert executor["side_pen_45"] is False

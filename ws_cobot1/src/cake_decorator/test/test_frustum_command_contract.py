@@ -109,7 +109,7 @@ def test_side_air_transfer_raises_rotation_speed_without_changing_contact(node, 
 
     node.set_parameters([
         Parameter("side_pen_45", value=True),
-        Parameter("travel_speed", value=120.0),
+        Parameter("travel_speed", value=180.0),
     ])
     strokes = [[(736, 384), (800, 384)], [(160, 384), (224, 384)]]
     if reverse:
@@ -124,12 +124,14 @@ def test_side_air_transfer_raises_rotation_speed_without_changing_contact(node, 
         if command.motion_type == MotionType.MOVE_SPLINE and not command.pen_down:
             air_transfers += 1
             # 각속도 제한 때문에 긴 공중 원호가 느려지지 않도록 API까지 전달한다.
-            assert list(request.vel) == pytest.approx([120.0, 60.0])
-            assert list(request.acc) == pytest.approx([100.0, 120.0])
+            assert list(request.vel) == pytest.approx([180.0, 90.0])
+            assert list(request.acc) == pytest.approx([300.0, 180.0])
         elif command.phase in (Phase.PEN_DOWN, Phase.PEN_UP):
             contacts += 1
             assert request.vel[1] == pytest.approx(30.0)
             assert request.acc[1] == pytest.approx(30.0)
+            if command.phase == Phase.PEN_UP:
+                assert request.vel[0] == pytest.approx(120.0)
     assert air_transfers > 0
     assert contacts == 4
 
@@ -141,6 +143,17 @@ def test_top_taught_orientation_is_separate_from_cake_yaw(node):
     assert contact[-1].pose.position.x == pytest.approx(0.4)
     assert contact[-1].pose.position.y == pytest.approx(0.051075)
     assert all(wp.pose.orientation.y == pytest.approx(1.0) for wp in response.waypoints_3d)
+
+
+def test_top_air_speed_does_not_raise_contact_or_lift_speed(node):
+    """상면 공중 이동을 높여도 PEN_DOWN·그리기·PEN_UP 속도는 보존한다."""
+    from rclpy.parameter import Parameter
+
+    node.set_parameters([Parameter("travel_speed", value=180.0)])
+    _, plan = convert(node, [[(512, 384), (700, 384)]], surface="TOP")
+    assert [command.vel for command in plan.commands] == pytest.approx(
+        [180.0, 15.0, 30.0, 120.0]
+    )
 
 
 def test_rotated_side_approach_stays_outside_sloped_cake(node):
@@ -340,7 +353,7 @@ def test_side_start_j6_branch_rejects_rotation_beyond_joint_range():
         choose_side_start_joints(commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse)
 
 
-def test_side_start_keeps_branch_selection_and_pr26_motion_speed():
+def test_side_start_keeps_branch_selection_with_faster_air_motion():
     """PR27의 J6 선택을 거친 목표도 PR26의30도/s·60도/s²로 이동해야 한다."""
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -356,4 +369,4 @@ def test_side_start_keeps_branch_selection_and_pr26_motion_speed():
     assert DoosanRobotClient.move_side_start(robot, commands)
     target = robot.move_joint.call_args.args[0]
     assert target[5] == pytest.approx(-348.)
-    assert robot.move_joint.call_args.kwargs == dict(speed_deg_s=30.0, acc_deg_s2=60.0)
+    assert robot.move_joint.call_args.kwargs == dict(speed_deg_s=60.0, acc_deg_s2=120.0)

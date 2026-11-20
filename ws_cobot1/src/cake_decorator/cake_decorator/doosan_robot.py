@@ -530,8 +530,8 @@ class DoosanRobotClient:
         except (RuntimeError, ValueError) as error:
             self._logger.error(f"옆면 J6 분기 선택 실패: {error}")
             return False
-        # PR26에서 설정한 공중 전환 속도를 사용하고 PR27의 J6 분기 선택은 유지한다.
-        return self.move_joint(target, speed_deg_s=30.0, acc_deg_s2=60.0) and self.verify_pose(
+        # J6 분기 선택과 도달 검증은 유지하고, 펜이 닿기 전 공중 전환만 빠르게 한다.
+        return self.move_joint(target, speed_deg_s=60.0, acc_deg_s2=120.0) and self.verify_pose(
             commands[2].pos.to_list()
         )
 
