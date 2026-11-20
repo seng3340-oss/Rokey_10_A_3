@@ -3,6 +3,8 @@ import type { DraftPreview } from "../api/draftPreview";
 import { useEffect, useRef, useState } from "react";
 import {
   phaseLabel,
+  formatLogTime,
+  koreanLogMessage,
   parseDetail,
   parseRuntime,
   isOrderFeedbackFresh,
@@ -172,7 +174,7 @@ export function Hmi() {
         const observed = collectOrderChanges(seenOrders.current, next.items);
         seenOrders.current = observed.signatures;
         if (observed.changes.length) {
-          const time = new Date().toLocaleTimeString("ko-KR");
+          const time = formatLogTime(new Date());
           setLogs((old) =>
             [
               ...observed.changes.map((change) => ({ ...change, time })),
@@ -194,8 +196,8 @@ export function Hmi() {
           setLogs((old) =>
             [
               {
-                time: new Date().toLocaleTimeString("ko-KR"),
-                message: `경고 · ${message}`,
+                time: formatLogTime(new Date()),
+                message: koreanLogMessage(message),
                 severity: "warning" as const,
               },
               ...old,
@@ -561,12 +563,13 @@ export function Hmi() {
               >
                 <time>{log.time}</time>
                 <span>
+                  {/* 각 로그의 정상·경고·오류 등급을 함께 표시한다. */}
                   <b>
                     {log.severity === "error"
                       ? "오류"
                       : log.severity === "warning"
                         ? "경고"
-                        : "상태"}
+                        : "정상"}
                   </b>{" "}
                   · {log.message}
                 </span>
