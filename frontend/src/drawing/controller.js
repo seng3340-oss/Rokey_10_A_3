@@ -1,7 +1,7 @@
 import { DRAFT_CHANNEL } from "../api/draftPreview.ts";
 import { cakeView } from "./cake3d.js";
 import { submitDrawing } from "../api/drawing";
-import { DRAWING_LAYOUT } from "./cakeDimensions";
+import { CAKE_DIMENSIONS, DRAWING_LAYOUT } from "./cakeDimensions";
 /**
  * React가 화면을 붙인 뒤 캔버스·미리보기·확인 창의 동작을 연결한다.
  * 그림은 면별 브라우저 메모리에 보관하며, 반환한 정리 함수는 화면 해제 시 호출한다.
@@ -9,6 +9,183 @@ import { DRAWING_LAYOUT } from "./cakeDimensions";
 export function mountDrawing() {
   // 접수 응답을 기다리는 동안 연속 클릭으로 같은 그림이 중복 제출되지 않게 한다.
   let submitting = false;
+  // 데모는 명시적인 주소에서만 사용하고 실제 주문 요청을 보내지 않는다.
+  const demoMode =
+    new URLSearchParams(globalThis.location?.search || "").get("demo") === "1";
+  let statusTimer = null;
+  let feedbackTimer = null;
+  let orderActive = false;
+  let disposed = false;
+  let lastActivity = performance.now();
+  // 마지막 조작 후 3초를 기다린 다음 공통 60초 카운트를 시작한다.
+  function remainingIdle() {
+    return Math.max(
+      0,
+      Math.min(60000, 63000 - (performance.now() - lastActivity)),
+    );
+  }
+  function recordActivity(event) {
+    if (event.type === "pointermove" && !event.buttons) return;
+    lastActivity = performance.now();
+  }
+
+  function showOrderStatus(orderId, demo) {
+    const panel = document.querySelector("#order-status");
+    if (typeof HTMLElement === "undefined" || !(panel instanceof HTMLElement))
+      return;
+    const dialog = modal;
+    orderActive = true;
+    panel.setAttribute("aria-hidden", "false");
+    dialog.classList.add("is-ordering");
+    if (idleInterval !== null) clearInterval(idleInterval);
+    idleInterval = null;
+    const message = document.querySelector("#order-message");
+    const title = document.querySelector("#order-title");
+    const percent = document.querySelector("#order-percent");
+    const progress = document.querySelector("#order-progress");
+    const pickup = document.querySelector("#pickup");
+    pickup.hidden = true;
+    pickup.onclick = resetOrder;
+    document.querySelector("#order-number").textContent = demo
+      ? ""
+      : `주문번호 ${orderId}`;
+    // TM의 DrawingPath 순번을 접수한 원본의 면 순서와 대응시킨다.
+    const orderedFaces = [
+      reviewedPayload,
+      ...(reviewedPayload.additional_paths || []),
+    ]
+      .filter((path) => path.strokes.length > 0)
+      .map((path) => path.drawing_surface);
+
+    /** 고객 문구는 서버의 공정 단계와 경로 순번을 기준으로 표시한다. */
+    function stageMessage(order) {
+      if (order.status !== "running") return "주문한 그림을 준비하고 있어요";
+      if (order.phase === "PREPARING")
+        return "케이크를 작업대에 준비하고 있어요";
+      if (order.phase === "FINISHING") return "완성된 케이크를 옮기고 있어요";
+      if (order.phase === "DRAWING") {
+        const match = /DrawingPath\[(\d+)\/(\d+)\]/.exec(order.message || "");
+        const index = match ? Number(match[1]) - 1 : 0;
+        // 순번이 없는 복수 면 주문에서는 현재 면을 추정하지 않는다.
+        const face =
+          match || orderedFaces.length === 1 ? orderedFaces[index] : null;
+        if (face === "top") return "윗면에 그림을 그리고 있어요";
+        if (face === "side") return "옆면에 그림을 그리고 있어요";
+        return "케이크에 그림을 그리고 있어요";
+      }
+      return "케이크를 준비하고 있어요";
+    }
+    // 화면 확인용 공정은 3초 안에 완료한다.
+    const demoStartedAt = performance.now();
+
+    // 실제 진행률은 주문 조회 API의 값만 사용한다. 예시는 별도로 표시한다.
+    async function updateStatus() {
+      try {
+        let order;
+        if (demo) {
+          const exampleProgress = Math.min(
+            100,
+            Math.round(((performance.now() - demoStartedAt) / 2800) * 100),
+          );
+          order = {
+            status: exampleProgress === 100 ? "completed" : "running",
+            progress_pct: exampleProgress,
+            phase:
+              exampleProgress < 15
+                ? "PREPARING"
+                : exampleProgress < 90
+                  ? "DRAWING"
+                  : "FINISHING",
+            message: `DrawingPath[${exampleProgress < 55 ? 1 : orderedFaces.length}/${orderedFaces.length}]`,
+          };
+        } else {
+          const response = await fetch(
+            `/api/orders/${encodeURIComponent(orderId)}`,
+            { cache: "no-store" },
+          );
+          if (!response.ok) throw new Error("조회 실패");
+          order = await response.json();
+        }
+        if (disposed || !dialog.open) return;
+        if (
+          !Number.isFinite(order.progress_pct) ||
+          order.progress_pct < 0 ||
+          order.progress_pct > 100
+        )
+          throw new Error("진행률 오류");
+        const terminalError = [
+          "failed",
+          "rejected",
+          "uncertain",
+          "resolved",
+        ].includes(order.status);
+        title.textContent =
+          order.status === "completed"
+            ? "케이크가 완성됐어요"
+            : terminalError
+              ? "운영자에게 문의해주세요"
+              : "케이크를 준비하고 있어요";
+        message.textContent = terminalError
+          ? "주문 상태를 확인하고 있어요."
+          : order.status === "completed"
+            ? "완성된 케이크를 확인해주세요."
+            : stageMessage(order);
+        percent.textContent = `전체 공정 ${Math.round(order.progress_pct)}%`;
+        progress.value = order.progress_pct;
+        if (order.status === "completed") {
+          // 버튼 클릭 또는 실제 경과 60초 중 먼저 오는 시점에 초기화한다.
+          pickup.hidden = false;
+          lastActivity = performance.now();
+          function updatePickup() {
+            if (disposed) return;
+            const remaining = remainingIdle();
+            document.querySelector("#pickup-seconds").textContent = String(
+              Math.ceil(remaining / 1000),
+            );
+            document
+              .querySelector("#pickup-ring")
+              .style.setProperty("--remaining", `${remaining / 600}%`);
+            if (remaining === 0) resetOrder();
+            else statusTimer = setTimeout(updatePickup, 100);
+          }
+          updatePickup();
+          return;
+        }
+        if (terminalError) return;
+      } catch {
+        if (disposed || !dialog.open) return;
+        message.textContent =
+          "진행 상태를 확인하고 있어요. 잠시만 기다려주세요.";
+        percent.textContent = "진행률 확인 중";
+        progress.removeAttribute("value");
+      }
+      statusTimer = setTimeout(updateStatus, demo ? 100 : 3000);
+    }
+    function resetOrder() {
+      if (disposed) return;
+      if (statusTimer !== null) clearTimeout(statusTimer);
+      pickup.hidden = true;
+      dialog.close();
+      dialog.classList.remove("is-ordering");
+      panel.setAttribute("aria-hidden", "true");
+      orderActive = false;
+      drawings.top.length = 0;
+      drawings.side.length = 0;
+      current = null;
+      reviewedPayload = null;
+      surface = "top";
+      document.querySelectorAll("[data-surface]").forEach((button) => {
+        const selected = button.dataset.surface === surface;
+        button.classList.toggle("selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      });
+      document.querySelector("#hint").textContent = "";
+      render();
+      updateTextures();
+      publishDraft();
+    }
+    updateStatus();
+  }
   // JSX의 고정 ID를 연결점으로 사용한다. 화면 구조와 이 선택자는 함께 유지한다.
   const canvas = document.querySelector("#draw");
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -89,7 +266,8 @@ export function mountDrawing() {
     // 옆면 좌우는 원통을 펼친 이음매라 실제 테두리가 없다. 여백을 두면 끝까지 그은 선도
     // 로봇에서는 이음매에 약 4mm 빈틈이 생기므로 좌우는 띠 경계까지 허용한다.
     return surface === "top"
-      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.drawableRadius - 3
+      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <=
+          top.drawableRadius - 3
       : p.x >= side.x &&
           p.x <= side.x + side.width &&
           p.y >= side.y + 5 &&
@@ -134,19 +312,30 @@ export function mountDrawing() {
       y: ((e.clientY - r.top) * 768) / r.height,
     };
   }
-  /** 저장된 점을 순서대로 연결한다. 입력 화면과 3D 텍스처에 같은 획 표현을 쓴다. */
+  /** 화면 확대율을 보정해 두 면의 선을 같은 표시 굵기로 그린다. */
   function paths(target, strokes, width = 5) {
+    // 옆면은 세로 확대가 적용되어 있으므로 가로·세로 배율을 각각 보정한다.
+    // 저장 좌표와 3D 텍스처는 기존 값을 사용한다.
+    const bounds = canvas.getBoundingClientRect();
+    const scaleX = target === ctx ? bounds.width / 1024 : 1;
+    const scaleY = target === ctx ? bounds.height / 768 : 1;
+    target.save();
+    target.scale(1 / scaleX, 1 / scaleY);
     target.strokeStyle = "#795041";
-    target.lineWidth = width;
+    target.lineWidth = target === ctx ? 4 : width;
     target.lineCap = "round";
     target.lineJoin = "round";
-    for (const s of strokes) {
+    for (const stroke of strokes) {
       target.beginPath();
-      s.forEach((p, i) =>
-        i ? target.lineTo(p.x, p.y) : target.moveTo(p.x, p.y),
-      );
+      stroke.forEach((point, index) => {
+        const x = point.x * scaleX;
+        const y = point.y * scaleY;
+        if (index) target.lineTo(x, y);
+        else target.moveTo(x, y);
+      });
       target.stroke();
     }
+    target.restore();
   }
   /** 면별 필기 영역을 잘라 텍스처 크기로 옮긴 뒤 두 3D 뷰에 변경을 알린다. */
   function updateTextures() {
@@ -162,7 +351,18 @@ export function mountDrawing() {
       const region = DRAWING_LAYOUT[name];
       t.scale(c.width / region.width, c.height / region.height);
       t.translate(-region.x, -region.y);
-      paths(t, drawings[name]);
+      // 픽셀당 실제 길이가 다른 두 면의 선을 같은 물리적 굵기로 입힌다.
+      const circumference =
+        (Math.PI *
+          (CAKE_DIMENSIONS.topDiameterMm + CAKE_DIMENSIONS.bottomDiameterMm)) /
+        2;
+      const sidePixelsPerMm = DRAWING_LAYOUT.side.width / circumference;
+      const width =
+        name === "top"
+          ? (5 * (DRAWING_LAYOUT.top.width / CAKE_DIMENSIONS.topDiameterMm)) /
+            sidePixelsPerMm
+          : 5;
+      paths(t, drawings[name], width);
       t.setTransform(1, 0, 0, 1, 0, 0);
     }
     live.update();
@@ -170,6 +370,7 @@ export function mountDrawing() {
   }
   /** 배경·점선·저장된 획과 편집 버튼을 현재 면에 맞춰 다시 동기화한다. */
   function render() {
+    canvas.dataset.surface = surface;
     ctx.fillStyle = "#fdfcf9";
     ctx.fillRect(0, 0, 1024, 768);
     ctx.beginPath();
@@ -182,7 +383,13 @@ export function mountDrawing() {
     if (surface === "top") {
       // 외곽 5mm는 회색, 그릴 수 있는 안쪽은 흰색으로 표시한다. 그림을 축소하지 않는다.
       ctx.beginPath();
-      ctx.arc(region.centerX, region.centerY, region.drawableRadius, 0, 2 * Math.PI);
+      ctx.arc(
+        region.centerX,
+        region.centerY,
+        region.drawableRadius,
+        0,
+        2 * Math.PI,
+      );
       ctx.fillStyle = "#fff";
       ctx.fill();
     }
@@ -195,10 +402,12 @@ export function mountDrawing() {
       // 케이크 전체 비율을 유지하면서 하단 금지 띠를 눈에 보이게 구분한다.
       const blockedHeight = region.y + region.height - region.drawableBottomY;
       ctx.fillStyle = "#e8e4df";
-      ctx.fillRect(region.x, region.drawableBottomY, region.width, blockedHeight);
-      ctx.fillStyle = "#746d65";
-      ctx.font = "13px sans-serif";
-      ctx.fillText("하단 1cm · 그릴 수 없는 영역", region.x + 14, region.drawableBottomY + blockedHeight / 2 + 4);
+      ctx.fillRect(
+        region.x,
+        region.drawableBottomY,
+        region.width,
+        blockedHeight,
+      );
       // fillRect는 경로를 바꾸지 않으므로 아래 clip은 원래 케이크 외곽을 쓴다.
     }
     // 점선 내부로 필기 표시를 제한하고, 이후 렌더링에는 클리핑을 남기지 않는다.
@@ -278,10 +487,6 @@ export function mountDrawing() {
         b.classList.toggle("selected", b === button);
         b.setAttribute("aria-pressed", String(b === button));
       });
-      document.querySelector("#surface-help").textContent =
-        surface === "top"
-          ? "점선 안쪽에 그려주세요. 케이크 윗면에 배치됩니다."
-          : "띠 안에 그린 그림이 옆면을 둘러 배치돼요. 오른쪽 3D에서 돌려보세요.";
       canvas.setAttribute(
         "aria-label",
         surface === "top" ? "윗면에 그림 그리기" : "옆면에 그림 그리기",
@@ -356,66 +561,54 @@ export function mountDrawing() {
     review.resize();
   };
   document.querySelector("#back").onclick = () => modal.close();
-  // 요청 내용은 확인 창에 공개하고, 접수 검증을 통과한 응답에만 완료 문구를 표시한다.
+  // 요청 중에는 버튼으로 중복 제출을 막고 실패한 경우에만 알림을 표시한다.
   document.querySelector("#confirm").onclick = async () => {
     if (submitting) return;
-    document.querySelector("#payload-panel").hidden = false;
-    document.querySelector("#payload").textContent = JSON.stringify(
-      reviewedPayload,
-      null,
-      2,
-    );
-    document.querySelector("#download").disabled =
-      !reviewedPayload?.strokes.length;
+    if (feedbackTimer !== null) clearTimeout(feedbackTimer);
+    document.querySelector("#payload-panel").hidden = true;
     const result = document.querySelector("#result");
     if (!reviewedPayload?.strokes.length) {
-      result.textContent =
-        "그림을 먼저 그려주세요.";
+      document.querySelector("#payload-panel").hidden = false;
+      result.textContent = "그림을 먼저 그려주세요.";
       return;
     }
     // 응답 대기 중에는 제출과 복귀를 잠시 막아 요청 대상이 바뀌지 않도록 한다.
     submitting = true;
     document.querySelector("#confirm").disabled = true;
     document.querySelector("#back").disabled = true;
-    result.textContent = "주문 접수 응답을 기다리는 중입니다.";
+    result.textContent = "";
     try {
-      const receipt = await submitDrawing(reviewedPayload);
-      result.textContent = `주문 ${receipt.order_id} 접수 완료 · 로봇 제작 완료를 뜻하지 않습니다.`;
+      const receipt = demoMode
+        ? { order_id: "화면 확인용" }
+        : await submitDrawing(reviewedPayload);
+      result.textContent = `주문 ${receipt.order_id} 접수 완료`;
       document.querySelector("#confirm").textContent = "접수 완료";
+      showOrderStatus(receipt.order_id, demoMode);
       // 실패 시 그림과 확인한 요청을 유지하고 재시도할 수 있도록 버튼만 복구한다.
     } catch (error) {
+      document.querySelector("#payload-panel").hidden = false;
       result.textContent =
         error instanceof Error ? error.message : "주문 접수에 실패했습니다.";
       document.querySelector("#confirm").disabled = false;
+      // 오류는 배치 위에 6초 표시한다. 재시도하면 이전 숨김 예약을 취소한다.
+      feedbackTimer = setTimeout(() => {
+        document.querySelector("#payload-panel").hidden = true;
+      }, 6000);
     } finally {
       submitting = false;
       document.querySelector("#back").disabled = false;
       resetIdle();
     }
   };
-  // 확인한 동일 데이터를 로컬 JSON으로 내보낸다. 다운로드용 임시 URL은 곧 해제한다.
-  document.querySelector("#download").onclick = () => {
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(reviewedPayload, null, 2)], {
-        type: "application/json",
-      }),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "drawing-" + reviewedPayload.drawing_surface + ".json";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
   render();
 
   // 전체 확인 화면의 무조작 시간만 계산한다. 복귀해도 입력 데이터는 지우지 않는다.
   const idleDuration = 60000;
-  let idleDeadline = 0;
   let idleInterval = null;
   /** 절대 마감 시각으로 남은 시간을 구해 탭 비활성화로 타이머가 늦어져도 보정한다. */
   function updateIdle() {
-    if (!modal.open) return;
-    const remaining = Math.max(0, idleDeadline - performance.now());
+    if (!modal.open || orderActive) return;
+    const remaining = remainingIdle();
     document.querySelector("#idle-seconds").textContent = String(
       Math.ceil(remaining / 1000),
     );
@@ -432,13 +625,13 @@ export function mountDrawing() {
   }
   /** 열린 확인 창의 사용자 활동에만 무조작 시간을 새로 부여한다. */
   function resetIdle() {
-    if (!modal.open) return;
-    idleDeadline = performance.now() + idleDuration;
+    if (!modal.open || orderActive) return;
+    lastActivity = performance.now();
     updateIdle();
   }
   // 사용자가 확인 화면을 연 시점부터 시작한다.
   document.querySelector("#review").addEventListener("click", () => {
-    if (!modal.open) return;
+    if (!modal.open || orderActive) return;
     if (idleInterval !== null) clearInterval(idleInterval);
     resetIdle();
     idleInterval = setInterval(updateIdle, 200);
@@ -453,7 +646,12 @@ export function mountDrawing() {
     },
     { passive: true },
   );
+  // 공정 중에는 Esc로 새 주문 화면을 열지 않도록 현재 상태 화면을 유지한다.
+  modal.addEventListener("cancel", (event) => {
+    if (orderActive) event.preventDefault();
+  });
   modal.addEventListener("close", () => {
+    lastActivity = performance.now();
     if (idleInterval !== null) clearInterval(idleInterval);
     idleInterval = null;
   });
@@ -463,8 +661,56 @@ export function mountDrawing() {
   };
   document.addEventListener("visibilitychange", onVisibility);
 
+  // 두 면 중 하나에 그림이 있으면 그리기 화면 오른쪽 위에 카운트를 표시한다.
+  const drawingCounter = document.querySelector("#drawing-idle");
+  function updateDrawingIdle() {
+    const visible = drawings.top.length > 0 || drawings.side.length > 0;
+    drawingCounter.classList.toggle("visible", visible);
+    drawingCounter.setAttribute("aria-hidden", String(!visible));
+    if (!visible || modal.open || submitting || orderActive || current) return;
+    const remaining = remainingIdle();
+    document.querySelector("#drawing-idle-seconds").textContent = String(
+      Math.ceil(remaining / 1000),
+    );
+    drawingCounter.style.setProperty("--remaining", `${remaining / 600}%`);
+    if (remaining === 0) {
+      drawings.top.length = 0;
+      drawings.side.length = 0;
+      reviewedPayload = null;
+      render();
+      flushTextures();
+      drawingCounter.classList.remove("visible");
+      drawingCounter.setAttribute("aria-hidden", "true");
+    }
+  }
+  const activityEvents = [
+    "pointerdown",
+    "pointermove",
+    "pointerup",
+    "click",
+    "keydown",
+    "wheel",
+    "scroll",
+  ];
+  for (const type of activityEvents)
+    document.addEventListener(type, recordActivity, {
+      passive: true,
+      capture: true,
+    });
+  // 브라우저의 실제 카운터가 있을 때만 화면 갱신 작업을 예약한다.
+  const drawingInterval =
+    typeof HTMLElement !== "undefined" && drawingCounter instanceof HTMLElement
+      ? setInterval(updateDrawingIdle, 100)
+      : null;
+
   // React 화면 해제 시 예약 작업과 전역 리스너, 두 WebGL 뷰의 자원을 정리한다.
   return () => {
+    disposed = true;
+    if (drawingInterval !== null) clearInterval(drawingInterval);
+    for (const type of activityEvents)
+      document.removeEventListener(type, recordActivity, { capture: true });
+    if (feedbackTimer !== null) clearTimeout(feedbackTimer);
+    if (statusTimer !== null) clearTimeout(statusTimer);
     if (textureTimer !== null) clearTimeout(textureTimer);
     if (idleInterval !== null) clearInterval(idleInterval);
     document.removeEventListener("visibilitychange", onVisibility);

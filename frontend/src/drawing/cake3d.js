@@ -102,7 +102,8 @@ export function cakeView(container, textures) {
     let theta = 0;
     let phi = 0.96;
     let drag = null;
-    const radius = 5.8;
+    // 고객 미리보기는 카드 안에서 크게 표시한다. 확인 창은 기존 시야를 사용한다.
+    const radius = container.id === "live3d" ? 6.0 : 5.8;
     let frame = null;
     /** 예약된 한 프레임을 그린다. 보이지 않는 컨테이너는 크기를 얻을 때까지 건너뛴다. */
     function draw() {
