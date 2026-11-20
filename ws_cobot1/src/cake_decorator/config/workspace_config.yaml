@@ -164,15 +164,15 @@ robot_executor_node:
 
     # cake_station_ps1 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 오프너의 위치와 기울기를 조정하여 받침판 안착 지점인 스테이션 상단으로 접근
-    plate_cake_station_ps1: [6.94, 26.30, 57.63, -7.22, 109.37, 138.20]
+    plate_cake_station_ps1: [13.48, 28.62, 57.58, -15.84, 110.95, 143.08]
 
     # cake_station_ps2 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 케이크 받침판을 스테이션에 넣기 위한 위치와 기울기, 높이 조정하여 지정 위치에 안착시키는 단계
-    plate_cake_station_ps2: [6.94, 26.03, 61.94, -7.47, 105.39, 139.67]
+    plate_cake_station_ps2: [10.49, 26.40, 61.25, -11.77, 106.52, 143.74]
 
     # cake_station_ps3 | joint, absolute | [2026-11-19 갱신: m0609_test_so1v2]
     # 케이크 받침판을 스테이션에 넣은 후 각도 조정으로 오프너에서 케이크 받침판을 분리하는 단계
-    plate_cake_station_ps3: [8.14, 23.81, 64.47, -5.02, 98.85, 145.37]
+    plate_cake_station_ps3: [4.00, 17.03, 73.00, -3.48, 94.57, 135.50]
 
     # cake_station_ps4 | joint, absolute | [2026-11-18 갱신: move cakeplate_update.txt]
     # 케이크 드로잉 작업 구역에서 로봇을 이탈시키는 동작
