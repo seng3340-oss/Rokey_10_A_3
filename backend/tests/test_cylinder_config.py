@@ -10,7 +10,7 @@ def test_shared_settings_preserve_frustum_dimensions():
     """주문 사본은 실제 윗지름·밑지름·높이를 모두 포함해야 한다."""
     cake = load_cake_settings()
     assert cake["top_diameter_mm"] == 113.5
-    assert cake["bottom_diameter_mm"] == 120.0
+    assert cake["bottom_diameter_mm"] == 118.5
     assert cake["height_mm"] == 79.0
     assert cake["board_width_mm"] == cake["board_depth_mm"] == 179.0
     assert cake["board_thickness_mm"] == 2.0

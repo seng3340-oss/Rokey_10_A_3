@@ -10,6 +10,7 @@ DO 서비스가 없는 가상환경에서만 기존 /onrobot/sendCommand로 대�
 from __future__ import annotations
 
 from typing import Optional
+from dataclasses import dataclass
 
 import threading
 import json
@@ -124,6 +125,19 @@ def validate_gripper_settings(
         raise ValueError(f"gripper_pulse_sec는 0보다 큰 유한값이어야 합니다: {pulse_sec!r}")
 
     return open_do, close_do, pulse
+
+
+@dataclass(frozen=True)
+class PreparedSideStart:
+    """이 주문의 옆면 전환 목표와 IK 관절 해. 관절·자세 각도 단위는 degree다.
+
+    펜촉 TCP를 선택한 뒤 준비하며, 공중 접근 중 목표나 팔꿈치 해가 바뀌면
+    사용할 수 없다. 다음 주문에서 재사용하지 않고 실행 함수에 직접 전달한다.
+    """
+
+    joints: tuple[float, ...]
+    target_pose: tuple[float, ...]  # BASE mm, ZYZ degree
+    solution_space: int
 
 
 class DoosanRobotClient:
@@ -495,8 +509,8 @@ class DoosanRobotClient:
         )
         request = MoveJointx.Request(
             pos=target.to_list(),
-            vel=10.0,
-            acc=20.0,
+            vel=30.0,
+            acc=60.0,
             sol=solution.sol_space,
             ref=DR_BASE,
             mode=DR_MV_MOD_ABS,
@@ -515,12 +529,86 @@ class DoosanRobotClient:
 
     def select_reachable_side_commands(self, commands, cancelled):
         """이동 전에 제어기의 IK/FK를 조회해 현재 관절 해에서 가능한 펜 자세를 찾는다."""
-        import numpy as np
-        from scipy.spatial.transform import Rotation
         from .side_pose_selection import select_side_roll
 
         self._side_validated_solution = None
-        joints = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        joints, solution, inverse = self._side_inverse()
+        self._logger.info("옆면 도달 가능 자세 검사 시작. 아직 이동하지 않습니다.")
+        selected = select_side_roll(commands, list(joints.pos), inverse, cancelled, self._logger.info)
+        after = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
+        if not after or not after.success or max(abs(a-b) for a,b in zip(joints.pos, after.pos)) > 0.1:
+            raise RuntimeError("도달 검사 중 로봇 자세가 바뀌었습니다. 다시 영점을 준비하세요.")
+        self._side_validated_solution = int(solution.sol_space)
+        return selected
+
+    def prepare_side_start(self, commands, cancelled=lambda: False) -> PreparedSideStart:
+        """펜 파지 완료 직후 J6 범위를 계산한다. 이동 명령은 보내지 않는다.
+
+        케이크 상공에 도착한 후 여러 IK/FK 응답을 기다리던 처리를 앞당긴다.
+        검사 표본과 J6 분기 선택은 유지하며, 실패하면 공중 접근 전에 중단한다.
+        """
+        from .side_pose_selection import choose_side_start_joints
+
+        joints, solution, inverse = self._side_inverse()
+        target, _ = choose_side_start_joints(
+            commands,
+            list(joints.pos),
+            inverse,
+            cancelled=cancelled,
+            report=self._logger.info,
+        )
+        return PreparedSideStart(
+            tuple(target),
+            tuple(commands[2].pos.to_list()),
+            int(solution.sol_space),
+        )
+
+    def move_side_start(self, commands, cancelled=lambda: False, *, prepared=None) -> bool:
+        """명령 #2에서 준비한 J6 목표로 이동하고 도달을 확인한다.
+
+        미리 준비했다면 목표와 현재 팔꿈치 해만 확인하며 전체 경로 IK를 반복하지
+        않는다. 기존 단독 호출은 prepared 생략 시 즉시 준비하는 방식으로 호환한다.
+        """
+        try:
+            if cancelled():
+                return False
+            if prepared is None:
+                prepared = self.prepare_side_start(commands, cancelled)
+            else:
+                if tuple(commands[2].pos.to_list()) != prepared.target_pose:
+                    raise ValueError("옆면 준비 후 전환 목표가 변경되었습니다.")
+                current = self._call("current_joints", GetCurrentPosj.Request())
+                if current is None or not current.success:
+                    raise RuntimeError("옆면 전환 전 현재 관절 조회 실패")
+                solution = self._call(
+                    "solution", GetSolutionSpace.Request(pos=list(current.pos)),
+                )
+                if (
+                    solution is None or not solution.success
+                    or solution.sol_space != prepared.solution_space
+                ):
+                    raise RuntimeError("옆면 준비 후 팔꿈치 해가 변경되었습니다.")
+        except (RuntimeError, ValueError) as error:
+            self._logger.error(f"옆면 J6 분기 선택 실패: {error}")
+            return False
+        if cancelled():
+            return False
+        # J6 분기 선택과 도달 검증은 유지하고, 펜이 닿기 전 공중 전환만 빠르게 한다.
+        return self.move_joint(list(prepared.joints), speed_deg_s=60.0, acc_deg_s2=120.0) and self.verify_pose(
+            commands[2].pos.to_list()
+        )
+
+    def _side_inverse(self):
+        """현재 TCP 기준 목표를 현재 팔꿈치 해(sol_space)의 관절각으로 푸는 함수를 만든다.
+
+        반환: (현재 관절 응답, solution space 응답, inverse(DsrPos) → 관절6개 | None).
+        드라이버가 FK를 플랜지 기준으로 주는 경우 TCP 목표를 플랜지 목표로 바꿔 푼다.
+        IK 결과는 FK 왕복으로 다시 확인한다. 로봇을 움직이지 않으며 90초 제한이 있다.
+        """
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+
+        joints =self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
         pose = self._call("current_pose", GetCurrentPosx.Request(ref=0), timeout=3)
         flange = self._call("flange", GetCurrentToolFlangePosx.Request(ref=0), timeout=3)
         if not (joints and joints.success and pose and pose.success and pose.task_pos_info and flange and flange.success):
@@ -570,13 +658,7 @@ class DoosanRobotClient:
                 return None
             return values
 
-        self._logger.info("옆면 도달 가능 자세 검사 시작. 아직 이동하지 않습니다.")
-        selected = select_side_roll(commands, list(joints.pos), inverse, cancelled, self._logger.info)
-        after = self._call("current_joints", GetCurrentPosj.Request(), timeout=3)
-        if not after or not after.success or max(abs(a-b) for a,b in zip(joints.pos, after.pos)) > 0.1:
-            raise RuntimeError("도달 검사 중 로봇 자세가 바뀌었습니다. 다시 영점을 준비하세요.")
-        self._side_validated_solution = int(solution.sol_space)
-        return selected
+        return joints, solution, inverse
 
 
     def execute_drawing_command(self, command) -> bool:

@@ -26,7 +26,7 @@ from geometry_msgs.msg import Point, Pose, Quaternion
 import rclpy
 from rclpy.node import Node
 
-from .frustum_path import DrawingFrustum, pixel_to_path_mm
+from .frustum_path import DrawingFrustum, overlap_side_seam, pixel_to_path_mm
 from .path_simplification import simplify_stroke_mm
 from .surface_path import (
     side_surface_leg,
@@ -53,6 +53,8 @@ class DrawingPathNode(Node):
         self.declare_parameter("drawing_speed", 30.0)  # mm/s, 테스트2 종이 검증 기준
         self.declare_parameter("side_drawing_speed", 60.0)  # 옆면 접촉 후 그리기 mm/s
         self.declare_parameter("travel_speed", 80.0)  # mm/s (펜 올린 상태)
+        # 접촉면에서 펜을 떼는 속도는 공중 이동과 분리해 기존 값을 유지한다.
+        self.declare_parameter("pen_up_speed", 120.0)  # mm/s (PEN_UP 전용)
         self.declare_parameter("approach_height", 10.0)  # mm (펜 접근 높이)
         self.declare_parameter("side_diameter_allowance_mm", 3.5)  # 옆면 경로 지름 보정(mm)
         self.declare_parameter("drawing_z_offset", 0.0)  # mm (표면 접촉 보정)
@@ -64,6 +66,9 @@ class DrawingPathNode(Node):
         self.declare_parameter("side_pen_vertical_deg", 17.0)
         # 양수이면 BASE +Y/-Y 가장자리를 각각 같은 거리만큼 안으로 줄인다.
         self.declare_parameter("side_y_inset_mm", 0.0)
+        # 웹 띠 좌우 끝이 이어진 옆면 링에서 이음매를 지나 더 그리는 길이(mm).
+        # 펜 접촉 시작·종료점의 잉크 부족으로 이음매가 비어 보이지 않게 한다. 0이면 끈다.
+        self.declare_parameter("side_seam_overlap_mm", 3.0)
         self.declare_parameter("integrated_side_cycle", False)
         self.declare_parameter("side_pen_45", False)  # 45도 실물 파지 웹 검증 모드
         self.declare_parameter("pen_tilt_deg", 0.0)  # 영점 자세가 없는 TOP 요청의 기본값
@@ -209,7 +214,9 @@ class DrawingPathNode(Node):
         waypoints: list[Waypoint3DMsg] = []
         pen_states: list[bool] = []
 
-        previous_side_end = None
+        # 1단계: 모든 획을 검증·mm 변환·단순화한다.
+        # 옆면 이음매 겹침은 다른 획의 끝점까지 봐야 하므로 명령 생성 전에 전체를 먼저 모은다.
+        selected_strokes = []
         total_input = total_selected = 0
         for stroke in request.strokes_2d:
             pts_px = [(pt.x, pt.y) for pt in stroke.points]
@@ -229,10 +236,9 @@ class DrawingPathNode(Node):
             ):
                 raise ValueError("원본 픽셀이 캔버스 범위를 벗어났습니다.")
             raw_mm = [converter(x, y, *args) for x, y in pts_px]
-            if surface == "TOP" and any(
-                math.hypot(x, y) > cake.r_top + 1e-4 for x, y in raw_mm
-            ):
-                raise ValueError("점이 윗면 원형 영역 밖입니다.")
+            if surface == "TOP":
+                from .drawing_geometry import validate_top_drawing_margin
+                validate_top_drawing_margin(raw_mm, cake.r_top)
             if surface == "SIDE":
                 from .drawing_geometry import validate_side_drawing_height
 
@@ -244,9 +250,23 @@ class DrawingPathNode(Node):
             )
             total_input += len(raw_mm)
             total_selected += len(selected.points)
+            selected_strokes.append(selected.points)
+
+        if surface == "SIDE":
+            # 웹 띠의 좌우 끝(호 0과 한 바퀴)이 이어진 링이면 이음매를 지나 조금 더 그린다.
+            # 경로 호 길이는 평균 반지름 기준이므로 한 바퀴는 2π × cake.radius(mm)다.
+            selected_strokes = overlap_side_seam(
+                selected_strokes,
+                2.0 * math.pi * cake.radius,
+                self._param("side_seam_overlap_mm"),
+            )
+
+        # 2단계: 단순화된 mm 획을 순서대로 로봇 명령으로 바꾼다.
+        previous_side_end = None
+        for points in selected_strokes:
             if surface == "TOP":
                 self._convert_top_mm(
-                    selected.points,
+                    points,
                     cake,
                     approach_h,
                     z_offset,
@@ -260,7 +280,7 @@ class DrawingPathNode(Node):
                 )
             else:
                 previous_side_end = self._convert_side_mm(
-                    selected.points,
+                    points,
                     previous_side_end,
                     cake,
                     approach_h,
@@ -319,13 +339,17 @@ class DrawingPathNode(Node):
         x, y, z = cake.top_to_abs(*points[0])
         waypoints.append(self._wp(x, y, z + clearance, quat, travel_speed, force))
         states.append(False)
+        lift_speed = min(
+            travel_speed,
+            self._param("pen_up_speed") * draw_speed / self._param("drawing_speed"),
+        )
         waypoints.append(self._wp(x, y, z + offset, quat, draw_speed * 0.5, force, pen_down=True))
         states.append(True)
         for point in points[1:]:
             x, y, z = cake.top_to_abs(*point)
             waypoints.append(self._wp(x, y, z + offset, quat, draw_speed, force, pen_down=True))
             states.append(True)
-        waypoints.append(self._wp(x, y, z + clearance, quat, travel_speed, force))
+        waypoints.append(self._wp(x, y, z + clearance, quat, lift_speed, force))
         states.append(False)
 
     def _side_leg(
@@ -507,7 +531,9 @@ class DrawingPathNode(Node):
                 )
         x, y, z = cake.side_abs_with_offset(*last, clearance)
         quat = pen_quat_side(last[0], last[1], cake, tilt_deg=tilt, reference_quat=reference_quat)
-        waypoints.append(self._wp(x, y, z, quat, travel_speed, force))
+        # 잉크가 끝난 직후의 이탈은 기존 속도다. 다음 획의 공중 이동만 가속한다.
+        lift_speed = min(travel_speed, self._param("pen_up_speed") * speed_ratio)
+        waypoints.append(self._wp(x, y, z, quat, lift_speed, force))
         states.append(False)
         return last
 

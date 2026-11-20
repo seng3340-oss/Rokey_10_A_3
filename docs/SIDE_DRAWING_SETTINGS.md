@@ -4,15 +4,15 @@
 
 | 항목 | 확정 값 | 설정 위치 |
 |---|---|---|
-| 케이크 윗면 중심 BASE XYZ | 396.8743225097656, -50.559329986572266, 222.0 mm | `config/real_robot.json` |
+| 케이크 윗면 중심 BASE XYZ | 396.7743225097656, -50.759329986572266, 222.0 mm | `config/real_robot.json` |
 | Y 양쪽 안쪽 보정 | 각각 1mm, 전체 Y 폭 2mm 감소 | `scripts/start_real_side_web_test.sh`의 `--side-y-inset-mm 1` |
-| 옆면 지름 유격 | 8.1mm, 반지름 방향으로 4.05mm 추가 | `ws_cobot1/src/cake_decorator/config/workspace_config.yaml`의 `side_diameter_allowance_mm` |
+| 옆면 지름 유격 | 8.0mm, 반지름 방향으로 4.0mm 추가 | `ws_cobot1/src/cake_decorator/config/workspace_config.yaml`의 `side_diameter_allowance_mm` |
 | 옆면 TCP 이름 | `Pen_Side_45` | 펜던트 등록값 및 `bent_pen.py` |
 | 펜촉 TCP XYZ / ABC | 1.095, -46.474, 271.695 mm / 0, 0, 0도 | 펜던트 등록값 및 `bent_pen.py`의 검증 기준 |
 | 펜 파지 회전 중심 | 0, 0, 220mm | `scripts/real_pen_pick_45.py`의 `GRIP_CENTER_MM` |
 
 Y 보정은 중심에 대해 sin(theta)로 부드럽게 적용한다. X/Z는 유지하고 Y 양끝만 각각 1mm 줄인다.
-지름 유격과 함께 적용되므로 같은 높이에서 X 양끝은 원래 표면보다 4.05mm, Y 양끝은 3.05mm 바깥이다.
+지름 유격과 함께 적용되므로 같은 높이에서 X 양끝은 원래 표면보다 4mm, Y 양끝은 3mm 바깥이다.
 펜 파지 중심 TCP와 펜촉 TCP는 용도가 다르다. 220mm는 회전할 때 지문 중앙을 고정하기 위한 값이고 펜촉 길이가 아니다.
 TCP의 XYZ는 로봇 BASE 기준 케이크 좌표가 아니라 플랜지 기준 펜촉 오프셋이다.
 ABC가 0이어도 펜은 물리적으로 45도로 잡혀 있다. TCP 축을 플랜지 축과 같게 정의한 것이다.
@@ -42,6 +42,7 @@ ABC가 0이어도 펜은 물리적으로 45도로 잡혀 있다. TCP 축을 플�
 ### workspace_config.yaml — ROS 경로·동작 설정
 
 - `side_diameter_allowance_mm`: 실제 케이크 크기는 그대로 두고 옆면 펜촉 경로만 바깥으로 넓힌다. 지름 기준이므로 반으로 나눠 반지름에 적용한다.
+- `side_seam_overlap_mm`: 웹 옆면 띠의 왼쪽 끝과 오른쪽 끝이 비슷한 높이(3mm 이내)로 이어진 링일 때 이음매를 지나 더 그리는 길이(mm). 현재 3mm, 0이면 끈다. 한쪽 끝만 이음매에 닿은 획은 연장하지 않는다. 웹은 띠 좌우 경계에서 약 12px(≈5mm) 안의 시작·끝점을 경계에 맞춰 보낸다.
 - `drawing_z_offset`: 접촉 경로 보정(mm). 윗면은 높이, 옆면은 표면 바깥 법선 방향 보정이다. 현재 0.
 - DP의 `approach_height`: 접근·이탈 거리 10mm. 케이크 중심 높이가 아니다.
 - RE의 같은 이름 `approach_height`: 별도 실행기 설정 0.05m(50mm). DP의 10mm와 단위·역할이 다르므로 함께 바꾸지 않는다.

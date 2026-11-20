@@ -74,17 +74,57 @@ export function mountDrawing() {
     }
     updateTextures();
   }
+  /**
+   * 옆면 띠의 좌우 끝을 이음매로 붙이는 거리(px).
+   * 옆면 띠 896px이 평균 둘레 약 366.8mm에 대응하므로 12px은 약 5mm다.
+   * 손으로 끝까지 그어도 경계 몇 px 앞에서 멈추는 경우를 흡수하되,
+   * 이음매에서 일부러 떨어뜨린 획까지 붙이지 않도록 작은 값으로 둔다.
+   */
+  const SIDE_SEAM_SNAP_PX = 12;
   /** 고정 입력 좌표계에서 실제 필기 허용 영역을 판정한다. 점선보다 약간 안쪽이다. */
   function inside(p) {
     const top = DRAWING_LAYOUT.top;
     const side = DRAWING_LAYOUT.side;
-    // 점선에서 5px 안쪽으로 제한하여 테두리에 필기가 걸치지 않게 한다.
+    // 윗면과 옆면 위아래는 점선에서 5px 안쪽으로 제한하여 테두리에 필기가 걸치지 않게 한다.
+    // 옆면 좌우는 원통을 펼친 이음매라 실제 테두리가 없다. 여백을 두면 끝까지 그은 선도
+    // 로봇에서는 이음매에 약 4mm 빈틈이 생기므로 좌우는 띠 경계까지 허용한다.
     return surface === "top"
-      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.radius - 5
-      : p.x >= side.x + 5 &&
-          p.x <= side.x + side.width - 5 &&
+      ? Math.hypot(p.x - top.centerX, p.y - top.centerY) <= top.drawableRadius - 3
+      : p.x >= side.x &&
+          p.x <= side.x + side.width &&
           p.y >= side.y + 5 &&
           p.y <= side.drawableBottomY - 5;
+  }
+  /**
+   * 옆면 획의 시작·끝점이 좌우 경계 근처이면 x를 경계값으로 맞춘 새 점을 반환한다.
+   * 시작점(pointerdown)과 끝점(finish)에만 적용하며, 획 중간 점은 사용자가 그린 위치를 유지한다.
+   * 띠 밖으로 조금 벗어난 점도 SIDE_SEAM_SNAP_PX 이내면 경계로 끌어와 입력으로 인정한다.
+   */
+  function snapToSeam(p) {
+    if (surface !== "side") return p;
+    const side = DRAWING_LAYOUT.side;
+    const left = side.x;
+    const right = side.x + side.width;
+    if (Math.abs(p.x - left) <= SIDE_SEAM_SNAP_PX) return { x: left, y: p.y };
+    if (Math.abs(p.x - right) <= SIDE_SEAM_SNAP_PX) return { x: right, y: p.y };
+    return p;
+  }
+  /**
+   * 옆면 획이 좌우 경계를 넘어 나갈 때, 직전 점과 바깥 점을 잇는 선분이 경계와 만나는 점을 구한다.
+   * 이 점을 획 끝에 추가해야 빠르게 그은 선도 이음매까지 닿는다.
+   * 위아래 경계로 나가거나 교점이 허용 높이 밖이면 null을 반환해 기존처럼 획만 끝낸다.
+   */
+  function seamExitPoint(previous, outside) {
+    if (surface !== "side") return null;
+    const side = DRAWING_LAYOUT.side;
+    let edgeX = null;
+    if (outside.x < side.x) edgeX = side.x;
+    else if (outside.x > side.x + side.width) edgeX = side.x + side.width;
+    if (edgeX === null || outside.x === previous.x) return null;
+    // 직선 보간 비율. 직전 점은 영역 안이므로 0~1 사이 값이다.
+    const ratio = (edgeX - previous.x) / (outside.x - previous.x);
+    const exit = { x: edgeX, y: previous.y + (outside.y - previous.y) * ratio };
+    return inside(exit) ? exit : null;
   }
   /** 화면 크기와 무관하게 포인터 위치를 원본 1024×768 캔버스 좌표로 환산한다. */
   function point(e) {
@@ -137,8 +177,15 @@ export function mountDrawing() {
     if (surface === "top")
       ctx.arc(region.centerX, region.centerY, region.radius, 0, 2 * Math.PI);
     else ctx.rect(region.x, region.y, region.width, region.height);
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = surface === "top" ? "#e8e4df" : "#fff";
     ctx.fill();
+    if (surface === "top") {
+      // 외곽 5mm는 회색, 그릴 수 있는 안쪽은 흰색으로 표시한다. 그림을 축소하지 않는다.
+      ctx.beginPath();
+      ctx.arc(region.centerX, region.centerY, region.drawableRadius, 0, 2 * Math.PI);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+    }
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#d7c8b6";
     ctx.setLineDash([7, 8]);
@@ -171,6 +218,10 @@ export function mountDrawing() {
     if (current && current.length < 2) {
       const index = drawings[surface].indexOf(current);
       if (index >= 0) drawings[surface].splice(index, 1);
+    } else if (current) {
+      // 끝점이 옆면 좌우 경계 근처에서 멈췄다면 이음매에 정확히 맞춘다.
+      // 제출 데이터와 화면 표시가 같은 배열을 쓰므로 미리보기에도 그대로 반영된다.
+      current[current.length - 1] = snapToSeam(current[current.length - 1]);
     }
     current = null;
     pointer = null;
@@ -180,7 +231,8 @@ export function mountDrawing() {
   // 첫 주 포인터만 받아 멀티터치로 하나의 획에 서로 다른 손가락이 섞이지 않게 한다.
   canvas.addEventListener("pointerdown", (e) => {
     if (pointer !== null || e.isPrimary === false) return;
-    const p = point(e);
+    // 옆면 좌우 경계 근처에서 시작한 획은 이음매에서 시작하도록 먼저 맞춘다.
+    const p = snapToSeam(point(e));
     if (!inside(p)) return;
     pointer = e.pointerId;
     current = [p];
@@ -194,12 +246,18 @@ export function mountDrawing() {
     if (e.pointerId !== pointer || !current) return;
     for (const event of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) {
       const p = point(event);
+      const previous = current[current.length - 1];
       // 허용 영역 밖으로 나가면 획을 종료한다. 다시 들어오는 선을 임의로 잇지 않는다.
       if (!inside(p)) {
+        // 옆면 좌우로 나간 경우에는 바깥 점을 버리기 전에 경계 교점을 마지막 점으로 남긴다.
+        // 빠른 필기에서 직전 표본이 경계 몇 px 앞에 머물러 이음매가 비는 것을 막는다.
+        const exit = seamExitPoint(previous, p);
+        if (exit && (exit.x !== previous.x || exit.y !== previous.y)) {
+          current.push(exit);
+        }
         finish();
         return;
       }
-      const previous = current[current.length - 1];
       current.push(p);
       // 누적 경로 전체를 다시 그리지 않고 새 선분만 즉시 표시한다.
       paths(ctx, [[previous, p]]);

@@ -532,3 +532,14 @@ def validate_side_drawing_height(points):
     """바닥 10mm 안의 원본 좌표가 있으면 경로 전체를 거부한다. 임의 보간·절단은 하지 않는다."""
     if any(height < SIDE_BOTTOM_CLEARANCE_MM - 1e-4 for _, height in points):
         raise ValueError("스테이지 충돌 방지를 위해 옆면 하단 10mm에는 그릴 수 없습니다.")
+
+
+TOP_EDGE_CLEARANCE_MM = 5.0
+
+
+def validate_top_drawing_margin(points, radius):
+    """실제 윗면 가장자리 5mm 안쪽인지 검사한다. 좌표를 압축하거나 잘라 잇지 않는다."""
+    if radius <= TOP_EDGE_CLEARANCE_MM or any(
+        math.hypot(x, y) > radius - TOP_EDGE_CLEARANCE_MM + 1e-4 for x, y in points
+    ):
+        raise ValueError("윗면 가장자리 5mm에는 그릴 수 없습니다.")

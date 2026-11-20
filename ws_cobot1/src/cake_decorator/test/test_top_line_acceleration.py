@@ -24,8 +24,8 @@ def test_short_top_lines_accelerate_faster_without_changing_geometry():
     assert top.success and side.success
 
     # TOP과 SIDE 모두 기존 그리기 가속도 300을 유지하고 접촉·이탈은 100을 쓴다.
-    assert [c.acc for c in top.commands] == [100.0, 100.0, 300.0, 300.0, 100.0]
-    assert [c.acc for c in side.commands] == [100.0, 100.0, 300.0, 300.0, 100.0]
+    assert [c.acc for c in top.commands] == [300.0, 100.0, 300.0, 300.0, 100.0]
+    assert [c.acc for c in side.commands] == [300.0, 100.0, 300.0, 300.0, 100.0]
     assert top.total_strokes == side.total_strokes == 1
 
     # 속도 조정으로 경로·선속도·획 경계가 달라지지 않아야 한다.

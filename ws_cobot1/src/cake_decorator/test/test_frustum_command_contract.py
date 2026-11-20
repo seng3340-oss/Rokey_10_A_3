@@ -101,13 +101,59 @@ def test_two_letters_travel_outside_frustum(node):
             assert (radius - radius_at_z) / math.hypot(1, 3.25 / 79) >= 10 - 1e-6
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_side_air_transfer_raises_rotation_speed_without_changing_contact(node, reverse):
+    """양방향 획 사이 곡선은 빠르게 돌고, 접촉·이탈에는 기존 제한을 전달한다."""
+    from rclpy.parameter import Parameter
+    from cake_decorator.drawing_motion import Phase
+
+    node.set_parameters([
+        Parameter("side_pen_45", value=True),
+        Parameter("travel_speed", value=180.0),
+    ])
+    strokes = [[(736, 384), (800, 384)], [(160, 384), (224, 384)]]
+    if reverse:
+        strokes.reverse()
+    _, plan = convert(node, strokes)
+    robot = RequestRecorder()
+    air_transfers = 0
+    contacts = 0
+    for command in plan.commands:
+        assert robot.execute_drawing_command(command)
+        _, request = robot.requests[-1]
+        if command.motion_type == MotionType.MOVE_SPLINE and not command.pen_down:
+            air_transfers += 1
+            # 각속도 제한 때문에 긴 공중 원호가 느려지지 않도록 API까지 전달한다.
+            assert list(request.vel) == pytest.approx([180.0, 90.0])
+            assert list(request.acc) == pytest.approx([300.0, 180.0])
+        elif command.phase in (Phase.PEN_DOWN, Phase.PEN_UP):
+            contacts += 1
+            assert request.vel[1] == pytest.approx(30.0)
+            assert request.acc[1] == pytest.approx(30.0)
+            if command.phase == Phase.PEN_UP:
+                assert request.vel[0] == pytest.approx(120.0)
+    assert air_transfers > 0
+    assert contacts == 4
+
+
 def test_top_taught_orientation_is_separate_from_cake_yaw(node):
     """케이크를90도 회전해도 영점 펜 자세는 그대로이고 글자 위치만 회전한다."""
-    response, _ = convert(node, [[(512,384),(832,384)]], surface="TOP", yaw=math.pi/2)
+    response, _ = convert(node, [[(512,384),(800,384)]], surface="TOP", yaw=math.pi/2)
     contact = [wp for wp in response.waypoints_3d if wp.pen_down]
     assert contact[-1].pose.position.x == pytest.approx(0.4)
-    assert contact[-1].pose.position.y == pytest.approx(0.05675)
+    assert contact[-1].pose.position.y == pytest.approx(0.051075)
     assert all(wp.pose.orientation.y == pytest.approx(1.0) for wp in response.waypoints_3d)
+
+
+def test_top_air_speed_does_not_raise_contact_or_lift_speed(node):
+    """상면 공중 이동을 높여도 PEN_DOWN·그리기·PEN_UP 속도는 보존한다."""
+    from rclpy.parameter import Parameter
+
+    node.set_parameters([Parameter("travel_speed", value=180.0)])
+    _, plan = convert(node, [[(512, 384), (700, 384)]], surface="TOP")
+    assert [command.vel for command in plan.commands] == pytest.approx(
+        [180.0, 15.0, 30.0, 120.0]
+    )
 
 
 def test_rotated_side_approach_stays_outside_sloped_cake(node):
@@ -249,3 +295,116 @@ def test_released_defaults_match_verified_seventeen_degrees_and_one_mm_clearance
     finally:
         value.destroy_node()
         rclpy.try_shutdown()
+
+
+def _yaw_path_commands(start_yaw, end_yaw):
+    """BASE Z 회전량(rz1)만 바뀌는 옆면 명령. #2 전환점 뒤 공중 스플라인 한 바퀴를 흉내 낸다."""
+    from dataclasses import replace
+    from cake_decorator.drawing_motion import DsrPos, MotionCommand, Phase
+
+    def pose(yaw):
+        return DsrPos(400., 0., 250., yaw, 90., 0.)
+
+    base = MotionCommand(MotionType.MOVE_LINE, pose(start_yaw), 30., 100., Phase.APPROACH, False)
+    step = 4.0 if end_yaw > start_yaw else -4.0
+    count = int(abs(end_yaw - start_yaw) / 4.0)
+    spline = [pose(start_yaw + step * i) for i in range(1, count + 1)]
+    return [base, base, base, replace(base, pos=spline[-1], spline=spline)]
+
+
+def _wrapped_j6_inverse(target):
+    """제어기 IK처럼 J6를 -180~180 표현으로만 돌려준다. 펜 BASE 회전과 J6는 반대 방향이다."""
+    joint6 = (-target.rz1 + 180.) % 360. - 180.
+    return [0., 0., 90., 0., 90., joint6]
+
+
+def test_side_start_j6_branch_fits_whole_path_when_first_stroke_is_right_end():
+    """띠 오른쪽 끝에서 시작해 원주를 거꾸로 한 바퀴 도는 경로도 J6 한계 안에서 시작한다."""
+    from cake_decorator.side_pose_selection import choose_side_start_joints
+
+    # 오른쪽 끝(348도)에서 왼쪽 끝(0도)으로 공중 이동. 가까운 해(J6=+12)로 시작하면
+    # J6가 +360까지 감겨 실물 로그처럼 한계를 넘는다.
+    commands = _yaw_path_commands(348., 0.)
+    joints, (low, high) = choose_side_start_joints(
+        commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse,
+    )
+    assert joints[5] == pytest.approx(-348.)
+    assert low == pytest.approx(-348.) and high == pytest.approx(0., abs=1e-9)
+
+
+def test_side_start_j6_branch_keeps_nearest_solution_when_it_fits():
+    """왼쪽 끝에서 시작하면 기존처럼 덜 도는 J6 해를 유지한다."""
+    from cake_decorator.side_pose_selection import choose_side_start_joints
+
+    commands = _yaw_path_commands(0., 340.)
+    joints, (low, high) = choose_side_start_joints(
+        commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse,
+    )
+    assert joints[5] == pytest.approx(0.)
+    assert low == pytest.approx(-340.) and high == pytest.approx(0., abs=1e-9)
+
+
+def test_side_start_j6_branch_rejects_rotation_beyond_joint_range():
+    """어느 분기로도 범위를 넘으면 이동 전에 거부한다."""
+    from cake_decorator.side_pose_selection import choose_side_start_joints
+
+    commands = _yaw_path_commands(0., 720.)
+    with pytest.raises(RuntimeError, match="J6 회전량"):
+        choose_side_start_joints(commands, [0., 0., 90., 0., 90., 0.], _wrapped_j6_inverse)
+
+
+def test_side_start_keeps_branch_selection_with_faster_air_motion():
+    """단독 호출도 J6 분기를 유지하면서 공중 전환 속도로 이동한다."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from cake_decorator.doosan_robot import DoosanRobotClient
+
+    commands = _yaw_path_commands(348., 0.)
+    robot = Mock()
+    robot._side_inverse.return_value = (
+        SimpleNamespace(pos=[0., 0., 90., 0., 90., 0.]),
+        SimpleNamespace(sol_space=2),
+        _wrapped_j6_inverse,
+    )
+    robot.prepare_side_start.side_effect = lambda *args: DoosanRobotClient.prepare_side_start(robot, *args)
+    robot.move_joint.return_value = True
+    robot.verify_pose.return_value = True
+    assert DoosanRobotClient.move_side_start(robot, commands)
+    target = robot.move_joint.call_args.args[0]
+    assert target[5] == pytest.approx(-348.)
+    assert robot.move_joint.call_args.kwargs == dict(speed_deg_s=60.0, acc_deg_s2=120.0)
+
+
+@pytest.mark.parametrize("solution_changed", [False, True])
+def test_prepared_side_start_does_not_repeat_ik_and_checks_solution(solution_changed):
+    """상공에서는 전체 IK를 반복하지 않고, 준비 후 팔꿈치 해가 바뀌면 이동하지 않는다."""
+    from types import SimpleNamespace
+
+    robot = RequestRecorder()
+    robot._logger = SimpleNamespace(info=lambda _: None, error=lambda _: None)
+    commands = _yaw_path_commands(348., 0.)
+    robot._side_inverse = lambda: (
+        SimpleNamespace(pos=[0., 0., 90., 0., 90., 0.]),
+        SimpleNamespace(sol_space=2),
+        _wrapped_j6_inverse,
+    )
+    prepared = robot.prepare_side_start(commands)
+
+    def no_second_ik():
+        raise AssertionError("케이크 상공에서 전체 IK를 다시 계산했습니다.")
+
+    robot._side_inverse = no_second_ik
+    robot._call = lambda key, request: (
+        SimpleNamespace(success=True, pos=[0., 0., 90., 0., 90., 0.])
+        if key == "current_joints" else
+        SimpleNamespace(success=True, sol_space=3 if solution_changed else 2)
+    )
+    robot.verify_pose = lambda _: True
+    assert robot.move_side_start(commands, prepared=prepared) is not solution_changed
+    if solution_changed:
+        assert robot.requests == []
+    else:
+        key, request = robot.requests[0]
+        assert key == "move_joint"
+        assert request.pos[5] == pytest.approx(-348.0)
+        assert request.vel == 60.0

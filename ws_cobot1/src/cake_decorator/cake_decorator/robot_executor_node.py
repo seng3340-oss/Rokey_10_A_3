@@ -103,11 +103,20 @@ class RobotExecutorNode(Node):
         'pen_tool_cycle': False,
         # 주문별 SIDE 집기·펜촉 TCP·반납. TOP/플레이트는 영점 TCP를 유지한다.
         'integrated_side_cycle': False,
-        # 빈손·도구만 들고 움직이는 구간은 1.5배, 케이크 상하 동작은 감속한다.
-        'free_joint_speed_deg_s': 45.0,
-        'free_joint_acc_deg_s2': 45.0,
-        'free_line_speed_mm_s': 75.0,
-        'free_line_acc_mm_s2': 150.0,
+        # 펜의 비접촉 이동만 별도로 조절한다. 잉크 경로 속도와 분리한다.
+        'pen_travel_speed_mm_s': 180.0,
+        'pen_lift_speed_mm_s': 150.0,
+        'pen_rack_speed_mm_s': 120.0,
+        'pen_motion_acc_mm_s2': 400.0,
+        'pen_rotation_speed_deg_s': 90.0,
+        'pen_rotation_acc_deg_s2': 180.0,
+        'pen_tilt_speed_deg_s': 31.5,
+        'pen_tilt_acc_deg_s2': 90.0,
+        # 빈손·도구만 들고 움직이는 구간만 가속하고, 케이크 운반은 유지한다.
+        'free_joint_speed_deg_s': 60.0,
+        'free_joint_acc_deg_s2': 120.0,
+        'free_line_speed_mm_s': 150.0,
+        'free_line_acc_mm_s2': 300.0,
         'cake_lift_speed_mm_s': 25.0,
         'cake_lift_acc_mm_s2': 50.0,
         'cake_seat_joint_speed_deg_s': 15.0,
@@ -196,6 +205,11 @@ class RobotExecutorNode(Node):
             Trigger, 'plate_finish', self._execute_plate_finish, callback_group=self._cb)
         self.get_logger().info(
             'robot_executor_node 시작 — 상태 머신 + 액션 서버 대기 중'
+        )
+        self.get_logger().info(
+            f"펜 이동 설정: 인출={self._param('pen_lift_speed_mm_s'):g}mm/s, "
+            f"공중={self._param('pen_travel_speed_mm_s'):g}mm/s, "
+            f"반납={self._param('pen_rack_speed_mm_s'):g}mm/s; TOP→SIDE 제자리 재파지"
         )
 
     def _plate_run(self, response, phase: str, callback):
@@ -670,11 +684,20 @@ class RobotExecutorNode(Node):
             if current is None or not current.success or not current.task_pos_info:
                 return False
             raised = list(current.task_pos_info[0].data[:6])
-            raised[2] = max(raised[2] + 50., command.pos.z)
-            if not self._robot.move_line(DsrPos(*raised), speed_mm_s=80., acc_mm_s2=200.):
-                return False
-            if not self._robot.verify_pose(raised):
-                return False
+            # 통합 파지에서는 이미 인출할 때 50mm를 추가로 확보했다.
+            extra = 0.0 if self._param('integrated_side_cycle') else 50.0
+            raised[2] = max(raised[2] + extra, command.pos.z)
+            if raised[2] > current.task_pos_info[0].data[2] + 0.1:
+                if not self._robot.move_line(
+                    DsrPos(*raised),
+                    speed_mm_s=self._param('pen_lift_speed_mm_s'),
+                    acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+                    angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+                    angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+                ):
+                    return False
+                if not self._robot.verify_pose(raised):
+                    return False
             # 첫 이탈 중 취소되었으면 이어지는 케이크 접근을 보내지 않는다.
             if getattr(self, '_cancel_requested', False):
                 return False
@@ -831,6 +854,7 @@ class RobotExecutorNode(Node):
                     cancelled,
                     reuse_rack_position=rack_ready,
                     preserve_speed=rack_ready,
+                    extra_lift_mm=50.0,
                 )
             except (RuntimeError, ValueError) as error:
                 self.get_logger().error(f'45도 펜 파지 실패: {error}')
@@ -847,13 +871,27 @@ class RobotExecutorNode(Node):
         if pen_cycle:
             # 팀의 TOP 파지·반납 함수와 DO 그리퍼 제어 순서를 그대로 사용한다.
             self._state = TaskState.PLACING_CAKE
-            if not self._do_grasping_tool(goal_handle, request):
+            if not self._do_grasping_tool(goal_handle, request, first_approach=plan.commands[0].pos):
                 return failed('PEN_PICK_FAILED')
             if cancelled():
                 return failed('CANCELLED')
             # 케이크 중심으로 이동/접촉하지 않고 첫 획 위로 직접 접근한다.
             if not self._prepare_first_stroke(plan, cancelled):
                 return failed('FIRST_STROKE_APPROACH_FAILED')
+
+        side_start = None
+        if side_45:
+            try:
+                started = time.monotonic()
+                self.get_logger().info('옆면 J6 준비: 케이크 접근 전에 경로 계산')
+                side_start = self._robot.prepare_side_start(plan.commands, cancelled)
+                self.get_logger().info(
+                    f'옆면 J6 준비 완료: {time.monotonic() - started:.2f}초 '
+                    '(상공에서는 전체 경로를 다시 계산하지 않음)'
+                )
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(f'옆면 J6 준비 실패: {error}')
+                return failed('SIDE_START_PREPARATION_FAILED')
 
         total = len(plan.commands)
         completed_strokes = 0
@@ -877,10 +915,18 @@ class RobotExecutorNode(Node):
                 )
             # 로컬 SIDE의 세 번째 비접촉 자세 전환과 첫 상승 접근을 보존한다.
             side_rotation = surface == 'SIDE' and i == 2 and not cmd.pen_down
-            moved = (
-                self._robot.move_task_joint(cmd.pos) if side_rotation
-                else self._execute_motion_command(cmd, i, side_45=side_45)
-            )
+            if side_rotation and side_45:
+                # 45도 펜은 원주 위치에 따라 J6가 한 바퀴 가까이 감긴다.
+                # movejx에 맡기면 첫 획이 띠 오른쪽 끝일 때 덜 감긴 J6 해를 골라
+                # 이후 공중 이동에서 J6 한계(±360)를 넘는다. 남은 경로 전체를 IK로
+                # 검사해 범위 안에 드는 J6 분기를 고른 뒤 movej로 전환한다.
+                moved = self._robot.move_side_start(
+                    plan.commands, cancelled, prepared=side_start,
+                )
+            elif side_rotation:
+                moved = self._robot.move_task_joint(cmd.pos)
+            else:
+                moved = self._execute_motion_command(cmd, i, side_45=side_45)
             if not moved:
                 self.get_logger().error(f'드로잉 이동 실패 (#{i}): {cmd.pos.to_list()}')
                 return failed(f'MOVE_FAILED_AT_{i}')
@@ -934,12 +980,24 @@ class RobotExecutorNode(Node):
         if current[2] < safe_z:
             raised = list(current)
             raised[2] = safe_z
-            if not self._robot.move_line(DsrPos(*raised), speed_mm_s=50.):
+            if not self._robot.move_line(
+                DsrPos(*raised),
+                speed_mm_s=self._param('pen_lift_speed_mm_s'),
+                acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+                angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+                angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+            ):
                 return False
         if cancelled():
             return False
         above = DsrPos(first.x, first.y, safe_z, first.rz1, first.ry, first.rz2)
-        return self._robot.move_line(above, speed_mm_s=50.)
+        return self._robot.move_line(
+            above,
+            speed_mm_s=self._param('pen_travel_speed_mm_s'),
+            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+        )
 
     # ==================================================================
     # GraspTool 액션 실행
@@ -970,7 +1028,7 @@ class RobotExecutorNode(Node):
             goal_handle.abort()
         return result
 
-    def _do_grasping_tool(self, goal_handle, task_goal) -> bool:
+    def _do_grasping_tool(self, goal_handle, task_goal, *, first_approach=None) -> bool:
         """펜 집기: 상공 → 펜 위치 → 그리퍼 닫기 → 수직 상공"""
         if self._check_cancel(goal_handle):
             return False
@@ -979,7 +1037,10 @@ class RobotExecutorNode(Node):
 
         approach = self._param('pen_stand_approach_pose')
         stand = self._param('pen_stand_pose')
-        gripper_up = self._param('pen_gripper_pose')
+        gripper_up = list(self._param('pen_gripper_pose'))
+        if first_approach is not None:
+            # 첫 획 상공 확보를 별도 이동으로 나누지 않고 펜 인출에 합친다.
+            gripper_up[2] = max(gripper_up[2], first_approach.z + 50.0)
 
         # 1. 펜 상공으로 이동 (관절)
         self.get_logger().info('펜 상공 이동')
@@ -991,21 +1052,20 @@ class RobotExecutorNode(Node):
             self._fail('펜 상공 이동 실패')
             return False
 
-        # 2. 그리퍼 열기
-        # time.sleep(0.5)
-        # # [변경 2026-11-19] DO ON/OFF 결과를 확인한다. 실패하면 아래로
-        # # 하강하지 않고 즉시 중단해 그리퍼 상태가 불명확한 채 움직이지 않는다.
-        # if not self._robot.gripper_open(self._param('gripper_open_width')):
-        #     self._fail('펜 그리퍼 열기 실패')
-        #     return False
-        # time.sleep(0.5)  # 대기 시간 추가
+        # PR23의 수정 유지: 앞선 반납에서 열린 그리퍼에 열기 펄스를 반복하지 않는다.
+        # 열린 상태로 파지 위치까지 내려간 뒤 닫기만 실행한다.
+        self.get_logger().info('TOP 펜 파지: 추가 열기 없이 하강 → 닫기')
 
         # 3. 펜 위치로 하강 (직선)
         if self._check_cancel(goal_handle):
             return False
         self.get_logger().info('펜 위치로 하강')
         if not self._robot.move_line(
-            DsrPos(*stand), speed_mm_s=45.0, acc_mm_s2=150.0,
+            DsrPos(*stand),
+            speed_mm_s=self._param('pen_rack_speed_mm_s'),
+            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
         ):
             self._fail('펜 하강 실패')
             return False
@@ -1024,7 +1084,13 @@ class RobotExecutorNode(Node):
         if self._check_cancel(goal_handle):
             return False
         self.get_logger().info('펜 들어올리기')
-        if not self._robot.move_line(DsrPos(*gripper_up), speed_mm_s=30.0):
+        if not self._robot.move_line(
+            DsrPos(*gripper_up),
+            speed_mm_s=self._param('pen_lift_speed_mm_s'),
+            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+        ):
             self._fail('펜 들어올리기 실패')
             return False
 
@@ -1044,7 +1110,11 @@ class RobotExecutorNode(Node):
 
         # approach는 관절 각도라서 move_line이 아닌 move_joint로 이동한다.
         self.get_logger().info('케이크 중심 상공 이동')
-        if not self._robot.move_joint(approach):
+        if not self._robot.move_joint(
+            approach,
+            speed_deg_s=self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=self._param('free_joint_acc_deg_s2'),
+        ):
             self._fail('케이크 중심 상공 이동 실패')
             return False
 
@@ -1079,7 +1149,13 @@ class RobotExecutorNode(Node):
             f'첫 획 시작점 상공 이동: {above.to_list()} '
             f'(이후 Z {current[2]:.1f} → {first.z:.1f} 수직 하강)'
         )
-        if not self._robot.move_line(above, speed_mm_s=50.0):
+        if not self._robot.move_line(
+            above,
+            speed_mm_s=self._param('pen_travel_speed_mm_s'),
+            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
+        ):
             self._fail('첫 획 시작점 상공 이동 실패')
             return False
         return True
@@ -1094,15 +1170,15 @@ class RobotExecutorNode(Node):
         drop_approach = self._param('pen_drop_approach_pose')
         drop = self._param('pen_drop_pose')
         drop_after = self._param('pen_drop_after_pose')
-        # TOP 후 SIDE가 남으면 중간 반납도 보호 구간이다. 마지막 반납만 가속한다.
+        # TOP 후 SIDE가 남으면 펜을 놓은 위치에서 바로 다음 파지로 이어간다.
         more_surfaces = bool(getattr(task_goal, 'has_more_surfaces', False))
 
         # 1. 놓을 위치 상공으로 이동 (관절)
         self.get_logger().info('펜 반납 상공 이동')
         if not self._robot.move_joint(
             drop_approach,
-            speed_deg_s=30.0 if more_surfaces else self._param('free_joint_speed_deg_s'),
-            acc_deg_s2=30.0 if more_surfaces else self._param('free_joint_acc_deg_s2'),
+            speed_deg_s=self._param('free_joint_speed_deg_s'),
+            acc_deg_s2=self._param('free_joint_acc_deg_s2'),
         ):
             self._fail('펜 반납 상공 이동 실패')
             return False
@@ -1112,8 +1188,10 @@ class RobotExecutorNode(Node):
             return False
         self.get_logger().info('펜 놓을 위치로 하강')
         if not self._robot.move_line(
-            DsrPos(*drop), speed_mm_s=30.0 if more_surfaces else 45.0,
-            acc_mm_s2=100.0 if more_surfaces else 150.0,
+            DsrPos(*drop), speed_mm_s=self._param('pen_rack_speed_mm_s'),
+            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
         ):
             self._fail('펜 하강 실패')
             return False
@@ -1128,14 +1206,21 @@ class RobotExecutorNode(Node):
             return False
         time.sleep(0.5)
 
+        if more_surfaces and self._param('integrated_side_cycle'):
+            # 펜은 거치대에 놓였고 손가락은 열린 상태다. 바로 45도 재파지로 이어간다.
+            self.get_logger().info('TOP 펜 반납 완료: 상공 후퇴 없이 제자리 SIDE 재파지 대기')
+            return True
+
         # 4. 상공으로 후퇴 (직선)
         if self._check_cancel(goal_handle):
             return False
         self.get_logger().info('펜 반납 후 상공 이동')
         if not self._robot.move_line(
             DsrPos(*drop_after),
-            speed_mm_s=50.0 if more_surfaces else self._param('free_line_speed_mm_s'),
-            acc_mm_s2=100.0 if more_surfaces else self._param('free_line_acc_mm_s2'),
+            speed_mm_s=self._param('pen_lift_speed_mm_s'),
+            acc_mm_s2=self._param('pen_motion_acc_mm_s2'),
+            angular_speed_deg_s=self._param('pen_rotation_speed_deg_s'),
+            angular_acc_deg_s2=self._param('pen_rotation_acc_deg_s2'),
         ):
             self._fail('펜 반납 후퇴 실패')
             return False

@@ -194,7 +194,7 @@ class TaskManagerNode(Node):
                     side_reference_pose(self.get_parameter('side_reference_pose').value)
 
             # 금지 높이가 포함된 기존 주문은 케이크를 운반하기 전에 거부한다.
-            from .drawing_geometry import FrustumCake, pixel_to_mm_side, validate_side_drawing_height
+            from .drawing_geometry import (FrustumCake, pixel_to_mm_side, validate_side_drawing_height, pixel_to_mm_top, validate_top_drawing_margin)
 
             cake = request.cake_params
             shape = FrustumCake(
@@ -202,6 +202,13 @@ class TaskManagerNode(Node):
                 height=cake.height * 1000., cx=0., cy=0., cz=0.,
             )
             for path in request.drawing_paths:
+                if path.surface == 'TOP':
+                    for stroke in path.strokes:
+                        validate_top_drawing_margin([
+                            pixel_to_mm_top(point.x, point.y, path.canvas_width, path.canvas_height, shape.r_top)
+                            for point in stroke.points
+                        ], shape.r_top)
+                    continue
                 if path.surface != 'SIDE':
                     continue
                 for stroke in path.strokes:
