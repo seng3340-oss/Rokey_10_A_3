@@ -31,7 +31,13 @@ from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
 from .doosan_robot import DoosanRobotClient
 from .plate_sequence import PlateSequence
-from .safety_exceptions import SafetyException, PenGraspError, require_pen_width
+from .safety_exceptions import (
+    SafetyException,
+    PenGraspError,
+    PenNotHeldError,
+    require_pen_width,
+    wait_before_regrasp,
+)
 from .integrated_pen_cycle import IntegratedPenCycle
 from .drawing_motion import (
     DsrPos,
@@ -52,6 +58,9 @@ class RobotExecutorNode(Node):
         'pen_open_min_width_m': 0.060,
         'pen_hold_min_width_m': 0.030,
         'opener_hold_min_width_m': 0.015,
+        # 펜·따개 없음 판정 후 거치대에서 한 번 더 집기 전 대기 시간[초].
+        # 작업자가 도구를 다시 놓을 시간이다. 재시도는 1회로 고정한다.
+        'tool_regrasp_wait_sec': 5.0,
         'plate_weight_check_enabled': False,
         'plate_opener_weight_kg': 0.05,
         'plate_cake_weight_kg': 0.20,
@@ -893,12 +902,7 @@ class RobotExecutorNode(Node):
         self._top_pen_rack_ready = False
         if integrated:
             try:
-                initial_joints = self._pen_cycle.pick_side(
-                    cancelled,
-                    reuse_rack_position=rack_ready,
-                    preserve_speed=rack_ready,
-                    extra_lift_mm=50.0,
-                )
+                initial_joints = self._pick_side_pen(cancelled, rack_ready)
             except PenGraspError:
                 raise
             except (RuntimeError, ValueError) as error:
@@ -916,7 +920,9 @@ class RobotExecutorNode(Node):
         if pen_cycle:
             # 팀의 TOP 파지·반납 함수와 DO 그리퍼 제어 순서를 그대로 사용한다.
             self._state = TaskState.PLACING_CAKE
-            if not self._do_grasping_tool(goal_handle, request, first_approach=plan.commands[0].pos):
+            if not self._grasp_top_pen(
+                goal_handle, request, first_approach=plan.commands[0].pos,
+            ):
                 return failed('PEN_PICK_FAILED')
             if cancelled():
                 return failed('CANCELLED')
@@ -1059,7 +1065,7 @@ class RobotExecutorNode(Node):
         if action == 'GRASP':
             self._state = TaskState.PLACING_CAKE
             try:
-                ok = self._do_grasping_tool(goal_handle, request)
+                ok = self._grasp_top_pen(goal_handle, request)
             except PenGraspError:
                 recovered = self._recover_pen_grasp()
                 result.success = False
@@ -1080,6 +1086,78 @@ class RobotExecutorNode(Node):
         else:
             goal_handle.abort()
         return result
+
+    # ------------------------------------------------------------------
+    # 펜 없음 재파지 (1회)
+    # ------------------------------------------------------------------
+
+    def _prepare_pen_regrasp(self, error, cancelled) -> bool:
+        """펜 없음 판정 뒤 재파지 준비: 그리퍼를 열고 정해진 시간 기다린다.
+
+        호출 시점: _do_grasping_tool·pick_side가 PenNotHeldError를 낸 직후(펜 인출 위치).
+        반환: 재파지를 진행해도 되면 True. HMI 정지·취소·그리퍼 이상·열기 실패면 False이고,
+              호출자는 원래 예외를 올려 기존 복구(그리퍼 열기 → safe_position_1)로 넘긴다.
+        그리퍼를 먼저 여는 이유: 다음 파지의 '파지 전 열림 폭' 검사를 통과하고,
+        빈 그리퍼로 거치대에 내려가야 펜을 다시 끼울 수 있기 때문이다.
+        """
+        self.get_logger().error(f'펜 없음 감지: {error}')
+        if self._robot.stop_latched or self._cancel_requested or self._robot.gripper_output_fault:
+            return False
+        if not self._robot.gripper_open(self._param('gripper_open_width')):
+            self.get_logger().error('펜 재파지 준비: 그리퍼 열기 실패')
+            return False
+        if not wait_before_regrasp(self._robot, self._param, '펜', cancelled):
+            return False
+        self.get_logger().warning('펜 재파지 시도 (1회)')
+        return True
+
+    def _grasp_top_pen(self, goal_handle, task_goal, *, first_approach=None) -> bool:
+        """TOP 펜 집기. 펜 없음이면 그리퍼를 열고 대기한 뒤 한 번 더 집는다.
+
+        2회차도 펜이 없으면 PenNotHeldError(PenGraspError)를 그대로 올려
+        _execute_draw의 기존 복구(그리퍼 열기 → safe_position_1)가 실행된다.
+        다시 잡으면 True를 반환해 드로잉을 계속 진행한다.
+        """
+        # _do_grasping_tool은 시작 시 GRASPING_TOOL로 전이하므로 진입 상태를 기억해
+        # 재시도 전에 되돌린다(GRASPING_TOOL → GRASPING_TOOL 전이는 허용되지 않음).
+        entry_state = self._state
+        try:
+            return self._do_grasping_tool(
+                goal_handle, task_goal, first_approach=first_approach,
+            )
+        except PenNotHeldError as error:
+            cancelled = lambda: goal_handle.is_cancel_requested or self._cancel_requested
+            if not self._prepare_pen_regrasp(error, cancelled):
+                raise
+        self._state = entry_state
+        return self._do_grasping_tool(
+            goal_handle, task_goal, first_approach=first_approach,
+        )
+
+    def _pick_side_pen(self, cancelled, rack_ready):
+        """SIDE 45도 펜 집기. 펜 없음이면 그리퍼를 열고 대기한 뒤 한 번 더 집는다.
+
+        1회차는 TOP 반납 위치에서 제자리 재파지(rack_ready)를 쓸 수 있다.
+        재시도는 이미 자세가 바뀌었으므로 거치대 상공부터 일반 파지로 다시 수행한다.
+        pick_side는 실패 시 스스로 기본 TCP를 복원하고 피벗 TCP를 정리한다.
+        반환: 파지 후 관절값. 2회차도 없으면 PenNotHeldError를 그대로 올린다.
+        """
+        try:
+            return self._pen_cycle.pick_side(
+                cancelled,
+                reuse_rack_position=rack_ready,
+                preserve_speed=rack_ready,
+                extra_lift_mm=50.0,
+            )
+        except PenNotHeldError as error:
+            if not self._prepare_pen_regrasp(error, cancelled):
+                raise
+        return self._pen_cycle.pick_side(
+            cancelled,
+            reuse_rack_position=False,
+            preserve_speed=False,
+            extra_lift_mm=50.0,
+        )
 
     def _recover_pen_grasp(self):
         """펜 검사 실패 후 열기와 안전 자세 이동 결과를 순서대로 확인한다."""

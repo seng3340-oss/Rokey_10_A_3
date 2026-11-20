@@ -11,7 +11,12 @@ import math
 from .doosan_robot import DR_MV_MOD_REL, DR_MV_MOD_ABS, DR_BASE
 from .drawing_motion import DsrPos
 from .plate_weight_check import PlateWeightChecker
-from .safety_exceptions import OpenerMissingError, PlateWeightError
+from .safety_exceptions import (
+    OpenerMissingError,
+    OpenerNotHeldError,
+    PlateWeightError,
+    wait_before_regrasp,
+)
 
 
 class PlateSequence:
@@ -46,6 +51,9 @@ class PlateSequence:
         if not self._robot.gripper_open(self._param('opener_open_width_mm')):
             raise OpenerMissingError(reason + ': 그리퍼 열기 실패, 현재 자세에서 중단')
         self._opener_held = False
+        if width is not None:
+            # 폭이 실제로 측정됐고 그리퍼도 열었다 = 재파지 가능한 "따개 없음".
+            raise OpenerNotHeldError(reason + ', 안전 자세에서 대기중')
         raise OpenerMissingError(reason + ', 안전 자세에서 대기중')
 
     def _weight_at_safe(self, stage):
@@ -181,7 +189,31 @@ class PlateSequence:
     def _plate_pick_opener(
         self, *, speed_approach=None, speed_slow=None,
     ) -> bool:
-        """공통 pick()을 재사용해 케이크가 없는 오프너를 파지한다.
+        """오프너를 파지한다. 따개 없음이면 대기 후 한 번 더 집는다.
+
+        처리 순서
+            1회차 파지 → 안전 자세에서 폭 검사
+            → 따개 없음(OpenerNotHeldError, 그리퍼는 이미 열림·안전 자세)이면
+              tool_regrasp_wait_sec 대기 후 거치대로 가서 2회차 파지
+            → 2회차도 없으면 예외를 그대로 올려 안전 자세에서 대기(기존 동작)
+        HMI 정지·그리퍼 출력 이상이면 재시도하지 않는다. 다시 잡으면 정상 진행한다.
+        """
+        try:
+            return self._plate_pick_opener_once(
+                speed_approach=speed_approach, speed_slow=speed_slow,
+            )
+        except OpenerNotHeldError as error:
+            if not wait_before_regrasp(self._robot, self._param, '따개'):
+                raise
+            self._logger.warning(f'따개 재파지 시도: {error}')
+        return self._plate_pick_opener_once(
+            speed_approach=speed_approach, speed_slow=speed_slow,
+        )
+
+    def _plate_pick_opener_once(
+        self, *, speed_approach=None, speed_slow=None,
+    ) -> bool:
+        """공통 pick()을 재사용해 케이크가 없는 오프너를 한 번 파지한다.
 
         접근·랙 진입·파지 후 후퇴는 모두 일반 직선 속도를 쓴다.
         그리퍼 명령과 닫힘·안정화 대기는 공통 pick()에 맡겨 보존한다.

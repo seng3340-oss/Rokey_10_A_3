@@ -45,6 +45,9 @@ robot_executor_node:
     pen_open_min_width_m: 0.060
     pen_hold_min_width_m: 0.030
     opener_hold_min_width_m: 0.015
+    # 펜·따개 없음 판정 뒤 그리퍼를 열고 이 시간[초] 기다린 다음 거치대에서 한 번 더 집는다.
+    # 다시 잡으면 공정을 계속하고, 두 번째도 없으면 safe_position_1에서 대기한다.
+    tool_regrasp_wait_sec: 5.0
     # 하중은 팀 PR 기준 75g 초과 증가를 사용하며 실물 측정 전에는 OFF다.
     plate_weight_check_enabled: false
     plate_opener_weight_kg: 0.05
