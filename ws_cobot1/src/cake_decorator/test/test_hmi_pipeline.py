@@ -39,6 +39,9 @@ class HardwareFreeDraw(Node):
         self.server = ActionServer(self, DrawOnCake, "draw_on_cake", self.execute)
         # 실제 플레이트 시퀀스 대신 서비스 결과만 주입한다. 장비 명령은 생성하지 않는다.
         self.plate_failure = None
+        self.cake_weight_reads = []
+        self.tool_regrasp_attempts = []
+        self.safe_checks = 0
         self.plate_calls = []
         self.prepare_server = self.create_service(
             Trigger, "plate_prepare", self.prepare
@@ -46,6 +49,16 @@ class HardwareFreeDraw(Node):
         self.finish_server = self.create_service(
             Trigger, "plate_finish", self.finish
         )
+        self.ready_server = self.create_service(
+            Trigger, 'workcell_resume_ready', self.resume_ready
+        )
+
+    def resume_ready(self, request, response):
+        """실제 장비 없는 도메인에서 재개 전 안전 확인 서비스 호출만 기록한다."""
+        self.safe_checks += 1
+        response.success = True
+        response.message = '테스트용 안전 자세 확인'
+        return response
 
     def prepare(self, request, response):
         """준비 서비스 호출을 기록하고 지정된 예외 응답을 반환한다."""
@@ -61,6 +74,39 @@ class HardwareFreeDraw(Node):
         failure = self.plate_failure
         response.success = failure is None or failure[0] != phase
         response.message = "완료" if response.success else f"{failure[1]}: {failure[2]}"
+        if not response.success and failure[1] == 'OPENER_MISSING':
+            # 팀원의 실제 따개 재파지까지 소진한 결과가 기존 Trigger 계약을 통해
+            # TM 최종 실패·주문 차단으로 이어지는지 검사한다. 장비 경계는 대역이다.
+            from test_tool_regrasp import opener_plate
+            from cake_decorator.safety_exceptions import OpenerMissingError
+
+            sequence, robot = opener_plate(0.010, 0.010)
+            try:
+                sequence._plate_pick_opener()
+            except OpenerMissingError as error:
+                response.message = f'{error.code}: {error}'
+                self.tool_regrasp_attempts.append(('opener', robot.pick.call_count))
+        if not response.success and phase == 'prepare' and failure[1] == 'CAKE_WEIGHT_FAILED':
+            # 실제 재집기·최종 복귀 로직을 서비스에 연결한다. 로봇 서비스 경계는
+            # 기록용 대역이므로 실제 장비 명령 없이 TM·브릿지·DB까지 검증한다.
+            from test_cake_retry import weight_sequence
+            from cake_decorator.safety_exceptions import PlateWeightError
+
+            sequence, robot, _ = weight_sequence([0.10, 0.15, 0.20, 0.20])
+            parameter = sequence._param
+            sequence._param = lambda name: (
+                0.0 if name in (
+                    'opener_pre_open_wait_sec', 'opener_close_wait_sec',
+                    'opener_close_settle_sec', 'opener_open_wait_sec',
+                ) else parameter(name)
+            )
+            try:
+                sequence._plate_prepare_steps()
+            except PlateWeightError as error:
+                response.message = f'{error.code}: {error}'
+                if error.resume_allowed:
+                    response.message += '\nRESUME_CAKE_PICK'
+                self.cake_weight_reads.append(robot.get_workpiece_weight.call_count)
         return response
 
     def execute(self, handle):
@@ -78,6 +124,19 @@ class HardwareFreeDraw(Node):
             time.sleep(0.15)
         if self.fail:
             handle.abort()
+            if self.fail == 'PEN_GRASP_FAILED':
+                # 펜도 최종 코드를 임의로 만들지 않고 TOP/SIDE 공통 실행기의
+                # 재파지 1회·기본 TCP 정리·안전 자세 복귀 결과를 통과시킨다.
+                from pytest import MonkeyPatch
+                from test_tool_regrasp import pen_executor
+                from test_integrated_pen_cycle import draw_handle
+
+                with MonkeyPatch.context() as patches:
+                    node = pen_executor(patches, 0.080, 0.010, 0.080, 0.010)
+                    result = node._execute_draw(draw_handle(handle.request.drawing_surface))
+                    attempts = sum(kind == 'close' for kind, _ in node._robot.events)
+                    self.tool_regrasp_attempts.append(('pen', attempts))
+                    return result
             return DrawOnCake.Result(
                 success=False,
                 error_code=self.fail,
@@ -216,7 +275,8 @@ class HmiPipelineTest(unittest.TestCase):
                     (
                         "top",
                         "CAKE_WEIGHT_FAILED",
-                        "케이크 무게 확인 실패: 하중 측정 실패. 안전 자세에서 대기중",
+                        "케이크 무게 확인 실패: 입고함 집기 재시도 1/1 후에도 케이크 없음 "
+                        "(무게 증가량 0.0500kg, 기준 0.0750kg 초과 필요). 안전 자세에서 대기중",
                         "prepare",
                     ),
                     (
@@ -253,15 +313,24 @@ class HmiPipelineTest(unittest.TestCase):
                     for _ in range(200):
                         detail = http("/api/orders/" + oid)
                         seen.append(detail["status"])
-                        if detail["status"] in ("completed", "failed"):
+                        if detail["status"] in ("completed", "paused"):
                             break
                         time.sleep(0.1)
                     self.assertEqual(
-                        detail["status"], "failed" if code else "completed"
+                        detail["status"], "paused" if code else "completed"
                     )
                     self.assertEqual(detail["error_code"], code)
                     if code:
                         self.assertEqual(detail["message"], message)
+                        # 실패 확정과 같은 트랜잭션으로 잠긴다. 다음 시나리오도
+                        # 관리자 확인을 명시하기 전에는 새 주문을 만들 수 없다.
+                        recovery = http('/api/workcell/recovery')
+                        self.assertTrue(recovery['requires_reset'])
+                        self.assertEqual(recovery['order_id'], oid)
+                        with self.assertRaises(HTTPError) as denied:
+                            http('/api/drawing', body)
+                        self.assertEqual(denied.exception.code, 409)
+                        denied.exception.close()
                     expected_calls = ["prepare"]
                     if not code or plate_phase == "finish":
                         expected_calls.append("finish")
@@ -280,6 +349,34 @@ class HmiPipelineTest(unittest.TestCase):
                             "observed_states": seen,
                         }
                     )
+                    if code:
+                        decision = {
+                            'revision': recovery['revision'],
+                            'confirmed_reset': True,
+                        }
+                        if recovery['can_resume']:
+                            draw.fail = ''
+                            draw.plate_failure = None
+                            draw.plate_calls.clear()
+                            before_resume = len(draw.goals)
+                            http('/api/workcell/resume', decision)
+                            for _ in range(200):
+                                continued = http('/api/orders/' + oid)
+                                if continued['status'] == 'completed':
+                                    break
+                                time.sleep(0.1)
+                            self.assertEqual(continued['status'], 'completed')
+                            self.assertEqual(continued['order_id'], oid)
+                            self.assertEqual(len(draw.goals) - before_resume, 1)
+                            self.assertEqual(draw.plate_calls, (
+                                ['prepare', 'finish'] if recovery['stopped_stage'] == 'PREPARING'
+                                else ['finish']
+                            ))
+                            self.assertEqual(http('/api/orders')['total'], len(results))
+                            results[-1]['resumed_status'] = continued['status']
+                        else:
+                            http('/api/workcell/initialize', decision)
+                            self.assertEqual(http('/api/orders/' + oid)['status'], 'failed')
                     # 준비 실패 주문은 DP를 호출하지 않으므로 계획을 조회하지 않는다.
                     if plate_phase == "prepare":
                         continue
@@ -302,7 +399,12 @@ class HmiPipelineTest(unittest.TestCase):
                         else:
                             self.assertAlmostEqual(a["y"], b["y"], places=3)
                     results[-1]["plan_source"] = plan["source"]
-                self.assertEqual(len(draw.goals), 5)
+                self.assertEqual(len(draw.goals), 9)
+                self.assertEqual(draw.safe_checks, 4)
+                self.assertEqual(draw.cake_weight_reads, [4])
+                self.assertEqual(
+                    draw.tool_regrasp_attempts, [('pen', 2), ('opener', 2)]
+                )
                 # 전체 그래프 조회에는 조회용 클라이언트 이름도 보일 수 있다.
                 # 실제 각 노드가 제공하는 서비스 서버만 조사해 장비 부재를 검사한다.
                 services = [

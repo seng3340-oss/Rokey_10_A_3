@@ -18,6 +18,7 @@ from std_msgs.msg import String
 from rclpy.qos import QoSProfile, DurabilityPolicy
 
 from .safety_exceptions import ERROR_MESSAGES
+from .resume_checkpoint import RECOVERABLE_ERRORS, checkpoint_json, parse_checkpoint
 from .hmi_plan import build_hmi_plan
 
 from builtin_interfaces.msg import Time as TimeMsg
@@ -110,6 +111,10 @@ class TaskManagerNode(Node):
             Trigger, 'plate_prepare', callback_group=self._cb)
         self._plate_finish_client = self.create_client(
             Trigger, 'plate_finish', callback_group=self._cb)
+        # 재개 직전 읽기 전용 검사로 안전 자세·빈 그리퍼·기본 TCP를 확인한다.
+        self._resume_ready_client = self.create_client(
+            Trigger, 'workcell_resume_ready', callback_group=self._cb,
+        )
 
         # ── GenerateTrajectory 서비스 클라이언트 ──
         self._gen_traj_client = self.create_client(
@@ -173,6 +178,9 @@ class TaskManagerNode(Node):
         self._current_command = ""
         self._last_status_message = "주문 준비"
         self._drawing_error = None
+        self._resume = None
+        self._active_path_index = 0
+        self._active_surface = ''
         self._is_busy = True
         result = CakeOrder.Result()
         start_time = time.time()
@@ -218,8 +226,37 @@ class TaskManagerNode(Node):
                         for point in stroke.points
                     ])
 
+            raw_resume = getattr(request, 'resume_checkpoint', '')
+            if raw_resume:
+                self._resume = parse_checkpoint(raw_resume, request.order_id)
+                ordered = order_surfaces(request.drawing_paths)
+                if self._resume['stage'] == 'DRAWING':
+                    index = self._resume['path_index']
+                    if (
+                        index >= len(ordered)
+                        or ordered[index].surface != self._resume['surface']
+                    ):
+                        raise ValueError('재개할 면과 원본 주문이 다릅니다.')
+                saved_side = self._resume['side_pose']
+                if saved_side and saved_side != list(
+                    self.get_parameter('side_reference_pose').value
+                ):
+                    raise ValueError('옆면 기준점이 변경됐습니다. 초기 자세 세팅을 선택하세요.')
+                if not self._run_plate_service(
+                    self._resume_ready_client, '재개 안전 자세 확인'
+                ):
+                    return self._fail(
+                        goal_handle, result, 'RESUME_NOT_SAFE',
+                        '재개 조건 미충족: 안전 자세·빈 그리퍼·기본 TCP·정지 상태를 확인하세요.',
+                        start_time,
+                    )
+            resume_stage = self._resume['stage'] if self._resume else 'PREPARING'
+
             # [변경 2026-11-18] 원본 plate 시퀀스를 드로잉 앞/뒤로 분리.
-            if self.get_parameter('plate_sequence_enabled').value:
+            if (
+                self.get_parameter('plate_sequence_enabled').value
+                and resume_stage == 'PREPARING'
+            ):
                 self._set_phase(Phase.PREPARING, goal_handle, 0.0, '플레이트 준비')
                 if not self._run_plate_service(self._plate_prepare_client, '드로잉 준비'):
                     code, message = self._plate_error or ('PLATE_PREPARE_FAILED', '플레이트 준비 실패')
@@ -227,17 +264,25 @@ class TaskManagerNode(Node):
                 if self._check_cancel(goal_handle):
                     return self._cancel(goal_handle, result, start_time)
 
-            drawing_start, _ = self._drawing_progress_range()
-            self._set_phase(Phase.DRAWING, goal_handle, drawing_start, '드로잉 시작')
-
-            ok = self._execute_drawing(request, goal_handle)
-            if not ok:
-                if self._check_cancel(goal_handle):
-                    return self._cancel(goal_handle, result, start_time)
-                code, message = self._drawing_error or (
-                    "DRAWING_FAILED", "드로잉 실패",
+            if resume_stage != 'FINISHING':
+                drawing_start, drawing_end = self._drawing_progress_range()
+                if self._resume and self._resume['stage'] == 'DRAWING':
+                    drawing_start += (drawing_end - drawing_start) * (
+                        self._resume['path_index'] / max(1, len(request.drawing_paths))
+                    )
+                self._set_phase(
+                    Phase.DRAWING, goal_handle, drawing_start,
+                    '중단된 그리기 단계 재개' if self._resume else '드로잉 시작',
                 )
-                return self._fail(goal_handle, result, code, message, start_time)
+
+                ok = self._execute_drawing(request, goal_handle)
+                if not ok:
+                    if self._check_cancel(goal_handle):
+                        return self._cancel(goal_handle, result, start_time)
+                    code, message = self._drawing_error or (
+                        "DRAWING_FAILED", "드로잉 실패",
+                    )
+                    return self._fail(goal_handle, result, code, message, start_time)
 
             if self.get_parameter('plate_sequence_enabled').value:
                 if self._check_cancel(goal_handle):
@@ -278,6 +323,7 @@ class TaskManagerNode(Node):
     def _run_plate_service(self, client, phase: str) -> bool:
         """[변경 2026-11-18] Robot Executor에 작업 단위 요청. TM은 좌표를 다루지 않는다."""
         self._plate_error = None
+        self._plate_resume_allowed = False
         if not client.wait_for_service(timeout_sec=10.0):
             self.get_logger().error(f'{phase}: 서비스 연결 실패')
             return False
@@ -288,6 +334,9 @@ class TaskManagerNode(Node):
             result = future.result()
             if result is None or not result.success:
                 detail = getattr(result, "message", "응답 없음")
+                if detail.endswith('\nRESUME_CAKE_PICK'):
+                    detail = detail.removesuffix('\nRESUME_CAKE_PICK')
+                    self._plate_resume_allowed = True
                 code, separator, message = detail.partition(": ")
                 if separator and code in ERROR_MESSAGES:
                     self._plate_error = (code, message[:2048])
@@ -319,6 +368,15 @@ class TaskManagerNode(Node):
         contact_force = self.get_parameter('contact_force').value
 
         for idx, dp in enumerate(paths):
+            resume = getattr(self, '_resume', None)
+            if (
+                resume
+                and resume['stage'] == 'DRAWING'
+                and idx < resume['path_index']
+            ):
+                continue
+            self._active_path_index = idx
+            self._active_surface = dp.surface
             if not dp.strokes:
                 self.get_logger().info(f'DrawingPath[{idx}] strokes 비어 있음 — 건너뜀')
                 continue
@@ -571,6 +629,39 @@ class TaskManagerNode(Node):
         return goal_handle.is_cancel_requested
 
     def _fail(self, goal_handle, result, code, msg, start_time):
+        """정지 단계가 검증된 예외는 재개 체크포인트를 남긴 뒤 Action을 종료한다."""
+        stage = self._current_phase.value
+        index = getattr(self, '_active_path_index', 0)
+        surface = getattr(self, '_active_surface', '')
+        if code == 'RESUME_NOT_SAFE' and getattr(self, '_resume', None):
+            stage = self._resume['stage']
+            index = self._resume['path_index']
+            surface = self._resume['surface']
+        allowed = (
+            (
+                stage in {'PREPARING', 'FINISHING'}
+                and (
+                    code == 'OPENER_MISSING'
+                    or (
+                        code == 'CAKE_WEIGHT_FAILED'
+                        and getattr(self, '_plate_resume_allowed', False)
+                    )
+                )
+            )
+            or (
+                stage == 'DRAWING'
+                and code in {'PEN_GRASP_FAILED', 'PEN_GRASP_RECOVERY_FAILED'}
+            )
+            or code == 'RESUME_NOT_SAFE'
+        )
+        if allowed and code in RECOVERABLE_ERRORS:
+            side = (
+                self.get_parameter('side_reference_pose').value
+                if self.get_parameter('integrated_side_cycle').value else []
+            )
+            result.resume_checkpoint = checkpoint_json(
+                goal_handle.request, stage, index, surface, side,
+            )
         self._set_phase(Phase.FAILED, goal_handle, 0.0, msg)
         result.success = False
         result.error_code = code

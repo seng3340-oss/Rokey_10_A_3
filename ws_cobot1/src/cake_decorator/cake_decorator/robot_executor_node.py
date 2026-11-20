@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import time
+import math
 import traceback
 import threading
 
@@ -25,7 +26,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
-from dsr_msgs2.srv import MoveStop
+from dsr_msgs2.srv import MoveStop, GetCurrentPosj, GetCurrentTcp, CheckMotion
 
 from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
@@ -227,6 +228,12 @@ class RobotExecutorNode(Node):
             Trigger, 'plate_prepare', self._execute_plate_prepare, callback_group=self._cb)
         self._plate_finish_srv = self.create_service(
             Trigger, 'plate_finish', self._execute_plate_finish, callback_group=self._cb)
+        self._resume_ready_srv = self.create_service(
+            Trigger,
+            'workcell_resume_ready',
+            self._check_resume_ready,
+            callback_group=self._cb,
+        )
         self.get_logger().info(
             'robot_executor_node 시작 — 상태 머신 + 액션 서버 대기 중'
         )
@@ -235,6 +242,63 @@ class RobotExecutorNode(Node):
             f"공중={self._param('free_line_speed_mm_s'):g}mm/s, "
             f"반납={self._param('free_line_speed_mm_s'):g}mm/s; TOP→SIDE 제자리 재파지"
         )
+
+    def _check_resume_ready(self, request, response):
+        """관리자 재개 직전 안전 자세·기본 TCP·빈 그리퍼를 읽기만 하며 이동하지 않는다.
+
+        복구 후 시작점은 plate_safe_position_1이다. 관절별 1도 이내를 요구하며
+        그리퍼 폭 검사를 쓰는 실물 설정에서는 열린 폭도 확인한다. 어떤 조회라도
+        실패하면 재개를 거부한다. HMI 버튼으로 정지·출력 이상 래치를 풀지 않는다.
+        """
+        response.success = False
+        if (
+            self._state != TaskState.IDLE
+            or self._robot.stop_latched
+            or self._robot.gripper_output_fault
+            or self._cancel_requested
+        ):
+            response.message = '실행 중·정지·출력 이상 상태에서는 재개할 수 없습니다.'
+            return response
+        if not self._plate_lock.acquire(blocking=False):
+            response.message = '다른 작업이 실행 중입니다.'
+            return response
+        try:
+            joints = self._robot._call('current_joints', GetCurrentPosj.Request())
+            tcp = self._robot._call('get_tcp', GetCurrentTcp.Request())
+            motion = self._robot._call('check_motion', CheckMotion.Request())
+            target = self._param('plate_safe_position_1')
+            valid = (
+                joints is not None
+                and joints.success
+                and len(joints.pos) == 6
+                and all(math.isfinite(value) for value in joints.pos)
+                and all(
+                    abs(actual - taught) <= 1.0
+                    for actual, taught in zip(joints.pos, target)
+                )
+                and tcp is not None
+                and tcp.success
+                and tcp.info == ''
+                and motion is not None
+                and motion.success
+                and motion.status == 0
+            )
+            if valid and self._param('gripper_safety_check_enabled'):
+                width = self._robot.get_gripper_width()
+                valid = (
+                    width is not None
+                    and math.isfinite(width)
+                    and width >= self._param('pen_open_min_width_m')
+                )
+            response.success = bool(valid)
+            response.message = '안전 자세·기본 TCP·빈 그리퍼 확인 완료' if valid else (
+                '안전 자세·기본 TCP·빈 그리퍼를 확인하지 못했습니다.'
+            )
+        except Exception as error:
+            response.message = f'재개 조건 조회 실패: {error}'
+        finally:
+            self._plate_lock.release()
+        return response
 
     def _plate_run(self, response, phase: str, callback):
         if not self._param('plate_sequence_enabled'):
@@ -254,6 +318,10 @@ class RobotExecutorNode(Node):
             self.get_logger().error(f'{phase}: {exc.code}: {exc}')
             response.success = False
             response.message = f'{exc.code}: {exc}'
+            if getattr(exc, 'resume_allowed', False):
+                # Trigger 기존 본문 뒤의 명시적 표식을 TM에서만 분리한다. 단순 센서
+                # 장애나 안착 후 실패를 케이크 집기 전 재개로 잘못 해석하지 않는다.
+                response.message += '\nRESUME_CAKE_PICK'
         except Exception as exc:
             self.get_logger().error(f'{phase} 예외: {exc}\n{traceback.format_exc()}')
             response.success = False

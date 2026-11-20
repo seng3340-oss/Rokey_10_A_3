@@ -3,6 +3,7 @@ import type { DrawingPathPayload, DrawingPayload } from "./drawing.ts";
 /** 기존 주문 API의 상태 값이다. 로봇의 안전 상태나 운전 모드를 뜻하지 않는다. */
 export const orderStates = [
   "received",
+  "paused",
   "claimed",
   "dispatching",
   "running",
@@ -172,6 +173,7 @@ export function parsePage(value: unknown): OrderPage {
 /** 기존 API 상태를 운영자에게 보여주는 명칭이다. 로봇 안전 판정과는 분리한다. */
 export const orderLabels: Record<OrderState, string> = {
   received: "접수",
+  paused: "복구 대기",
   claimed: "브릿지 인수",
   dispatching: "전송 확인 중",
   running: "공정 진행",
@@ -244,7 +246,7 @@ export function collectOrderChanges(
     ]);
     signatures.set(order.order_id, signature);
     if (previous.get(order.order_id) === signature) continue;
-    const severity = ["failed", "rejected"].includes(order.status)
+    const severity = ["failed", "paused", "rejected"].includes(order.status)
       ? "error"
       : order.status === "uncertain"
         ? "warning"
@@ -406,8 +408,8 @@ export function parseRobotStop(value: unknown): RobotStop {
 }
 
 /**
- * HMI에서 유일하게 허용하는 쓰기 요청: 소프트웨어 정지.
- * 정지 해제 API는 없으며, 재개는 현장 정리 후 실행기 재시작으로만 한다.
+ * HMI의 소프트웨어 정지를 요청한다. 예외 복구·주문 재개와는 별도 경로다.
+ * 소프트웨어 정지 해제 API는 없으며 현장 정리 후 실행기 재시작으로 해제한다.
  * 본문 없이 POST하며 응답으로 갱신된 정지 상태를 돌려받는다.
  * 정지 요청은 즉시성이 중요하므로 3초 안에 응답이 없으면 실패로 알린다.
  */
@@ -427,4 +429,118 @@ export async function sendRobotStop(): Promise<RobotStop> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** 제작 실패 후 서버에 영속화된 접수 잠금이다. 로봇 운전·안전 상태와는 별개다. */
+export interface WorkcellRecovery {
+  revision: number;
+  requires_reset: boolean;
+  can_reset: boolean;
+  can_resume: boolean;
+  resume_requested: boolean;
+  stopped_stage: string;
+  stopped_label: string;
+  order_id: string;
+  error_code: string;
+  message: string;
+  updated_at: string;
+  reset_at: string | null;
+}
+
+/** 알 수 없는 잠금 응답을 접수 가능으로 해석하지 않도록 계약을 검사한다. */
+export function parseWorkcellRecovery(value: unknown): WorkcellRecovery {
+  const row = value as WorkcellRecovery;
+  if (
+    !row ||
+    typeof row !== "object" ||
+    !Number.isSafeInteger(row.revision) ||
+    row.revision < 0 ||
+    typeof row.requires_reset !== "boolean" ||
+    typeof row.can_reset !== "boolean" ||
+    typeof row.can_resume !== "boolean" ||
+    typeof row.resume_requested !== "boolean" ||
+    typeof row.stopped_stage !== "string" ||
+    typeof row.stopped_label !== "string" ||
+    typeof row.order_id !== "string" ||
+    typeof row.error_code !== "string" ||
+    typeof row.message !== "string" ||
+    typeof row.updated_at !== "string" ||
+    !(row.reset_at === null || typeof row.reset_at === "string") ||
+    (row.requires_reset && (!row.order_id || row.revision === 0)) ||
+    (row.can_reset && !row.requires_reset) ||
+    (row.can_resume && !row.can_reset)
+  )
+    throw new Error("재설정 상태 응답을 확인할 수 없습니다.");
+  return row;
+}
+
+/** 관리자 확인 버튼에서만 호출한다. 재개는 동일 주문을 예약하고 초기 확인은 최종 실패로 종료한다. */
+export async function sendWorkcellDecision(
+  decision: "resume" | "initialize",
+  revision: number,
+  signal: AbortSignal,
+): Promise<WorkcellRecovery> {
+  const response = await fetch(`/api/workcell/${decision}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision, confirmed_reset: true }),
+    signal,
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const problem = await response.json();
+    throw new Error(
+      typeof problem.detail === "string"
+        ? problem.detail
+        : "재설정 완료 요청 실패",
+    );
+  }
+  return parseWorkcellRecovery(await response.json());
+}
+
+/** 서버에 기록한 제작 이벤트다. id는 페이지 이동용 증가 커서이며 시간은 UTC ISO다. */
+export interface StoredWorkcellLog {
+  id: number;
+  created_at: string;
+  order_id: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+}
+export interface WorkcellLogPage {
+  items: StoredWorkcellLog[];
+  has_more: boolean;
+}
+
+/** 깨진 로그·커서 응답은 빈 이력으로 숨기지 않고 재조회 가능한 오류로 표시한다. */
+export function parseWorkcellLogs(value: unknown): WorkcellLogPage {
+  const page = value as WorkcellLogPage;
+  if (
+    !page ||
+    !Array.isArray(page.items) ||
+    page.items.length > 100 ||
+    typeof page.has_more !== "boolean" ||
+    page.items.some(
+      (row) =>
+        !row ||
+        !Number.isSafeInteger(row.id) ||
+        row.id < 1 ||
+        typeof row.created_at !== "string" ||
+        !Number.isFinite(Date.parse(row.created_at)) ||
+        typeof row.order_id !== "string" ||
+        typeof row.message !== "string" ||
+        !["info", "warning", "error"].includes(row.severity),
+    )
+  )
+    throw new Error("로그 응답을 확인할 수 없습니다.");
+  return page;
+}
+
+/** 새 로그·이전 페이지가 겹쳐 도착해도 ID로 합치고 최신순을 유지한다. */
+export function mergeWorkcellLogs(
+  previous: StoredWorkcellLog[],
+  incoming: StoredWorkcellLog[],
+): StoredWorkcellLog[] {
+  return [
+    ...new Map([...previous, ...incoming].map((row) => [row.id, row])).values(),
+  ].sort((a, b) => b.id - a.id);
 }
