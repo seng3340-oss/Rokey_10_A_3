@@ -226,6 +226,12 @@ class DoosanRobotClient:
         # 안전을 위해 후속 자동 홈 복귀도 하지 않는다.
         self.gripper_output_fault = False
 
+        # HMI 소프트웨어 정지 래치. True면 로봇을 움직이거나 그리퍼를 구동하는
+        # 서비스(_LATCH_BLOCKED)를 보내지 않고 실패(None)로 처리한다.
+        # 조회·TCP 설정·move_stop은 계속 허용해 정지 후 정리와 상태 확인이 가능하다.
+        # 실행 노드가 /cake/stop_latch 토픽으로 설정·해제한다.
+        self.stop_latched = False
+
         # 노드 생성 시점은 아직 어떤 모터 명령도 보내지 않은 정지 상태다.
         # 이후 운용 중 설정을 바꾸려면 configure_gripper(robot_stopped=True)를
         # 명시해야 하며, 그렇지 않으면 기존 설정을 유지한다.
@@ -240,13 +246,28 @@ class DoosanRobotClient:
     # 서비스 호출 헬퍼
     # ------------------------------------------------------------------
 
+    # 정지 래치 중 거부하는 서비스 키. 로봇 이동(move_*, move_stop 제외)과
+    # 그리퍼 구동(제어박스 DO, 가상 그리퍼 명령)이다.
+    _LATCH_BLOCKED = frozenset({
+        "move_jointx", "move_circle", "move_line", "move_joint",
+        "move_home", "move_spline", "set_digital_output", "gripper",
+    })
+
     def _call(self, key: str, request, timeout: float = 180.0) -> Optional[object]:
         """동기 서비스 호출 래퍼.
 
+        모든 로봇 명령이 이 함수를 지나므로 HMI 정지 래치를 여기서 검사한다.
+
         Returns
         -------
-        서비스 응답 객체. 실패 시 None.
+        서비스 응답 객체. 실패 또는 정지 래치로 거부하면 None.
         """
+        if self.stop_latched and (
+            key in self._LATCH_BLOCKED
+            or (key.startswith("move_") and key != "move_stop")
+        ):
+            self._logger.error(f"HMI 정지 중: {key} 명령을 보내지 않습니다.")
+            return None
         client = self._clients[key]
 
         if not client.wait_for_service(timeout_sec=self._timeout):

@@ -1,4 +1,4 @@
-# 작업 관리 노드가 /task_status로 발행할 작업 상태다. 아직 발행 노드는 없다.
+# task_manager_node가 /task_status로 발행하는 작업 상태. 작업 중 마지막 값을 1초마다 갱신한다.
 string order_id
 # 공정 상태 문자열. 허용 상태 집합은 작업 관리 구현과 함께 확정한다.
 string phase

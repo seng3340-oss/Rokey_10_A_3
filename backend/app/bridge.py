@@ -30,6 +30,9 @@ class BridgeEvent(ContractModel):
         "rejected",
         "uncertain",
     ]
+    # 운전 모드는 브릿지 실행 설정이며 실제 장비 연결이나 안전 확인을 뜻하지 않는다.
+    execution_mode: Literal["unknown", "real", "simulation"] = "unknown"
+    current_command: Annotated[str, Field(max_length=128)] = ""
     phase: Annotated[str, Field(max_length=128)] = ""
     progress_pct: Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)] = 0.0
     message: Annotated[str, Field(max_length=2048)] = ""
@@ -63,6 +66,12 @@ def now():
 @router.post("/claim", dependencies=[Depends(authorize)])
 def claim_order(request: Request):
     """received 주문 하나를 원자적으로 인수한다. 인수한 주문은 자동 재할당하지 않는다."""
+    # HMI 소프트웨어 정지 중에는 새 주문을 내주지 않는다. 브릿지도 같은 검사를 하지만
+    # 정지 수신 전에 claim이 먼저 도착하는 경쟁을 서버에서도 막는다.
+    # (robot_stop 모듈이 이 모듈을 import하므로 순환 import 없이 app.state로 확인한다.)
+    robot_stop = getattr(request.app.state, "robot_stop", None)
+    if robot_stop is not None and robot_stop.stopped:
+        return Response(status_code=204)
     with request.app.state.database.connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(

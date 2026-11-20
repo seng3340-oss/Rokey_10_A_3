@@ -20,3 +20,7 @@ frontend/dist/
 
 # 로봇별 로컬 실측값은 형상 관리에서 제외한다.
 /config/local/
+
+# SQLite 보조 파일도 주문 데이터와 함께 로컬에 유지한다.
+*.sqlite3-wal
+*.sqlite3-shm

@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
       // frontend 밖의 공통 실측 JSON도 개발 서버에서 읽되 프로젝트 경계 안으로 제한한다.
       fs: { allow: [fileURLToPath(new URL("..", import.meta.url))] },
       proxy: {
-        // 기존 드로잉 요청용 프록시다. 정적 HMI는 API를 호출하지 않는다.
+        // 고객 주문 요청과 HMI 읽기 전용 조회에 사용하는 동일 출처 프록시다.
         "/api": {
           target: env.API_PROXY_TARGET || "http://127.0.0.1:5000",
           changeOrigin: true,

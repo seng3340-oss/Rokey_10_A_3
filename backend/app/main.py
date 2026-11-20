@@ -8,13 +8,16 @@ import sqlite3
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .database import Database
 from .bridge import router as bridge_router
 from .drawings import router as drawing_router
 from .orders import router as order_router
+from .monitoring import router as monitoring_router, runtime_snapshot
+from .robot_stop import RobotStopState, router as robot_stop_router
 
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data" / "orders.sqlite3"
@@ -70,6 +73,7 @@ def create_app(
     database_path: Path | None = None,
     max_body_bytes: int = 2 * 1024 * 1024,
     bridge_token: str | None = None,
+    frontend_dist: Path | None = None,
 ) -> FastAPI:
     """테스트마다 별도 DB를 주입할 수 있도록 앱 생성과 DB 준비를 분리한다."""
     path = database_path or Path(os.environ.get("CAKE_DATABASE_PATH", DEFAULT_DATABASE))
@@ -84,15 +88,19 @@ def create_app(
     app = FastAPI(
         title="케이크 드로잉 주문 API",
         version="0.1.0",
-        description="그림 저장·조회와 인증된 ROS 브릿지 내부 연결. HMI는 정적이며 로봇 실행 노드는 미구현입니다.",
+        description="그림 저장·조회와 인증된 ROS 브릿지 내부 연결. HMI는 TM 피드백·연결 관측·계획 경로를 읽습니다. 로봇 안전 신호·실측 궤적은 별도 인터페이스가 필요합니다.",
         lifespan=lifespan,
     )
     app.state.database = database
     app.state.bridge_token = bridge_token or os.environ.get("CAKE_BRIDGE_TOKEN", "")
+    # HMI 소프트웨어 정지 상태. 프로세스 메모리에만 두며 재시작 시 해제 상태로 시작한다.
+    app.state.robot_stop = RobotStopState()
     app.add_middleware(BodyLimitMiddleware, max_bytes=max_body_bytes)
     app.include_router(drawing_router)
     app.include_router(order_router)
     app.include_router(bridge_router)
+    app.include_router(monitoring_router)
+    app.include_router(robot_stop_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
@@ -121,7 +129,34 @@ def create_app(
     @app.get("/api/health", tags=["서버 확인"])
     def health():
         """웹 서버 상태만 반환한다. ROS나 로봇이 연결된 것으로 오해하지 않게 한다."""
-        return {"status": "ok", "ros_connected": False, "ros_status_monitored": False}
+        snapshot = runtime_snapshot(database)
+        return {
+            "status": "ok",
+            "ros_connected": snapshot["task_server_ready"],
+            "ros_status_monitored": snapshot["bridge_fresh"],
+            "robot_connected": None,
+        }
+
+    # 선택한 빌드 결과만 동일 출처로 제공한다. 이 경로는 ROS/장비를 시작하지 않는다.
+    configured_dist = frontend_dist or os.environ.get("CAKE_FRONTEND_DIST")
+    if configured_dist:
+        dist = Path(configured_dist).resolve()
+        if not (dist / "index.html").is_file():
+            raise ValueError("CAKE_FRONTEND_DIST에 frontend 빌드 결과가 필요합니다.")
+
+        @app.get("/", include_in_schema=False)
+        @app.get("/hmi", include_in_schema=False)
+        @app.get("/workspace", include_in_schema=False)
+        @app.get("/paired", include_in_schema=False)
+        def frontend_page():
+            return FileResponse(dist / "index.html")
+
+        if (dist / "assets").is_dir():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=dist / "assets"),
+                name="frontend-assets",
+            )
 
     return app
 

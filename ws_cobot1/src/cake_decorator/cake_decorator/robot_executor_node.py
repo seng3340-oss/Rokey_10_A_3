@@ -20,7 +20,10 @@ from rclpy.action import ActionServer, GoalResponse, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
+from dsr_msgs2.srv import MoveStop
 
 from cake_decorator_interfaces.action import DrawOnCake, GraspTool, PickAndPlace
 
@@ -160,6 +163,21 @@ class RobotExecutorNode(Node):
         # ── 상태 머신 ──
         self._state = TaskState.IDLE
         self._cancel_requested = False
+
+        # ── HMI 소프트웨어 정지 래치 ──
+        # 브릿지가 /cake/stop_latch(Bool, TRANSIENT_LOCAL)로 정지·해제를 알린다.
+        # 액션 실행 중에도 처리되도록 재진입 콜백 그룹(MultiThreadedExecutor)에 둔다.
+        self._stop_latch_sub = self.create_subscription(
+            Bool,
+            '/cake/stop_latch',
+            self._on_stop_latch,
+            QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+            callback_group=self._cb,
+        )
 
         # --- 액션 서버 일괄 등록 ---
         actions = [
@@ -694,8 +712,35 @@ class RobotExecutorNode(Node):
         return self._robot.execute_drawing_command(command)
 
     def _goal_callback(self, goal_request):
+        # HMI 정지 중에는 새 작업을 받지 않는다. 해제 후 다음 주문부터 실행한다.
+        if self._robot.stop_latched:
+            self.get_logger().warn('HMI 정지 중: 액션 Goal 거부')
+            return GoalResponse.REJECT
         self.get_logger().info('액션 Goal 수신')
         return GoalResponse.ACCEPT
+
+    def _on_stop_latch(self, msg: Bool) -> None:
+        """HMI 정지 래치 수신.
+
+        정지(True)
+            1. 로봇 클라이언트 래치를 먼저 걸어 이후 이동·그리퍼 명령을 모두 거부한다.
+            2. 진행 중 작업에 취소 플래그를 세워 단계 경계에서 종료하게 한다.
+            3. move_stop(Quick stop)을 한 번 더 보낸다. 브릿지의 정지 직전에 이 노드가
+               보낸 이동 명령이 드라이버에 늦게 도착한 경우까지 멈추기 위한 중복 정지다.
+        False
+            실행기 시작 시 브릿지의 초기 동기화로만 온다(HMI 해제 기능 없음).
+            래치를 걸지 않은 상태로 둔다. 재개는 실행기 재시작으로만 한다.
+        """
+        if not msg.data:
+            # 이미 정지 래치가 걸렸다면 풀지 않는다. 같은 실행 중에는 재개하지 않는다.
+            return
+        self._robot.stop_latched = True
+        self._cancel_requested = True
+        self.get_logger().error('HMI 정지 수신: 이동·그리퍼 명령 차단, 로봇 정지')
+        # DR_QSTOP(1): Quick stop, Stop Category 2. 브릿지와 같은 정지 방식이다.
+        response = self._robot._call('move_stop', MoveStop.Request(stop_mode=1), timeout=3.0)
+        if response is None or not response.success:
+            self.get_logger().error('실행 노드 move_stop 응답 확인 실패. 펜던트를 확인하세요.')
 
     def _cancel_callback(self, goal_handle):
         self.get_logger().info('액션 취소 요청 수신')

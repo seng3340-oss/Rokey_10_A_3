@@ -94,3 +94,10 @@ ros2 interface show cake_decorator_interfaces/srv/GenerateTrajectory
 ```
 
 빌드는 타입·설치 확인입니다. DP 업데이트 후 TOP/SIDE의 실제 계산·가상 이동 통합 검증이 추가로 필요합니다.
+
+## HMI 계획 표시
+
+HMI는 DP 응답의 표시용 사본을 읽습니다. 원뿔대의 사면 길이·케이크 평면 회전과
+실제 요청의 TOP/SIDE 기준점을 반영하며, 펜을 올린 구간은 잇지 않습니다.
+원호의 경유점과 스플라인 표본은 계획 제어점으로 표시하며 실측 궤적이 아닙니다.
+HMI는 이동·정지 명령을 보내지 않습니다.

@@ -102,6 +102,7 @@ def summary_from_row(row: sqlite3.Row) -> OrderSummary:
         phase=row["phase"],
         progress_pct=row["progress_pct"],
         message=row["message"],
+        error_code=json.loads(row["result_json"] or "{}").get("error_code", ""),
         robot_dispatched=(
             None
             if row["execution_state"] in ("dispatching", "uncertain")
@@ -121,7 +122,7 @@ def list_orders(
         connection.execute("BEGIN")
         total = connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
         rows = connection.execute(
-            "SELECT o.order_id,o.drawing_surface,o.created_at,e.state AS execution_state,e.phase,e.progress_pct,e.message FROM orders o "
+            "SELECT o.order_id,o.drawing_surface,o.created_at,e.state AS execution_state,e.phase,e.progress_pct,e.message,e.result_json FROM orders o "
             "JOIN order_execution e USING(order_id) ORDER BY o.id DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
@@ -139,7 +140,7 @@ def read_order(order_id: str, request: Request):
     """저장된 주문과 원본 그림을 조회하며 존재하지 않는 주문은 404로 구분한다."""
     with request.app.state.database.connection() as connection:
         row = connection.execute(
-            "SELECT o.*, e.state AS execution_state,e.phase,e.progress_pct,e.message FROM orders o "
+            "SELECT o.*, e.state AS execution_state,e.phase,e.progress_pct,e.message,e.result_json FROM orders o "
             "JOIN order_execution e USING(order_id) WHERE o.order_id = ?",
             (order_id,),
         ).fetchone()
@@ -151,3 +152,29 @@ def read_order(order_id: str, request: Request):
         **summary_from_row(row).model_dump(),
         drawing=json.loads(row["drawing_json"]),
     )
+
+
+@router.get("/{order_id}/monitor")
+def read_order_monitor(order_id: str, request: Request):
+    """저장된 마지막 이벤트만 읽는다. 안전 신호·실행 모드·실측 궤적은 추정하지 않는다.
+
+    기존 주문 응답을 유지하는 선택적 확장이다. 내부 토큰과 원본 이벤트 본문은
+    반환하지 않으며 DB에 주문 생성·인수·변경을 일으키지 않는다.
+    """
+    with request.app.state.database.connection() as connection:
+        row = connection.execute(
+            "SELECT updated_at,result_json FROM order_execution WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "해당 주문을 찾을 수 없습니다.")
+    event = json.loads(row["result_json"] or "{}")
+    return {
+        "updated_at": row["updated_at"],
+        "error_code": event.get("error_code", ""),
+        "elapsed_time_sec": event.get("elapsed_time_sec", 0.0),
+        "execution_mode": event.get("execution_mode", "unknown"),
+        "current_command": event.get("current_command", ""),
+        "safety_status": "unknown",
+        "trajectory_available": False,
+    }
