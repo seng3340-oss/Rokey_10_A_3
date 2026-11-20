@@ -42,7 +42,7 @@ def return_pen(
         "pen_motion_acc_mm_s2": 400.0,
         "pen_rotation_speed_deg_s": 90.0,
         "pen_rotation_acc_deg_s2": 180.0,
-        "pen_tilt_speed_deg_s": 45.0,
+        "pen_tilt_speed_deg_s": 31.5,
         "pen_tilt_acc_deg_s2": 90.0,
     }
     resolved = {}

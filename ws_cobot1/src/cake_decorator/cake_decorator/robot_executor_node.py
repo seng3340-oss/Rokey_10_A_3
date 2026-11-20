@@ -107,7 +107,7 @@ class RobotExecutorNode(Node):
         'pen_motion_acc_mm_s2': 400.0,
         'pen_rotation_speed_deg_s': 90.0,
         'pen_rotation_acc_deg_s2': 180.0,
-        'pen_tilt_speed_deg_s': 45.0,
+        'pen_tilt_speed_deg_s': 31.5,
         'pen_tilt_acc_deg_s2': 90.0,
         # 빈손·도구만 들고 움직이는 구간만 가속하고, 케이크 운반은 유지한다.
         'free_joint_speed_deg_s': 60.0,

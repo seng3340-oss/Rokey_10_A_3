@@ -27,7 +27,7 @@ class MotionRobot(ServiceRobot):
         return super().move_joint(joints, **kwargs)
 
 
-@pytest.mark.parametrize("tilt_speed, tilt_acc", [(45.0, 90.0), (30.0, 60.0)])
+@pytest.mark.parametrize("tilt_speed, tilt_acc", [(31.5, 90.0), (30.0, 60.0)])
 def test_pick_slows_only_tilt_and_upright_with_fixed_pivot(tilt_speed, tilt_acc):
     """기울임 두 구간만 감속하고 인출 속도·220mm 중심·티칭을 보존한다."""
     from cake_decorator.integrated_pen_cycle import IntegratedPenCycle
@@ -91,7 +91,7 @@ def test_return_slows_orientation_but_keeps_free_unwind_and_coordinates(
     monkeypatch.setattr(returning.time, "sleep", lambda _: None)
     rack = rack_parameters()
     rack.update(
-        pen_tilt_speed_deg_s=45.0,
+        pen_tilt_speed_deg_s=31.5,
         pen_tilt_acc_deg_s2=90.0,
         pen_drop_pose=[280.0, 210.0, 330.0, 40.25, 180.0, 40.02],
         pen_drop_after_pose=[280.0, 210.0, 570.0, 37.07, -179.99, 36.84],
@@ -116,14 +116,14 @@ def test_return_slows_orientation_but_keeps_free_unwind_and_coordinates(
     assert [settings for _, settings in robot.joints] == [
         {"speed_deg_s": 60.0, "acc_deg_s2": 120.0},
         {"speed_deg_s": 60.0, "acc_deg_s2": 120.0},
-        {"speed_deg_s": 45.0, "acc_deg_s2": 90.0},
+        {"speed_deg_s": 31.5, "acc_deg_s2": 90.0},
     ]
     assert len(robot.lines) == 4
     assert [settings for _, _, settings in robot.lines] == [
         {
             "speed_mm_s": speed,
             "acc_mm_s2": 400.0,
-            "angular_speed_deg_s": 45.0,
+            "angular_speed_deg_s": 31.5,
             "angular_acc_deg_s2": 90.0,
         }
         for speed in (150.0, 180.0, 120.0, 150.0)
@@ -185,7 +185,7 @@ def test_return_accepts_legacy_node_without_new_tilt_parameters(monkeypatch):
             rack=rack,
             parameter=lambda name: node.get_parameter(name).value,
         )
-        assert all(settings["angular_speed_deg_s"] == 45.0 for _, _, settings in robot.lines)
+        assert all(settings["angular_speed_deg_s"] == 31.5 for _, _, settings in robot.lines)
         assert any(kind == "gripper" for kind, _ in robot.events)
     finally:
         node.destroy_node()

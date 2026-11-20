@@ -495,7 +495,7 @@ def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
     speeds = [call.kwargs['speed_mm_s'] for call in robot.move_line.call_args_list]
     assert speeds == [120., 150., 150., 150.]
     # 45도 기울임·수직 복귀만 동일하게 낮추고 직선 인출은 빠르게 유지한다.
-    assert [call.kwargs['angular_speed_deg_s'] for call in robot.move_line.call_args_list] == [90., 45., 90., 45.]
+    assert [call.kwargs['angular_speed_deg_s'] for call in robot.move_line.call_args_list] == [90., 31.5, 90., 31.5]
     assert [call.kwargs['angular_acc_deg_s2'] for call in robot.move_line.call_args_list] == [180., 90., 180., 90.]
 
 

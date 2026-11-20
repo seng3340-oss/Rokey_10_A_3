@@ -49,8 +49,8 @@ robot_executor_node:
     # 도구 자세의 회전 제한도 함께 올려 선속도만 높여도 느린 현상을 줄인다.
     pen_rotation_speed_deg_s: 90.0
     pen_rotation_acc_deg_s2: 180.0
-    # 옆면 펜의 45도 기울임·수직 복귀만 같은 완만한 속도로 실행한다.
-    pen_tilt_speed_deg_s: 45.0
+    # 옆면 펜의 45도 기울임·수직 복귀: 기존 45도/s의 70%인 31.5도/s.
+    pen_tilt_speed_deg_s: 31.5
     pen_tilt_acc_deg_s2: 90.0
     # 케이크 운반·그리기 구간은 기존 속도 유지. 빈손·도구 이동만 가속한다.
     free_joint_speed_deg_s: 60.0
