@@ -225,3 +225,29 @@ test("robot stop contract validates state and posts to stop endpoints", async ()
     globalThis.fetch = original;
   }
 });
+
+test("로그 시각과 공정 메시지는 한글로 표시하고 오류 코드는 유지한다", async () => {
+  const { formatLogTime, koreanLogMessage, collectOrderChanges } =
+    await import("../src/api/hmi.ts");
+  assert.equal(
+    formatLogTime(new Date(2026, 10, 20, 14, 10, 2, 123)),
+    "2026-11-20 14:10:02.123",
+  );
+  assert.equal(
+    koreanLogMessage("DrawingPath[1/2] PEN_DOWN · 획 2/5"),
+    "그림 경로 [1/2] 펜 내림 · 획 2/5",
+  );
+  assert.equal(
+    koreanLogMessage("DrawOnCake 실패: MOVE_FAILED_AT_12", "MOVE_FAILED_AT_12"),
+    "그리기 실패: MOVE_FAILED_AT_12",
+  );
+  assert.equal(
+    koreanLogMessage("Failed to fetch"),
+    "서버에 연결할 수 없습니다",
+  );
+  const result = collectOrderChanges(new Map(), [
+    parseOrder({ ...order, message: "DrawingPath[1/2] DRAWING · 획 2/5" }),
+  ]);
+  assert.match(result.changes[0].message, /드로잉.*그림 경로 \[1\/2\] 그리기/);
+  assert.ok(result.changes[0].message.includes(order.order_id));
+});

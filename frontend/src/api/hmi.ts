@@ -151,6 +151,44 @@ export interface OrderLog {
   severity: "info" | "warning" | "error";
 }
 
+/** HMI에서 관측한 시각을 운영자의 현지 시간으로 밀리초까지 표시한다. */
+export function formatLogTime(date: Date): string {
+  const pad = (value: number, length = 2) =>
+    String(value).padStart(length, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+
+/** 공정 로그에 포함된 경로·동작 이름을 번역하고 오류코드는 보존한다. */
+export function koreanLogMessage(message: string, errorCode = ""): string {
+  const motions: Record<string, string> = {
+    APPROACH: "접근",
+    PEN_DOWN: "펜 내림",
+    DRAWING: "그리기",
+    PEN_UP: "펜 올림",
+    REPOSITIONING: "다음 획으로 이동",
+  };
+  const words: Record<string, string> = {
+    TM: "작업 관리 노드",
+    Goal: "작업 요청",
+    DrawOnCake: "그리기",
+    HTTP: "응답 코드",
+    TOP: "윗면",
+    SIDE: "옆면",
+  };
+  return message
+    .replace(/Failed to fetch/gi, "서버에 연결할 수 없습니다")
+    .replace(/NetworkError/gi, "네트워크 연결 오류")
+    .replace(/DrawingPath\[(\d+)\/(\d+)\]/g, "그림 경로 [$1/$2]")
+    .replace(/[A-Za-z][A-Za-z0-9_-]*/g, (word) => {
+      if (
+        word === errorCode ||
+        (/^[A-Z]+(?:_[A-Z0-9]+)+$/.test(word) && !(word in motions))
+      )
+        return word;
+      return motions[word] || words[word] || "상세 정보";
+    });
+}
+
 /** 선택한 주문과 무관하게 목록 전체의 변화를 수집해 다른 주문의 오류도 놓치지 않는다. */
 export function collectOrderChanges(
   previous: Map<string, string>,
@@ -176,7 +214,7 @@ export function collectOrderChanges(
         : "info";
     changes.push({
       severity,
-      message: `${order.order_id} · ${orderLabels[order.status]} · ${order.phase || "공정 미수신"} · ${order.progress_pct.toFixed(1)}% · ${order.message}${order.error_code ? ` · 오류 코드 ${order.error_code}` : ""}`,
+      message: `${order.order_id} · ${orderLabels[order.status]} · ${order.phase && phaseLabel(order.phase) === order.phase ? "알 수 없는 공정" : phaseLabel(order.phase)} · ${order.progress_pct.toFixed(1)}% · ${koreanLogMessage(order.message, order.error_code)}${order.error_code ? ` · 오류 코드 ${order.error_code}` : ""}`,
     });
   }
   return { signatures, changes };

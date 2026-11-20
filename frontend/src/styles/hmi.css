@@ -292,7 +292,7 @@
 }
 .hmi-log {
   display: grid;
-  grid-template-columns: 95px minmax(0, 1fr);
+  grid-template-columns: 175px minmax(0, 1fr);
   gap: 12px;
   padding: 14px 0;
   border-top: 1px solid var(--line);
@@ -375,7 +375,8 @@
     grid-template-columns: 1fr;
   }
   .hmi-log {
-    grid-template-columns: 75px minmax(0, 1fr);
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
   .hmi-drawing,
   .hmi-placeholder {
