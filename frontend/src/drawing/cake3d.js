@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { MODEL_SIZE } from "./cakeDimensions";
+import { createCreamLayer } from "./creamGeometry.js";
 /**
- * 두 면의 캔버스 텍스처로 회전 가능한 케이크를 만들고 조작·정리 함수를 반환한다.
+ * 두 면의 원본 획을 생크림 입체로 표시하는 케이크와 조작·정리 함수를 반환한다.
  * 일반 미리보기와 확인 창이 각각 호출하며, 입력 그림 자체는 변경하지 않는다.
  * @param {HTMLElement} container
  * @param {{top: HTMLCanvasElement, side: HTMLCanvasElement}} textures
- * @param {{autoRotate?: boolean}} options HMI에서만 자동 회전을 선택한다.
+ * @param {{autoRotate?: boolean, cream?: boolean}} options HMI는 자동 회전도 선택한다.
  */
 export function cakeView(container, textures, options = {}) {
   try {
@@ -18,6 +19,8 @@ export function cakeView(container, textures, options = {}) {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.9;
+    renderer.shadowMap.enabled = Boolean(options.cream);
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
     // 본체·윗면·받침·테두리를 하나의 모형으로 구성하고 조명으로 입체감을 만든다.
     const group = new THREE.Group();
@@ -25,6 +28,13 @@ export function cakeView(container, textures, options = {}) {
     scene.add(new THREE.HemisphereLight(0xffffff, 0xc8b9a1, 1.8));
     const key = new THREE.DirectionalLight(0xfff7ec, 2);
     key.position.set(-3, 6, 4);
+    // 크림의 얕은 그림자가 평평한 케이크 표면과 흰 입체 획을 구분한다.
+    key.castShadow = Boolean(options.cream);
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.left = key.shadow.camera.bottom = -3;
+    key.shadow.camera.right = key.shadow.camera.top = 3;
+    key.shadow.normalBias = 0.003;
+    key.shadow.bias = -0.0001;
     scene.add(key);
     const fill = new THREE.DirectionalLight(0xffffff, 0.7);
     fill.position.set(4, 2, -3);
@@ -48,18 +58,30 @@ export function cakeView(container, textures, options = {}) {
         true,
         Math.PI,
       ),
-      new THREE.MeshStandardMaterial({ map: sideTexture, roughness: 0.85 }),
+      new THREE.MeshStandardMaterial(
+        options.cream
+          ? { color: 0xf0e4cc, roughness: 0.93 }
+          : { map: sideTexture, roughness: 0.85 },
+      ),
     );
     side.position.y = MODEL_SIZE.cakeBottom + MODEL_SIZE.cakeHeight / 2;
+    side.receiveShadow = true;
     group.add(side);
     // 원판을 수평으로 눕혀 원뿔대 위에 배치한다. 미세한 높이 차이로 겹침을 피한다.
     const top = new THREE.Mesh(
       new THREE.CircleGeometry(MODEL_SIZE.cakeRadius, 96),
-      new THREE.MeshStandardMaterial({ map: topTexture, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial(
+        options.cream
+          ? { color: 0xf5ead5, roughness: 0.92 }
+          : { map: topTexture, roughness: 0.9 },
+      ),
     );
     top.rotation.x = -Math.PI / 2;
     top.position.y = MODEL_SIZE.cakeTop + 0.001;
+    top.receiveShadow = true;
     group.add(top);
+    const cream = options.cream ? createCreamLayer() : null;
+    if (cream) group.add(cream.group);
     // 받침과 가장자리 장식은 그림 텍스처와 분리해 케이크 윤곽을 유지한다.
     const board = new THREE.Mesh(
       new THREE.BoxGeometry(
@@ -196,8 +218,12 @@ export function cakeView(container, textures, options = {}) {
       container.dataset.ready = "true";
       update();
     });
-    /** 원본 캔버스의 변경을 GPU 업로드 대상으로 표시하고 한 번 다시 그린다. */
-    function update() {
+    /** 원본 획의 표시용 크림만 갱신한다. 인자가 없으면 현재 획을 유지해 복원에 사용한다. */
+    function update(drawings) {
+      if (cream && drawings) {
+        cream.update(drawings);
+        container.dataset.creamMeshes = String(cream.group.children.length);
+      }
       topTexture.needsUpdate = true;
       sideTexture.needsUpdate = true;
       invalidate();
@@ -225,6 +251,13 @@ export function cakeView(container, textures, options = {}) {
           document.removeEventListener("visibilitychange", onVisibility);
         observer.disconnect();
         if (frame !== null) cancelAnimationFrame(frame);
+        cream?.dispose();
+        // 크림 모드에서는 텍스처가 재질에 없으므로 별도로 해제한다.
+        if (cream) {
+          topTexture.dispose();
+          sideTexture.dispose();
+        }
+        key.shadow.dispose();
         scene.traverse((object) => {
           object.geometry?.dispose();
           // 단일 재질과 재질 배열을 같은 순회로 처리해 장면 구성에 관계없이 정리한다.

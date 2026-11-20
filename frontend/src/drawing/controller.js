@@ -252,13 +252,17 @@ export function mountDrawing(options = {}) {
   textures.side.width = 1024;
   textures.side.height = 256;
   // 오른쪽 미리보기는 즉시 생성하고, 확인 창의 3D는 처음 열릴 때 생성한다.
-  const live = cakeView(document.querySelector("#live3d"), textures);
+  const live = cakeView(document.querySelector("#live3d"), textures, {
+    cream: true,
+  });
   let review = null;
   /** 확인창이 열린 뒤 3D를 준비한다. 최초 제출과 경고 후 재개가 같은 경로를 쓴다. */
   function prepareReview() {
     if (!review)
-      review = cakeView(document.querySelector("#review3d"), textures);
-    review.update();
+      review = cakeView(document.querySelector("#review3d"), textures, {
+        cream: true,
+      });
+    review.update(drawings);
     review.view("angle");
     review.resize();
   }
@@ -417,8 +421,9 @@ export function mountDrawing(options = {}) {
       paths(t, drawings[name], width);
       t.setTransform(1, 0, 0, 1, 0, 0);
     }
-    live.update();
-    if (modal.open) review?.update();
+    // 표시 전용 입체 획에 사본을 만들게 하며 원본 좌표·주문 전송은 그대로 둔다.
+    live.update(drawings);
+    if (modal.open) review?.update(drawings);
   }
   /** 배경·점선·저장된 획과 편집 버튼을 현재 면에 맞춰 다시 동기화한다. */
   function render() {

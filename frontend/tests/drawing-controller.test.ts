@@ -11,11 +11,15 @@ const hooks = registerHooks({
           url:
             "data:text/javascript," +
             encodeURIComponent(`
-              export function cakeView(container, textures) {
+              export function cakeView(container, textures, options) {
                 container.modelTextures = textures;
+                container.modelOptions = options;
                 container.modelEvents.push("create");
                 return {
-                  update() { container.modelEvents.push("update"); },
+                  update(drawings) {
+                    container.modelEvents.push("update");
+                    container.modelDrawings = structuredClone(drawings);
+                  },
                   view(kind) { container.modelEvents.push("view:" + kind); },
                   resize() { container.modelEvents.push("resize"); },
                   dispose() { container.modelEvents.push("dispose"); },
@@ -46,6 +50,8 @@ class Element extends EventTarget {
   // 생성뿐 아니라 원본 두 면의 선이 3D 텍스처에 실제 복원됐는지도 관찰한다.
   modelEvents: string[] = [];
   modelTextures: Record<string, Element> | null = null;
+  modelOptions: { cream?: boolean } = {};
+  modelDrawings: Record<string, { x: number; y: number }[][]> = {};
   drawnPoints: { operation: string; x: number; y: number }[] = [];
   style = { setProperty() {} };
   // 실제 주문 화면의 진행·실패 전환도 관찰할 수 있도록 classList 상태를 보관한다.
@@ -555,6 +561,24 @@ test("경고 후 재개하면 3D를 생성하고 저장된 양면 그림을 표�
     1,
   );
   assert.ok(preview.modelEvents.includes("view:angle"));
+  // 경고에서 돌아온 확인 창과 실시간 뷰 모두 같은 양면 원본으로 크림을 복원해야 한다.
+  assert.equal(preview.modelOptions.cream, true);
+  assert.equal(ui.element("#live3d").modelOptions.cream, true);
+  assert.deepEqual(preview.modelDrawings, {
+    top: [
+      [
+        { x: 500, y: 350 },
+        { x: 520, y: 360 },
+      ],
+    ],
+    side: [
+      [
+        { x: 200, y: 380 },
+        { x: 220, y: 390 },
+      ],
+    ],
+  });
+  assert.deepEqual(ui.element("#live3d").modelDrawings, preview.modelDrawings);
   assert.deepEqual(preview.modelTextures!.top.drawnPoints.slice(-2), [
     { operation: "moveTo", x: 500, y: 350 },
     { operation: "lineTo", x: 520, y: 360 },
