@@ -1,0 +1,236 @@
+==================================================================
+ 실제 로봇 전체 공정 테스트
+ (플레이트 준비 → 펜 집기 → 드로잉 → 펜 반납 → 플레이트 후처리)
+==================================================================
+ 실행 전 확인
+  1) 펜던트에 설정된 TCP가 yaml의 plate_*·pen_* 좌표를 티칭할 때의
+     TCP와 같다. (작업 좌표는 현재 TCP 기준이라 다르면 다른 위치로 간다.)
+  2) 오프너·케이크가 시작 위치에 있고, 펜이 거치대에 꽂혀 있으며
+     그리퍼는 비어 있다.
+  3) 플레이트·펜·스테이지·출고 위치 사이 이동 경로에 사람과 장애물이 없다.
+  4) 첫 시험은 실제 케이크 대신 종이·박스를 둔다.
+  5) 펜던트 비상정지를 바로 누를 수 있다.
+
+ 드로잉 기준점 (YES 영점·펜촉 TCP 등록 없음)
+  - XY: config/real_robot.json의 side_cake_center_xy_mm
+  - 펜이 닿는 Z와 펜 자세: yaml cake_center_pose (기존 케이크 중심 하강 높이)
+  - 순서: 케이크 중심 상공 → 첫 획 시작점 상공 → 수직 하강 → 그리기
+  - 아래에 출력되는 기준점이 스테이지 위 케이크 중심과 맞는지 확인한다.
+
+ 동작
+  - 웹 제작 요청 1회마다 위 전체 공정을 한 번 실행한다.
+  - 웹에서는 윗면(TOP)만 그린다. 옆면 요청은 펜을 집기 전에 거부한다.
+  - 중간 단계가 실패하면 주문은 FAILED로 끝나고 이후 단계는 실행하지 않는다.
+    케이크·펜·오프너가 중간 위치에 남을 수 있으므로 수동으로 정리한다.
+==================================================================
+yaml 펜 좌표 (/home/soeun/cobot_1/Rokey_10_A_3/scripts/../ws_cobot1/src/cake_decorator/config/workspace_config.yaml):
+  pen_stand_pose: [248.86, 244.77, 312.99, 123.66, 180.00, 123.43] # 펜을 잡을 위치
+  pen_stand_approach_pose: [43.61, -1.88, 99.63, 0.09, 82.26, 43.29] # 펜이 있는 위치의 상공
+  pen_gripper_pose: [248.91, 244.76, 548.06, 37.07, -179.99, 36.84] # 펜을 잡고 수직 상공
+  pen_drop_approach_pose: [43.58, 0.53, 69.85, 0.09, 109.63, 43.31] # 펜을 놓을 위치 상공
+  pen_drop_pose: [248.86, 244.77, 314.84, 40.25, 180.00, 40.02] # 펜을 놓을 위치
+  pen_drop_after_pose: [248.91, 244.76, 548.06, 37.07, -179.99, 36.84] # 펜을 놓은 후 상공
+yaml 플레이트 좌표 키: 28개
+케이크 기준 좌표 (/home/soeun/cobot_1/Rokey_10_A_3/scripts/../config/real_robot.json):
+  {
+    "cake_top_z_mm": 222.0,
+    "configure_pen_tcp_on_yes": true,
+    "side_cake_center_xy_mm": [
+      396.8743225097656,
+      -50.559329986572266
+    ]
+  }
+  cake_center_pose: [401.80, -55.57, 513.29, 179.76, 179.35, 179.02] # 기본 TCP 기준 윗면 그리기 자세
+
+위 항목을 모두 확인했으면 GO 입력 (그 외 종료): 로봇 환경 자동 준비: /home/soeun/cobot_1/Rokey_10_A_3/ws_dsr/install/local_setup.bash
+ROS 검색: SUBNET, DOMAIN_ID=30, 외부 검색 서버=사용
+real_robot.json 케이크 기준점 [mm, deg]: [396.8743225097656, -50.559329986572266, 513.29, 179.76, 179.35, 179.02]
+SIDE 실측 기준점 [mm, deg]: [396.8743225097656, -50.559329986572266, 222.0, 123.66, 180.0, 123.43]
+통합 공정: 펜 순환·플레이트 사용, SIDE 속도 30mm/s, 공중 100mm/s, Y inset 1mm, 지름 유격 8.1mm
+실행 로그: /home/soeun/cobot_1/Rokey_10_A_3/log/system/20261120-110706-real-204257
+시작: driver
+[driver] [INFO] [launch]: All log files can be found below /home/soeun/.ros/log/2026-11-20-11-07-08-570560-soeun-16Z90Q-EA7WK-204360
+[driver] [INFO] [launch]: Default logging verbosity is set to INFO
+[driver] [INFO] [ros2_control_node-1]: process started with pid [204366]
+[driver] [INFO] [spawner-2]: process started with pid [204367]
+[driver] [INFO] [OnRobotRGControllerServer-3]: process started with pid [204368]
+[driver] [INFO] [gripper_joint_state_publisher.py-4]: process started with pid [204369]
+[driver] [INFO] [joint_state_publisher-5]: process started with pid [204370]
+[driver] [INFO] [robot_state_publisher-6]: process started with pid [204371]
+[driver] [INFO] [static_transform_publisher-7]: process started with pid [204372]
+[driver] [INFO] [rviz2-8]: process started with pid [204373]
+[driver] [static_transform_publisher-7] [WARN] [1795140429.191380609] []: Old-style arguments are deprecated; see --help for new-style arguments
+[driver] [static_transform_publisher-7] [INFO] [1795140429.234213184] [dsr01.static_transform_publisher]: Spinning until stopped - publishing transform
+[driver] [static_transform_publisher-7] translation: ('0.000000', '0.000000', '0.000000')
+[driver] [static_transform_publisher-7] rotation: ('0.000000', '0.000000', '0.000000', '1.000000')
+[driver] [static_transform_publisher-7] from 'world' to 'base_link'
+[driver] [robot_state_publisher-6] [INFO] [1795140429.255990442] [dsr01.robot_state_publisher]: Robot initialized
+[driver] [ros2_control_node-1] [INFO] [1795140429.317639454] [dsr01.controller_manager]: Using Steady (Monotonic) clock for triggering controller manager cycles.
+[driver] [ros2_control_node-1] [INFO] [1795140429.334546820] [dsr01.controller_manager]: Subscribing to '/dsr01/robot_description' topic for robot description.
+[driver] [ros2_control_node-1] [INFO] [1795140429.334714049] [dsr01.controller_manager]: update rate is 100 Hz
+[driver] [ros2_control_node-1] [INFO] [1795140429.334730002] [dsr01.controller_manager]: Overruns handling is : enabled
+[driver] [ros2_control_node-1] [INFO] [1795140429.334739180] [dsr01.controller_manager]: Spawning controller_manager RT thread with scheduler priority: 50
+[driver] [ros2_control_node-1] [WARN] [1795140429.334918573] [dsr01.controller_manager]: Could not enable FIFO RT scheduling policy: with error number <1>(Operation not permitted). See [https://control.ros.org/master/doc/ros2_control/controller_manager/doc/userdoc.html] for details on how to enable realtime scheduling.
+[driver] [rviz2-8] [INFO] [1795140429.883000954] [rviz2]: Stereo is NOT SUPPORTED
+[driver] [rviz2-8] [INFO] [1795140429.883200303] [rviz2]: OpenGl version: 4.6 (GLSL 4.6)
+[driver] [rviz2-8] [INFO] [1795140429.940522618] [rviz2]: Stereo is NOT SUPPORTED
+[driver] [ros2_control_node-1] [INFO] [1795140430.045607578] [dsr01.controller_manager]: Received robot description from topic.
+[driver] [ros2_control_node-1] [INFO] [1795140430.045778661] [dsr01.controller_manager]: Enforcing command limits is disabled. Command limits from URDF will be ignored.
+[driver] [ros2_control_node-1] text not specified in the rt_host tag
+[driver] [ros2_control_node-1] [INFO] [1795140430.057549434] [dsr01.controller_manager]: Loading hardware 'm0609' 
+[driver] [ros2_control_node-1] [INFO] [1795140430.086150830] [dsr01.controller_manager]: Loaded hardware 'm0609' from plugin 'dsr_hardware2/DRHWInterface'
+[driver] [ros2_control_node-1] [INFO] [1795140430.086622929] [dsr01.controller_manager]: Initialize hardware 'm0609' 
+[driver] [ros2_control_node-1] [INFO] [1795140430.131813143] [dsr_hw_interface2]: model : m0609
+[driver] [ros2_control_node-1] [INFO] [1795140430.131923554] [dsr_hw_interface2]: mode : real
+[driver] [ros2_control_node-1] [INFO] [1795140430.131936139] [dsr_hw_interface2]: update_rate : 100
+[driver] [ros2_control_node-1] [INFO] [1795140430.131982947] [dsr_hw_interface2]: port : 12345
+[driver] [ros2_control_node-1] [INFO] [1795140430.131992778] [dsr_hw_interface2]: rt_host : 
+[driver] [ros2_control_node-1] [INFO] [1795140430.132000768] [dsr_hw_interface2]: host : 192.168.1.100
+[driver] [ros2_control_node-1] [INFO] [1795140430.132168158] [dsr_hw_interface2]: [on_init] Hardware name : m0609, type : system, plugin name : dsr_hardware2/DRHWInterface
+[driver] [ros2_control_node-1] [INFO] [1795140430.132426929] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] [INFO] [1795140430.132437395] [dsr_hw_interface2]:     INITAILIZE
+[driver] [ros2_control_node-1] [INFO] [1795140430.132444742] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] [INFO] [1795140430.236527140] [dsr_hw_interface2]: Connected to DRCF
+[driver] [ros2_control_node-1] [INFO] [1795140430.236824239] [dsr_hw_interface2]: INITIAL MANAGE_ACCESS_CONTROL_FORCE_REQUEST called
+[driver] [ros2_control_node-1] [INFO] [1795140430.238885929] [dsr_hw_interface2]: AUTHORITY : MONITORING_ACCESS_CONTROL_GRANT
+[driver] [ros2_control_node-1] [INFO] [1795140430.238966181] [dsr_hw_interface2]: INITIAL AUTHORITY GRANTED !!!
+[driver] [ros2_control_node-1] [INFO] [1795140430.239003080] [dsr_hw_interface2]: ROBOT_STATE : STATE_SAFE_OFF
+[driver] [spawner-2] [INFO] [1795140430.369064585] [dsr01.spawner_joint_state_broadcaster]: waiting for service /dsr01/controller_manager/list_controllers to become available...
+[driver] [joint_state_publisher-5] [INFO] [1795140430.433539748] [dsr01.joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...
+[driver] [gripper_joint_state_publisher.py-4] [INFO] [1795140430.528037611] [dsr01.gripper_joint_state_publisher]: Gripper joint state publisher started.
+[driver] [OnRobotRGControllerServer-3] [INFO] [1795140431.094394176] [OnRobot Modbus]: Changer address: 65
+[driver] [OnRobotRGControllerServer-3] [INFO] [1795140431.099254100] [OnRobot Modbus]: Connected successfully.
+[driver] [ros2_control_node-1] [INFO] [1795140431.643267562] [dsr_hw_interface2]: INITIAL CONTROL_SERVO_ON called
+[driver] [joint_state_publisher-5] [INFO] [1795140432.008598811] [dsr01.joint_state_publisher]: Got description, configuring robot
+[driver] [ros2_control_node-1] [INFO] [1795140432.663904433] [dsr_hw_interface2]: INITIAL CONTROL_SERVO_ON called
+[driver] [ros2_control_node-1] [INFO] [1795140432.920008297] [dsr_hw_interface2]: ROBOT_STATE : STATE_STANDBY
+[driver] [ros2_control_node-1] [INFO] [1795140432.920051189] [dsr_hw_interface2]: INITIAL STATE_STANDBY !!!
+[driver] [ros2_control_node-1] [INFO] [1795140433.664061660] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] [INFO] [1795140433.664110119] [dsr_hw_interface2]:     OPEN CONNECTION
+[driver] [ros2_control_node-1] [INFO] [1795140433.664116885] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] [INFO] [1795140433.664122904] [dsr_hw_interface2]:     Real Robot Mode
+[driver] [ros2_control_node-1] [INFO] [1795140433.664985796] [dsr_hw_interface2]:     DRCF version = GF02120100
+[driver] [ros2_control_node-1] [INFO] [1795140433.665040337] [dsr_hw_interface2]:     DRFL version = GL013303
+[driver] [ros2_control_node-1] [INFO] [1795140433.665051880] [dsr_hw_interface2]:     m_nVersionDRCF = 2120100
+[driver] [ros2_control_node-1] [INFO] [1795140433.665061441] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] usClientPort : 38997
+[driver] [ros2_control_node-1] [INFO] [1795140433.808999154] [dsr_hw_interface2]: Connected RT control stream
+[driver] [ros2_control_node-1] [INFO] [1795140433.809192967] [dsr_hw_interface2]: Setting velocity and acceleration limits
+[driver] [ros2_control_node-1] [INFO] [1795140433.830036714] [dsr01.controller_manager]: Successful initialization of hardware 'm0609'
+[driver] [ros2_control_node-1] [INFO] [1795140433.832188689] [dsr01.controller_manager]: Activating component 'm0609'.
+[driver] [ros2_control_node-1] [INFO] [1795140433.832292196] [resource_manager]: 'configure' hardware 'm0609' 
+[driver] [ros2_control_node-1] [INFO] [1795140433.832317210] [resource_manager]: Successful 'configure' of hardware 'm0609'
+[driver] [ros2_control_node-1] [INFO] [1795140433.832452795] [resource_manager]: 'activate' hardware 'm0609' 
+[driver] [ros2_control_node-1] [INFO] [1795140433.832491548] [resource_manager]: Successful 'activate' of hardware 'm0609'
+[driver] [ros2_control_node-1] [INFO] [1795140433.832730117] [dsr01.controller_manager]: Registering statistics for : m0609
+[driver] [ros2_control_node-1] [INFO] [1795140433.833002789] [dsr01.controller_manager]: Resource Manager has been successfully initialized. Starting Controller Manager services...
+[driver] [ros2_control_node-1] [INFO] [1795140434.274661352] [dsr01.controller_manager]: Loading controller : 'joint_state_broadcaster' of type 'joint_state_broadcaster/JointStateBroadcaster'
+[driver] [ros2_control_node-1] [INFO] [1795140434.274779778] [dsr01.controller_manager]: Loading controller 'joint_state_broadcaster'
+[driver] [ros2_control_node-1] [INFO] [1795140434.286581229] [dsr01.controller_manager]: Controller 'joint_state_broadcaster' node arguments: --ros-args --params-file /tmp/launch_params_tu705zf5 --params-file /tmp/launch_params_59fo8r9q --params-file /home/soeun/cobot_1/Rokey_10_A_3/ws_dsr/install/dsr_controller2/share/dsr_controller2/config/dsr_controller2.yaml 
+[driver] [spawner-2] [INFO] [1795140434.350142110] [dsr01.spawner_joint_state_broadcaster]: Loaded joint_state_broadcaster
+[driver] [ros2_control_node-1] [INFO] [1795140434.510943702] [dsr01.controller_manager]: Configuring controller: 'joint_state_broadcaster'
+[driver] [ros2_control_node-1] [INFO] [1795140434.511254359] [dsr01.joint_state_broadcaster]: 'joints' or 'interfaces' parameter is empty. All available state interfaces will be published
+[driver] [ros2_control_node-1] [INFO] [1795140434.691926414] [dsr01.controller_manager]: Activating controllers: [ joint_state_broadcaster ]
+[driver] [ros2_control_node-1] [INFO] [1795140434.695929058] [dsr01.controller_manager]: Successfully switched controllers!
+[driver] [spawner-2] [INFO] [1795140434.708779935] [dsr01.spawner_joint_state_broadcaster]: Configured and activated joint_state_broadcaster
+[driver] [INFO] [spawner-2]: process has finished cleanly [pid 204367]
+[driver] [INFO] [spawner-9]: process started with pid [204569]
+[driver] [spawner-9] [INFO] [1795140436.164263895] [dsr01.spawner_dsr_controller2]: waiting for service /dsr01/controller_manager/list_controllers to become available...
+[driver] [ros2_control_node-1] [INFO] [1795140437.404158467] [dsr01.controller_manager]: Loading controller : 'dsr_controller2' of type 'dsr_controller2/RobotController'
+[driver] [ros2_control_node-1] [INFO] [1795140437.404325863] [dsr01.controller_manager]: Loading controller 'dsr_controller2'
+[driver] [ros2_control_node-1] [INFO] [1795140437.499375081] [dsr01.controller_manager]: Controller 'dsr_controller2' node arguments: --ros-args --params-file /tmp/launch_params_tu705zf5 --params-file /tmp/launch_params_59fo8r9q --params-file /home/soeun/cobot_1/Rokey_10_A_3/ws_dsr/install/dsr_controller2/share/dsr_controller2/config/dsr_controller2.yaml 
+[driver] [spawner-9] [INFO] [1795140437.551462382] [dsr01.spawner_dsr_controller2]: Loaded dsr_controller2
+[driver] [ros2_control_node-1] [INFO] [1795140437.637837317] [dsr01.controller_manager]: Configuring controller: 'dsr_controller2'
+[driver] [ros2_control_node-1] Depreciated API.. deleted soon.
+[driver] [ros2_control_node-1]  Please use 'set_on_monitoring_data_ex'
+[driver] [ros2_control_node-1] Depreciated API.. deleted soon.
+[driver] [ros2_control_node-1]  Please use 'set_on_monitoring_ctrl_io_ex'.
+[driver] [ros2_control_node-1] [INFO] [1795140437.733285435] [dsr01.controller_manager]: Activating controllers: [ dsr_controller2 ]
+[driver] [ros2_control_node-1] [INFO] [1795140437.735940448] [dsr01.dsr_controller2]: Service prefix: dsr_controller2/
+[driver] [ros2_control_node-1] [INFO] [1795140438.201164915] [dsr01.controller_manager]: Successfully switched controllers!
+[driver] [ros2_control_node-1] [WARN] [1795140438.201180500] [dsr01.controller_manager]: Overrun might occur, Total time : 465622.767 us (Expected < 10000.000 us) --> Read time : 31.652 us, Update time : 465562.103 us (Switch time : 465506.899 us (Switch chained mode time : 1.356 us, perform mode change time : 0.902 us, Activation time : 465500.723 us, Deactivation time : 0.787 us)), Write time : 29.012 us
+[driver] [ros2_control_node-1] [WARN] [1795140438.201385422] [dsr01.controller_manager]: Overrun detected! The controller manager missed its desired rate of 100 Hz. The loop took 465.982812 ms (missed cycles : 47).
+[driver] [ros2_control_node-1] [WARN] [1795140438.205532159] [dsr_hw_interface2]: [REAL] Skip dt=0.469923 (expected=0.010000, allowed=[0.003000, 0.015000])
+[driver] [spawner-9] [INFO] [1795140438.208569047] [dsr01.spawner_dsr_controller2]: Configured and activated dsr_controller2
+시작: backend
+[driver] [INFO] [spawner-9]: process has finished cleanly [pid 204569]
+[backend] INFO:     Started server process [204623]
+[backend] INFO:     Waiting for application startup.
+[backend] INFO:     Application startup complete.
+[backend] INFO:     Uvicorn running on http://127.0.0.1:5000 (Press CTRL+C to quit)
+[backend] INFO:     127.0.0.1:40214 - "GET /api/health HTTP/1.1" 200 OK
+상면 중심 TCP [mm, deg]: [396.8743225097656, -50.559329986572266, 513.29, 179.76, 179.35, 179.02]
+시작: drawing_path_node
+시작: robot_executor_node
+시작: task_manager_node
+[drawing_path_node] [INFO] [1795140441.009437284] [drawing_path_node]: drawing_path_node 서비스 서버 시작 (pixel→frustum)
+[task_manager_node] [INFO] [1795140441.106208658] [task_manager_node]: task_manager_node 시작 (드로잉 전용)
+[robot_executor_node] [INFO] [1795140441.445812147] [robot_executor_node]: 그리퍼 설정 적용: Open=DO2, Close=DO1, 펄스=0.50s
+[robot_executor_node] [INFO] [1795140441.593577191] [robot_executor_node]: robot_executor_node 시작 — 상태 머신 + 액션 서버 대기 중
+제어 주기 검증 완료 대기: 주문 전달은 아직 시작하지 않습니다.
+[driver] [ros2_control_node-1] [INFO] [1795140450.202038229] [dsr_controller2]: get_robot_system_cb() called and calling Drfl->get_robot_system()
+[driver] [ros2_control_node-1] [INFO] [1795140450.292044782] [dsr_controller2]: get_robot_state_cb() called and calling Drfl->get_robot_state()
+[driver] [ros2_control_node-1] [INFO] [1795140452.377931293] [dsr_controller2]: get_robot_state_cb() called and calling Drfl->get_robot_state()
+[driver] [ros2_control_node-1] [INFO] [1795140454.463595335] [dsr_controller2]: get_robot_state_cb() called and calling Drfl->get_robot_state()
+[driver] [ros2_control_node-1] [INFO] [1795140456.549109757] [dsr_controller2]: get_robot_state_cb() called and calling Drfl->get_robot_state()
+[driver] [ros2_control_node-1] [INFO] [1795140458.636016207] [dsr_controller2]: get_robot_state_cb() called and calling Drfl->get_robot_state()
+[driver] [ros2_control_node-1] [INFO] [1795140460.723960722] [dsr_controller2]: get_robot_state_cb() called and calling Drfl->get_robot_state()
+[backend] INFO:     Shutting down
+[backend] INFO:     Waiting for application shutdown.
+[backend] INFO:     Application shutdown complete.
+[backend] INFO:     Finished server process [204623]
+기본 TCP 복원 완료: 선택 없음, 0,0,0,0,0,0
+[driver] [WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[driver] [static_transform_publisher-7] [INFO] [1795140464.474069279] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[driver] [robot_state_publisher-6] [INFO] [1795140464.474113032] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[driver] [rviz2-8] [INFO] [1795140464.474113773] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[driver] [ros2_control_node-1] [INFO] [1795140464.474143391] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[driver] [ros2_control_node-1] [INFO] [1795140464.474293874] [dsr01.controller_manager]: Shutdown request received....
+[driver] [ros2_control_node-1] [INFO] [1795140464.474402690] [dsr01.controller_manager]: Shutting down all controllers in the controller manager.
+[driver] [ros2_control_node-1] [INFO] [1795140464.474455287] [dsr01.controller_manager]: Deactivating controller 'dsr_controller2'
+[driver] [ros2_control_node-1] [INFO] [1795140464.474534449] [dsr01.controller_manager]: Shutting down controller 'dsr_controller2'
+[driver] [ros2_control_node-1] [INFO] [1795140464.474607799] [dsr_controller2]: on deactivate
+[driver] [ros2_control_node-1] [INFO] [1795140464.475443356] [dsr01.controller_manager]: Deactivating controller 'joint_state_broadcaster'
+[driver] [ros2_control_node-1] [INFO] [1795140464.475529716] [dsr01.controller_manager]: Shutting down controller 'joint_state_broadcaster'
+[driver] [ros2_control_node-1] [INFO] [1795140464.475635970] [resource_manager]: 'deactivate' hardware 'm0609' 
+[driver] [ros2_control_node-1] [INFO] [1795140464.475657684] [resource_manager]: Successful 'deactivate' of hardware 'm0609'
+[driver] [ros2_control_node-1] [INFO] [1795140464.475666570] [resource_manager]: 'shutdown' hardware 'm0609' 
+[driver] [ros2_control_node-1] [INFO] [1795140464.475674510] [resource_manager]: Successful 'shutdown' of hardware 'm0609'
+[driver] [ros2_control_node-1] [INFO] [1795140464.475756564] [dsr01.controller_manager]: Shutting down the controller manager.
+[driver] [ros2_control_node-1] [INFO] [1795140464.500071211] [dsr01.controller_manager.pal_statistics]: Async messages lost 0
+[driver] [ros2_control_node-1] [INFO] [1795140464.500126530] [dsr01.controller_manager.pal_statistics]: publish_async_failures_ 0
+[driver] [ros2_control_node-1] [INFO] [1795140464.522105679] [dsr01.controller_manager.pal_statistics]: Async messages lost 0
+[driver] [ros2_control_node-1] [INFO] [1795140464.522185697] [dsr01.controller_manager.pal_statistics]: publish_async_failures_ 0
+[driver] [INFO] [static_transform_publisher-7]: process has finished cleanly [pid 204372]
+[driver] [INFO] [robot_state_publisher-6]: process has finished cleanly [pid 204371]
+[driver] [gripper_joint_state_publisher.py-4] Traceback (most recent call last):
+[driver] [gripper_joint_state_publisher.py-4]   File "/home/soeun/cobot_1/Rokey_10_A_3/ws_dsr/install/m0609_rg2_bringup/lib/m0609_rg2_bringup/gripper_joint_state_publisher.py", line 51, in <module>
+[driver] [gripper_joint_state_publisher.py-4]     main()
+[driver] [gripper_joint_state_publisher.py-4]   File "/home/soeun/cobot_1/Rokey_10_A_3/ws_dsr/install/m0609_rg2_bringup/lib/m0609_rg2_bringup/gripper_joint_state_publisher.py", line 47, in main
+[driver] [gripper_joint_state_publisher.py-4]     rclpy.shutdown()
+[driver] [gripper_joint_state_publisher.py-4]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 134, in shutdown
+[driver] [gripper_joint_state_publisher.py-4]     _shutdown(context=context)
+[driver] [gripper_joint_state_publisher.py-4]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/utilities.py", line 82, in shutdown
+[driver] [gripper_joint_state_publisher.py-4]     context.shutdown()
+[driver] [gripper_joint_state_publisher.py-4]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/context.py", line 129, in shutdown
+[driver] [gripper_joint_state_publisher.py-4]     self.__context.shutdown()
+[driver] [gripper_joint_state_publisher.py-4] rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
+[driver] [INFO] [rviz2-8]: process has finished cleanly [pid 204373]
+[driver] [INFO] [joint_state_publisher-5]: process has finished cleanly [pid 204370]
+[driver] [INFO] [OnRobotRGControllerServer-3]: process has finished cleanly [pid 204368]
+[driver] [ros2_control_node-1] RTControl is already stopped
+[driver] [ros2_control_node-1] [ERROR] [1795140465.008862789] [dsr_controller2]: Disconnected.. Please check out Ethernet Cable.. 
+[driver] [ros2_control_node-1] [INFO] [1795140465.008927579] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] [INFO] [1795140465.008933987] [dsr_hw_interface2]:     CONNECTION IS CLOSED
+[driver] [ros2_control_node-1] [INFO] [1795140465.008937820] [dsr_hw_interface2]: _______________________________________________
+[driver] [ros2_control_node-1] 
+[driver] [ros2_control_node-1] System exception: cannot signal event (lock)
+[driver] [ERROR] [gripper_joint_state_publisher.py-4]: process has died [pid 204369, exit code 1, cmd '/home/soeun/cobot_1/Rokey_10_A_3/ws_dsr/install/m0609_rg2_bringup/lib/m0609_rg2_bringup/gripper_joint_state_publisher.py --ros-args -r __node:=gripper_joint_state_publisher -r __ns:=/dsr01'].
+[driver] [INFO] [ros2_control_node-1]: process has finished cleanly [pid 204366]
+실행기가 시작한 서비스들을 종료했습니다.

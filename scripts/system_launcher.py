@@ -1327,6 +1327,14 @@ def main():
                 ]
             processes.start(name, command)
         session.ready_application()
+        # 선택한 로컬 시작 검증이 끝날 때까지 주문 전달(브리지)만 대기한다.
+        # 드라이버·업무 노드는 이미 살아 있으므로 full_process_terminal.py가
+        # 이 사이에 상태 조회와 CPU/실시간 설정 검증을 수행할 수 있다.
+        # 승인 파일 경로는 실행마다 새로 받으며, 변수가 없으면 기존처럼 대기 없이 진행한다.
+        startup_gate = env.get("CAKE_STARTUP_GATE")
+        if startup_gate:
+            print("제어 주기 검증 완료 대기: 주문 전달은 아직 시작하지 않습니다.", flush=True)
+            processes.wait(lambda: Path(startup_gate).is_file(), 600)
         processes.start(
             "bridge",
             [

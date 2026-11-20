@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 프로젝트의 전체 공정을 준비하고 검증한 뒤 주문 전달을 허용한다.
 set -eo pipefail
-project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 if [[ " $* " == *" --help "* || " $* " == *" -h "* ]]; then
   echo "사용법: ./start_full.sh [--check]"
