@@ -141,7 +141,12 @@ class ServiceRobot:
         self.events.append(("rotate", self.tcp))
         return self.fail != "draw"
 
-    def move_side_start(self, commands, cancelled=lambda: False):
+    def prepare_side_start(self, commands, cancelled=lambda: False):
+        """실제 IK 대신 준비 시점을 기록해 케이크 이동 전 계산 순서를 검사한다."""
+        self.events.append(("prepare_side", self.tcp))
+        return object()
+
+    def move_side_start(self, commands, cancelled=lambda: False, *, prepared=None):
         """45도 펜 자세 전환점. IK 분기 계산은 side_pose_selection 시험에서 검증한다."""
         self.events.append(("rotate", self.tcp))
         return self.fail != "draw"
@@ -307,6 +312,15 @@ def test_integrated_side_orders_can_repeat_and_top_does_not_inherit_side_mode(mo
     assert draws == ["Pen_Side_45"] * 6 + [""] * 4
     assert len([1 for kind, _ in executor._robot.events if kind == "create_tcp"]) == 2
     executor._go_to_cake_center.assert_not_called()
+
+
+def test_side_rotation_is_prepared_before_cake_approach(monkeypatch):
+    """J6 계산을 케이크 상공 회전 직전에 하지 않고 파지 완료 직후 실행한다."""
+    executor = make_executor(monkeypatch, integrated_side_cycle=True)
+    assert executor._execute_draw(draw_handle("SIDE")).success
+    kinds = [kind for kind, _ in executor._robot.events]
+    assert kinds.index("close") < kinds.index("prepare_side") < kinds.index("draw")
+    assert kinds.count("prepare_side") == 1
 
 
 @pytest.mark.parametrize("failure", ["draw", "cancel", "last_cancel", "pick_cancel"])
@@ -480,10 +494,9 @@ def test_side_regrip_preserves_speed_during_two_surface_order(continuing):
     cycle.pick_side(preserve_speed=continuing)
     speeds = [call.kwargs['speed_mm_s'] for call in robot.move_line.call_args_list]
     assert speeds == [120., 150., 150., 150.]
-    # 제자리 재파지에서도 느린 고정 회전값으로 돌아가지 않아야 한다.
-    for call in robot.move_line.call_args_list:
-        assert call.kwargs['angular_speed_deg_s'] == 90.0
-        assert call.kwargs['angular_acc_deg_s2'] == 180.0
+    # 45도 기울임·수직 복귀만 동일하게 낮추고 직선 인출은 빠르게 유지한다.
+    assert [call.kwargs['angular_speed_deg_s'] for call in robot.move_line.call_args_list] == [90., 45., 90., 45.]
+    assert [call.kwargs['angular_acc_deg_s2'] for call in robot.move_line.call_args_list] == [180., 90., 180., 90.]
 
 
 @pytest.mark.parametrize('has_more', [False, True])

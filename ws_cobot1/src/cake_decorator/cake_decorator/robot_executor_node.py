@@ -107,6 +107,8 @@ class RobotExecutorNode(Node):
         'pen_motion_acc_mm_s2': 400.0,
         'pen_rotation_speed_deg_s': 90.0,
         'pen_rotation_acc_deg_s2': 180.0,
+        'pen_tilt_speed_deg_s': 45.0,
+        'pen_tilt_acc_deg_s2': 90.0,
         # 빈손·도구만 들고 움직이는 구간만 가속하고, 케이크 운반은 유지한다.
         'free_joint_speed_deg_s': 60.0,
         'free_joint_acc_deg_s2': 120.0,
@@ -832,6 +834,20 @@ class RobotExecutorNode(Node):
             if not self._prepare_first_stroke(plan, cancelled):
                 return failed('FIRST_STROKE_APPROACH_FAILED')
 
+        side_start = None
+        if side_45:
+            try:
+                started = time.monotonic()
+                self.get_logger().info('옆면 J6 준비: 케이크 접근 전에 경로 계산')
+                side_start = self._robot.prepare_side_start(plan.commands, cancelled)
+                self.get_logger().info(
+                    f'옆면 J6 준비 완료: {time.monotonic() - started:.2f}초 '
+                    '(상공에서는 전체 경로를 다시 계산하지 않음)'
+                )
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(f'옆면 J6 준비 실패: {error}')
+                return failed('SIDE_START_PREPARATION_FAILED')
+
         total = len(plan.commands)
         completed_strokes = 0
         prev_stroke_idx = 0
@@ -859,7 +875,9 @@ class RobotExecutorNode(Node):
                 # movejx에 맡기면 첫 획이 띠 오른쪽 끝일 때 덜 감긴 J6 해를 골라
                 # 이후 공중 이동에서 J6 한계(±360)를 넘는다. 남은 경로 전체를 IK로
                 # 검사해 범위 안에 드는 J6 분기를 고른 뒤 movej로 전환한다.
-                moved = self._robot.move_side_start(plan.commands, cancelled)
+                moved = self._robot.move_side_start(
+                    plan.commands, cancelled, prepared=side_start,
+                )
             elif side_rotation:
                 moved = self._robot.move_task_joint(cmd.pos)
             else:

@@ -10,6 +10,7 @@ DO 서비스가 없는 가상환경에서만 기존 /onrobot/sendCommand로 대�
 from __future__ import annotations
 
 from typing import Optional
+from dataclasses import dataclass
 
 import threading
 import json
@@ -124,6 +125,19 @@ def validate_gripper_settings(
         raise ValueError(f"gripper_pulse_sec는 0보다 큰 유한값이어야 합니다: {pulse_sec!r}")
 
     return open_do, close_do, pulse
+
+
+@dataclass(frozen=True)
+class PreparedSideStart:
+    """이 주문의 옆면 전환 목표와 IK 관절 해. 관절·자세 각도 단위는 degree다.
+
+    펜촉 TCP를 선택한 뒤 준비하며, 공중 접근 중 목표나 팔꿈치 해가 바뀌면
+    사용할 수 없다. 다음 주문에서 재사용하지 않고 실행 함수에 직접 전달한다.
+    """
+
+    joints: tuple[float, ...]
+    target_pose: tuple[float, ...]  # BASE mm, ZYZ degree
+    solution_space: int
 
 
 class DoosanRobotClient:
@@ -506,32 +520,60 @@ class DoosanRobotClient:
         self._side_validated_solution = int(solution.sol_space)
         return selected
 
-    def move_side_start(self, commands, cancelled=lambda: False) -> bool:
-        """45도 펜 옆면의 자세 전환점(명령 #2)으로 J6 회전 방향을 지정해 관절 이동한다.
+    def prepare_side_start(self, commands, cancelled=lambda: False) -> PreparedSideStart:
+        """펜 파지 완료 직후 J6 범위를 계산한다. 이동 명령은 보내지 않는다.
 
-        호출 시점: RE 드로잉 루프의 i == 2(펜이 닿지 않은 공중 전환점).
-        movejx는 J6의 ±360 해 중 제어기가 가까운 쪽을 고른다. 첫 획이 띠 오른쪽 끝이면
-        그 해가 이후 공중 이동(원주 역방향 한 바퀴)에서 J6 한계를 넘게 만든다.
-        그래서 남은 경로 전체의 J6 누적 변화를 IK로 미리 계산하고, 범위 안에 드는
-        J6 분기를 명시한 movej로 이동한다. 위치·자세(FK)는 movejx 목표와 같다.
-        반환: 이동과 TCP 도달 확인이 모두 성공하면 True. 검사 실패 시 이동하지 않는다.
+        케이크 상공에 도착한 후 여러 IK/FK 응답을 기다리던 처리를 앞당긴다.
+        검사 표본과 J6 분기 선택은 유지하며, 실패하면 공중 접근 전에 중단한다.
         """
         from .side_pose_selection import choose_side_start_joints
 
+        joints, solution, inverse = self._side_inverse()
+        target, _ = choose_side_start_joints(
+            commands,
+            list(joints.pos),
+            inverse,
+            cancelled=cancelled,
+            report=self._logger.info,
+        )
+        return PreparedSideStart(
+            tuple(target),
+            tuple(commands[2].pos.to_list()),
+            int(solution.sol_space),
+        )
+
+    def move_side_start(self, commands, cancelled=lambda: False, *, prepared=None) -> bool:
+        """명령 #2에서 준비한 J6 목표로 이동하고 도달을 확인한다.
+
+        미리 준비했다면 목표와 현재 팔꿈치 해만 확인하며 전체 경로 IK를 반복하지
+        않는다. 기존 단독 호출은 prepared 생략 시 즉시 준비하는 방식으로 호환한다.
+        """
         try:
-            joints, _, inverse = self._side_inverse()
-            target, _ = choose_side_start_joints(
-                commands,
-                list(joints.pos),
-                inverse,
-                cancelled=cancelled,
-                report=self._logger.info,
-            )
+            if cancelled():
+                return False
+            if prepared is None:
+                prepared = self.prepare_side_start(commands, cancelled)
+            else:
+                if tuple(commands[2].pos.to_list()) != prepared.target_pose:
+                    raise ValueError("옆면 준비 후 전환 목표가 변경되었습니다.")
+                current = self._call("current_joints", GetCurrentPosj.Request())
+                if current is None or not current.success:
+                    raise RuntimeError("옆면 전환 전 현재 관절 조회 실패")
+                solution = self._call(
+                    "solution", GetSolutionSpace.Request(pos=list(current.pos)),
+                )
+                if (
+                    solution is None or not solution.success
+                    or solution.sol_space != prepared.solution_space
+                ):
+                    raise RuntimeError("옆면 준비 후 팔꿈치 해가 변경되었습니다.")
         except (RuntimeError, ValueError) as error:
             self._logger.error(f"옆면 J6 분기 선택 실패: {error}")
             return False
+        if cancelled():
+            return False
         # J6 분기 선택과 도달 검증은 유지하고, 펜이 닿기 전 공중 전환만 빠르게 한다.
-        return self.move_joint(target, speed_deg_s=60.0, acc_deg_s2=120.0) and self.verify_pose(
+        return self.move_joint(list(prepared.joints), speed_deg_s=60.0, acc_deg_s2=120.0) and self.verify_pose(
             commands[2].pos.to_list()
         )
 

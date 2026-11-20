@@ -354,7 +354,7 @@ def test_side_start_j6_branch_rejects_rotation_beyond_joint_range():
 
 
 def test_side_start_keeps_branch_selection_with_faster_air_motion():
-    """PR27의 J6 선택을 거친 목표도 PR26의30도/s·60도/s²로 이동해야 한다."""
+    """단독 호출도 J6 분기를 유지하면서 공중 전환 속도로 이동한다."""
     from types import SimpleNamespace
     from unittest.mock import Mock
     from cake_decorator.doosan_robot import DoosanRobotClient
@@ -362,11 +362,49 @@ def test_side_start_keeps_branch_selection_with_faster_air_motion():
     commands = _yaw_path_commands(348., 0.)
     robot = Mock()
     robot._side_inverse.return_value = (
-        SimpleNamespace(pos=[0., 0., 90., 0., 90., 0.]), None, _wrapped_j6_inverse,
+        SimpleNamespace(pos=[0., 0., 90., 0., 90., 0.]),
+        SimpleNamespace(sol_space=2),
+        _wrapped_j6_inverse,
     )
+    robot.prepare_side_start.side_effect = lambda *args: DoosanRobotClient.prepare_side_start(robot, *args)
     robot.move_joint.return_value = True
     robot.verify_pose.return_value = True
     assert DoosanRobotClient.move_side_start(robot, commands)
     target = robot.move_joint.call_args.args[0]
     assert target[5] == pytest.approx(-348.)
     assert robot.move_joint.call_args.kwargs == dict(speed_deg_s=60.0, acc_deg_s2=120.0)
+
+
+@pytest.mark.parametrize("solution_changed", [False, True])
+def test_prepared_side_start_does_not_repeat_ik_and_checks_solution(solution_changed):
+    """상공에서는 전체 IK를 반복하지 않고, 준비 후 팔꿈치 해가 바뀌면 이동하지 않는다."""
+    from types import SimpleNamespace
+
+    robot = RequestRecorder()
+    robot._logger = SimpleNamespace(info=lambda _: None, error=lambda _: None)
+    commands = _yaw_path_commands(348., 0.)
+    robot._side_inverse = lambda: (
+        SimpleNamespace(pos=[0., 0., 90., 0., 90., 0.]),
+        SimpleNamespace(sol_space=2),
+        _wrapped_j6_inverse,
+    )
+    prepared = robot.prepare_side_start(commands)
+
+    def no_second_ik():
+        raise AssertionError("케이크 상공에서 전체 IK를 다시 계산했습니다.")
+
+    robot._side_inverse = no_second_ik
+    robot._call = lambda key, request: (
+        SimpleNamespace(success=True, pos=[0., 0., 90., 0., 90., 0.])
+        if key == "current_joints" else
+        SimpleNamespace(success=True, sol_space=3 if solution_changed else 2)
+    )
+    robot.verify_pose = lambda _: True
+    assert robot.move_side_start(commands, prepared=prepared) is not solution_changed
+    if solution_changed:
+        assert robot.requests == []
+    else:
+        key, request = robot.requests[0]
+        assert key == "move_joint"
+        assert request.pos[5] == pytest.approx(-348.0)
+        assert request.vel == 60.0
