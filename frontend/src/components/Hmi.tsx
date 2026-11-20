@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   phaseLabel,
   parseDetail,
-  parsePlan,
   parseRuntime,
   isOrderFeedbackFresh,
   parsePage,
@@ -13,17 +12,18 @@ import {
   orderLabels as labels,
   parseRobotStop,
   sendRobotStop,
+  surfaceDrawing,
 } from "../api/hmi";
 import type {
   Monitor,
   OrderDetail,
   OrderPage,
   OrderLog,
-  TaskPlan,
   RuntimeMonitor,
   RobotStop,
 } from "../api/hmi";
-import type { DrawingPayload } from "../api/drawing";
+import type { DrawingPathPayload } from "../api/drawing";
+import { HmiCake3D } from "./HmiCake3D";
 import "../styles/hmi.css";
 
 /** 원본 픽셀 그대로 표시한다. 측면은 입력 캔버스이며 실제 원뿔대 전개도가 아니다. */
@@ -32,7 +32,7 @@ function Drawing({
   faded = false,
   label = "고객 원본 그림",
 }: {
-  drawing: DrawingPayload;
+  drawing: DrawingPathPayload;
   faded?: boolean;
   label?: string;
 }) {
@@ -77,11 +77,10 @@ export function Hmi() {
   const [selected, setSelected] = useState("");
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [monitor, setMonitor] = useState<Monitor | null>(null);
-  const [plan, setPlan] = useState<TaskPlan | null>(null);
   const [runtime, setRuntime] = useState<RuntimeMonitor | null>(null);
-  const [trajectoryWarning, setTrajectoryWarning] = useState("");
   const [surface, setSurface] = useState<"top" | "side">("top");
-  const [overlay, setOverlay] = useState(false);
+  // 고객 원본 카드의 보기 방식. true면 두 면을 입힌 3D 케이크, false면 선택 면(surface)의 2D 원본.
+  const [view3d, setView3d] = useState(false);
   const [error, setError] = useState("");
   const [health, setHealth] = useState(false);
   const [updated, setUpdated] = useState("");
@@ -126,8 +125,6 @@ export function Hmi() {
         const id = selected || next.items[0]?.order_id;
         let order: OrderDetail | null = null;
         let meta: Monitor | null = null;
-        let path: TaskPlan | null = null;
-        let pathWarning = "";
         if (id) {
           order = parseDetail(
             await readJson(
@@ -152,23 +149,6 @@ export function Hmi() {
             if (controller.signal.aborted) throw new Error("조회 시간 초과");
           }
         }
-        if (order) {
-          try {
-            path = parsePlan(
-              await readJson(
-                `/api/orders/${encodeURIComponent(order.order_id)}/plan`,
-                controller.signal,
-              ),
-              order,
-            );
-          } catch (cause) {
-            if (controller.signal.aborted) throw new Error("조회 시간 초과");
-            // 이전 서버의 404는 미지원 상태로 취급하고, 손상된/실패한 경로는 별도 안내한다.
-            const text =
-              cause instanceof Error ? cause.message : "경로 조회 실패";
-            if (!text.includes("HTTP 404")) pathWarning = text;
-          }
-        }
         if (!active) return;
         // 목록 뒤에 받은 상세가 더 최신일 수 있으므로 선택 행과 상세의 상태를 맞춘다.
         if (order) {
@@ -184,9 +164,7 @@ export function Hmi() {
         setPage(next);
         setDetail(order);
         setMonitor(meta);
-        setPlan(path);
         setRuntime(connection);
-        setTrajectoryWarning(pathWarning);
         setHealth(true);
         setError("");
         setUpdated(new Date().toLocaleTimeString("ko-KR"));
@@ -307,10 +285,9 @@ export function Hmi() {
         ? "물리 E-stop 신호 미수신 · 브릿지 미연결: 소프트웨어 정지가 로봇에 전달되지 않습니다."
         : "물리 E-stop 신호 미수신 · 소프트웨어 정지는 인증된 안전 기능이 아닙니다.");
 
-  // 한 주문에 한 면만 존재한다. 없는 반대 면을 자동 생성하거나 다른 주문과 섞지 않는다.
-  const drawing =
-    detail?.drawing.drawing_surface === surface ? detail.drawing : null;
-  const visiblePlan = plan?.drawing_surface === surface ? plan : null;
+  // 한 주문에는 윗면만, 옆면만, 또는 윗면+옆면(additional_paths)이 들어올 수 있다.
+  // 선택 면의 원본을 주문 안에서만 찾고, 없는 면을 만들거나 다른 주문과 섞지 않는다.
+  const drawing = surfaceDrawing(detail?.drawing, surface);
   const stale = !health && Boolean(updated);
 
   return (
@@ -348,18 +325,17 @@ export function Hmi() {
       </div>
       <div className="hmi-shell">
         <aside>
-          <small>STATION 01</small>
           <h2>제작을 한눈에.</h2>
           <nav>
             <a href="#overview">주문·공정</a>
-            <a href="#drawing">드로잉 비교</a>
+            <a href="#drawing">고객 원본</a>
             <a href="#logs">경고·로그</a>
           </nav>
           <p>M0609 / RG2</p>
           <small>
-            읽기 전용 HMI
+            주문·공정 조회 전용
             <br />
-            로봇 제어 없음
+            로봇 제어는 소프트웨어 정지만
           </small>
         </aside>
         <main>
@@ -392,9 +368,8 @@ export function Hmi() {
           )}
           <div className="hmi-title" id="overview">
             <div>
-              <small>OPERATIONS / READ ONLY</small>
+              <small>OPERATIONS</small>
               <h1>제작 현황</h1>
-              <p>저장된 주문과 TM 공정 피드백을 확인합니다.</p>
             </div>
             <div className="hmi-controls">
               <button onClick={() => setRefresh((n) => n + 1)}>
@@ -405,14 +380,12 @@ export function Hmi() {
               </button>
             </div>
           </div>
-          <div
-            className={error ? "hmi-banner warning" : "hmi-banner"}
-            role="status"
-          >
-            {error
-              ? `${error} ${stale ? "이전 조회 값을 표시 중 · 최신 상태가 아닙니다." : ""}`
-              : "읽기 전용 · 3초 간격 갱신. API 응답은 로봇 연결·안전 확인을 의미하지 않습니다."}
-          </div>
+          {/* 조회 오류가 있을 때만 경고 띠를 표시한다. 정상일 때는 안내 문구 없이 비워 둔다. */}
+          {error && (
+            <div className="hmi-banner warning" role="status">
+              {`${error} ${stale ? "이전 조회 값을 표시 중 · 최신 상태가 아닙니다." : ""}`}
+            </div>
+          )}
           <section className="hmi-stats" aria-label="상태 요약">
             <article>
               <small>주문 API</small>
@@ -428,17 +401,6 @@ export function Hmi() {
               <small>선택 공정</small>
               <strong>{detail ? phaseLabel(detail.phase) : "—"}</strong>
               <span>{detail ? labels[detail.status] : "주문 미선택"}</span>
-            </article>
-            <article>
-              <small>실제 / 시뮬레이션</small>
-              <strong>
-                {monitor?.execution_mode === "real"
-                  ? "실물 설정"
-                  : monitor?.execution_mode === "simulation"
-                    ? "시뮬레이션 설정"
-                    : "미확인"}
-              </strong>
-              <span>해당 주문의 브릿지 설정 · 실제 연결/안전 신호 아님</span>
             </article>
           </section>
           <section className="hmi-card hmi-runtime" aria-label="TM 연결 관측">
@@ -462,6 +424,46 @@ export function Hmi() {
                   : "작업 피드백 대기"}
             </p>
           </section>
+          {/* 선택 주문 피드백: TM 연결 관측 바로 아래에 한 줄 요약 형태로 작게 둔다. */}
+          <section
+            className="hmi-card hmi-feedback"
+            aria-label="선택 주문 피드백"
+          >
+            <div className="hmi-feedback-head">
+              <h2>선택 주문 피드백</h2>
+              <b>{detail?.order_id || "—"}</b>
+              <span>{detail?.message || "공정 메시지가 없습니다."}</span>
+            </div>
+            <div className="hmi-feedback-progress">
+              <label htmlFor="hmi-feedback-progress">
+                TM 공정 진행률 {detail?.progress_pct.toFixed(1) ?? "—"}%
+              </label>
+              <progress
+                id="hmi-feedback-progress"
+                max="100"
+                value={detail?.progress_pct || 0}
+              />
+            </div>
+            <dl>
+              <dt>상태 갱신</dt>
+              <dd>{monitor?.updated_at || "미제공"}</dd>
+              <dt>오류 코드</dt>
+              <dd>{monitor?.error_code || "기록 없음"}</dd>
+              <dt>현재 명령</dt>
+              <dd>{monitor?.current_command || "미수신 / 작업 종료"}</dd>
+              <dt>TM 피드백</dt>
+              <dd>
+                {isOrderFeedbackFresh(runtime, detail?.order_id) && health
+                  ? "수신 중"
+                  : detail &&
+                      ["completed", "failed", "rejected", "resolved"].includes(
+                        detail.status,
+                      )
+                    ? "종료된 주문"
+                    : "대기 / 미확인"}
+              </dd>
+            </dl>
+          </section>
           <div className="hmi-panels">
             <section className="hmi-card">
               <h2>주문·공정 상태 {stale && "· 이전 조회 값"}</h2>
@@ -477,7 +479,6 @@ export function Hmi() {
                         setSelected(order.order_id);
                         setDetail(null);
                         setMonitor(null);
-                        setPlan(null);
                         setSurface(order.drawing_surface);
                       }}
                     >
@@ -495,111 +496,57 @@ export function Hmi() {
                 </div>
               )}
             </section>
-            <section className="hmi-card">
-              <h2>선택 주문 피드백</h2>
-              <h3>{detail?.order_id || "—"}</h3>
-              <p>{detail?.message || "공정 메시지가 없습니다."}</p>
-              <label>
-                TM 공정 진행률 {detail?.progress_pct.toFixed(1) ?? "—"}%
-              </label>
-              <progress max="100" value={detail?.progress_pct || 0} />
+            {/* 고객 원본 그림: 주문 목록 옆에서 선택 주문의 그림을 바로 확인한다.
+                상단/측면은 해당 면의 2D 원본, 3D는 두 면을 한 케이크에 입혀 보여준다. */}
+            <section className="hmi-card hmi-original" id="drawing">
+              <div className="hmi-original-head">
+                <h2>고객 원본 그림</h2>
+                <div className="hmi-controls">
+                  <button
+                    aria-pressed={!view3d && surface === "top"}
+                    onClick={() => {
+                      setSurface("top");
+                      setView3d(false);
+                    }}
+                  >
+                    상단
+                  </button>
+                  <button
+                    aria-pressed={!view3d && surface === "side"}
+                    onClick={() => {
+                      setSurface("side");
+                      setView3d(false);
+                    }}
+                  >
+                    측면
+                  </button>
+                  <button aria-pressed={view3d} onClick={() => setView3d(true)}>
+                    3D
+                  </button>
+                </div>
+              </div>
+              {view3d ? (
+                detail ? (
+                  <HmiCake3D drawing={detail.drawing} />
+                ) : (
+                  <div className="hmi-placeholder">주문을 선택하세요</div>
+                )
+              ) : drawing ? (
+                <Drawing drawing={drawing} />
+              ) : (
+                <div className="hmi-placeholder">
+                  {detail
+                    ? "이 주문에는 이 면의 그림이 없습니다"
+                    : "주문을 선택하세요"}
+                </div>
+              )}
               <p className="hmi-muted">
-                공정 진행률은 드로잉 완료 실측값이 아닙니다.
+                {view3d
+                  ? "드래그해서 돌려 볼 수 있습니다. 원본 그림이며 실제 필기 결과가 아닙니다."
+                  : `${surface === "top" ? "상단" : "측면"} 원본 · 고객이 제출한 좌표 그대로`}
               </p>
-              <dl>
-                <dt>상태 갱신 시각</dt>
-                <dd>{monitor?.updated_at || "미제공"}</dd>
-                <dt>마지막 오류 코드</dt>
-                <dd>{monitor?.error_code || "기록 없음 / 미제공"}</dd>
-                <dt>현재 작업 명령</dt>
-                <dd>{monitor?.current_command || "미수신 / 작업 종료"}</dd>
-                <dt>ROS 연결·heartbeat</dt>
-                <dd>
-                  {isOrderFeedbackFresh(runtime, detail?.order_id) && health
-                    ? "선택 주문의 TM 피드백 수신 중"
-                    : detail &&
-                        [
-                          "completed",
-                          "failed",
-                          "rejected",
-                          "resolved",
-                        ].includes(detail.status)
-                      ? "종료된 주문 기록"
-                      : "선택 주문 피드백 대기 / 미확인"}
-                </dd>
-              </dl>
             </section>
           </div>
-          <section className="hmi-card hmi-monitor" id="drawing">
-            <div className="hmi-title">
-              <div>
-                <small>DRAWING MONITOR</small>
-                <h2>원본과 TM 계획 제어점 비교</h2>
-              </div>
-              <div className="hmi-controls">
-                <button
-                  aria-pressed={surface === "top"}
-                  onClick={() => setSurface("top")}
-                >
-                  상단
-                </button>
-                <button
-                  aria-pressed={surface === "side"}
-                  onClick={() => setSurface("side")}
-                >
-                  측면
-                </button>
-                <button
-                  aria-pressed={overlay}
-                  onClick={() => setOverlay(!overlay)}
-                >
-                  {overlay ? "나란히 보기" : "겹쳐 보기"}
-                </button>
-              </div>
-            </div>
-            <p>
-              TM이 받은 GenerateTrajectory 결과를 표시합니다. 실제 TCP·잉크 측정
-              경로는 미연결입니다. 진행률이나 원본 그림으로 실행 궤적을 추정하지
-              않습니다.
-            </p>
-            <div
-              className={overlay ? "hmi-comparison overlay" : "hmi-comparison"}
-            >
-              <figure>
-                <figcaption>
-                  고객 원본 · {surface === "top" ? "상단" : "측면"}
-                </figcaption>
-                {drawing ? (
-                  <Drawing drawing={drawing} />
-                ) : (
-                  <div className="hmi-placeholder">이 면의 원본이 없습니다</div>
-                )}
-              </figure>
-              <figure>
-                <figcaption>TM 계획 제어점 · 실측 아님</figcaption>
-                {visiblePlan ? (
-                  <Drawing drawing={visiblePlan} label="TM 계획 경로" />
-                ) : (
-                  <div className="hmi-placeholder">TM 계획 경로 미수신</div>
-                )}
-              </figure>
-            </div>
-            {trajectoryWarning && (
-              <p role="status" className="hmi-banner warning">
-                계획 조회 경고 · {trajectoryWarning}
-              </p>
-            )}
-            {visiblePlan && (
-              <p className="hmi-path-metrics">
-                계획 {visiblePlan.strokes.length}획 ·{" "}
-                {visiblePlan.waypoint_count}개 웨이포인트 ·{" "}
-                {visiblePlan.updated_at}
-              </p>
-            )}
-            <p className="hmi-muted">
-              제작 완료 상태는 실제 필기 품질·물리 안전 확인을 뜻하지 않습니다.
-            </p>
-          </section>
           <section className="hmi-card" id="logs">
             <h2>경고·오류 로그</h2>
             <p>

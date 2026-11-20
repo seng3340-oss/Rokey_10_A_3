@@ -11,6 +11,7 @@ import {
   collectOrderChanges,
   parseRobotStop,
   sendRobotStop,
+  surfaceDrawing,
 } from "../src/api/hmi.ts";
 
 const order = {
@@ -224,4 +225,58 @@ test("robot stop contract validates state and posts to stop endpoints", async ()
   } finally {
     globalThis.fetch = original;
   }
+});
+
+/** 윗면+옆면 주문은 추가 면을 검사하고, 면 선택 시 주문 안에서만 원본을 찾는다. */
+test("detail accepts one side additional path and finds drawing per surface", () => {
+  const stroke = {
+    stroke_id: 0,
+    points: [
+      { x: 300, y: 300 },
+      { x: 400, y: 350 },
+    ],
+  };
+  const top = {
+    canvas_width: 1024,
+    canvas_height: 768,
+    drawing_surface: "top",
+    strokes: [stroke],
+  };
+  const side = { ...top, drawing_surface: "side" };
+  const detail = parseDetail({
+    ...order,
+    drawing: { ...top, additional_paths: [side] },
+  });
+  assert.equal(surfaceDrawing(detail.drawing, "top")?.drawing_surface, "top");
+  assert.equal(surfaceDrawing(detail.drawing, "side")?.drawing_surface, "side");
+  assert.equal(
+    surfaceDrawing(parseDetail({ ...order, drawing: top }).drawing, "side"),
+    null,
+  );
+  assert.equal(surfaceDrawing(null, "top"), null);
+  // 추가 면은 옆면 1개만 허용하고, 좌표가 캔버스를 벗어나면 거부한다.
+  assert.throws(() =>
+    parseDetail({ ...order, drawing: { ...top, additional_paths: [top] } }),
+  );
+  assert.throws(() =>
+    parseDetail({
+      ...order,
+      drawing: { ...top, additional_paths: [side, side] },
+    }),
+  );
+  const outside = {
+    ...side,
+    strokes: [
+      {
+        stroke_id: 0,
+        points: [
+          { x: 0, y: 0 },
+          { x: 2000, y: 0 },
+        ],
+      },
+    ],
+  };
+  assert.throws(() =>
+    parseDetail({ ...order, drawing: { ...top, additional_paths: [outside] } }),
+  );
 });

@@ -146,9 +146,10 @@
   border: 1px solid #cf9586;
   color: #8b352c;
 }
+/* 상태 요약 카드 3장(주문 API·저장 주문·선택 공정)을 한 줄에 둔다. */
 .hmi-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin: 22px 0;
 }
@@ -212,34 +213,18 @@
   margin: 0;
   text-align: right;
 }
-.hmi-monitor,
 #logs {
   margin-top: 22px;
+  scroll-margin-top: 125px;
+}
+/* 사이드바 "고객 원본" 링크로 이동할 때 고정 안전 띠 아래에서 카드 제목이 보이게 한다. */
+.hmi-original {
   scroll-margin-top: 125px;
 }
 .hmi-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-.hmi-comparison {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin: 20px 0;
-}
-.hmi-comparison figure {
-  margin: 0;
-  min-width: 0;
-  background: #faf7f1;
-  border: 1px dashed #d6c9b4;
-  border-radius: 14px;
-  overflow: hidden;
-}
-.hmi-comparison figcaption {
-  padding: 15px;
-  font-weight: 600;
-  font-size: 13px;
 }
 .hmi-drawing {
   display: block;
@@ -257,25 +242,6 @@
   line-height: 2;
   padding: 18px;
 }
-/* 겹쳐 보기는 동일 원본 픽셀 좌표계를 사용한다. 실행 궤적이 없으면 안내만 겹친다. */
-.hmi-comparison.overlay {
-  grid-template-columns: 1fr;
-  position: relative;
-}
-.hmi-comparison.overlay figure:first-child {
-  grid-area: 1/1;
-}
-.hmi-comparison.overlay figure:last-child {
-  grid-area: 1/1;
-  background: transparent;
-}
-.hmi-comparison.overlay figure:last-child .hmi-drawing {
-  color: #347c77;
-  opacity: 0.8;
-}
-.hmi-comparison.overlay figure:first-child figcaption {
-  visibility: hidden;
-}
 .hmi-demo {
   display: flex;
   align-items: center;
@@ -285,10 +251,6 @@
 .hmi-demo input {
   width: 18px;
   height: 18px;
-}
-.hmi-monitor input[type="range"] {
-  width: 100%;
-  accent-color: #9a835f;
 }
 .hmi-log {
   display: grid;
@@ -337,9 +299,7 @@
   .hmi-shell aside {
     display: none;
   }
-  .hmi-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  /* 카드가 3장이라 태블릿에서도 3열을 유지해 한 장만 다음 줄로 밀리지 않게 한다. */
 }
 /* 휴대폰은 모든 비교·공정 패널을 한 열로 읽고 고정 안전 띠에 두 줄을 허용한다. */
 @media (max-width: 650px) {
@@ -359,7 +319,9 @@
     font-size: 10px;
     max-width: 220px;
   }
+  /* 휴대폰 폭에서는 3열이 너무 좁아 공정 이름이 잘리므로 한 열로 쌓는다. */
   .hmi-stats {
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
   .hmi-stats article,
@@ -370,8 +332,7 @@
   .hmi-stats strong {
     font-size: 19px;
   }
-  .hmi-panels,
-  .hmi-comparison {
+  .hmi-panels {
     grid-template-columns: 1fr;
   }
   .hmi-log {
@@ -418,12 +379,6 @@
   .hmi-path-layers {
     height: 240px;
   }
-}
-.hmi-comparison.overlay .hmi-path-layers > .hmi-drawing {
-  color: #256eb4;
-}
-.hmi-comparison.overlay .hmi-measured-path .hmi-drawing {
-  color: #20805b;
 }
 
 /* 작성 중 두 면을 주문 이력 위에 나란히 표시하고, 작은 화면에서는 높이를 줄인다. */
@@ -507,5 +462,115 @@
   }
   .hmi-stop-actions button {
     flex: 1;
+  }
+}
+
+/* 선택 주문 피드백: TM 연결 관측 아래의 작은 요약 띠.
+   제목·주문번호·메시지 → 진행률 → 상세 4항목을 한 줄 흐름으로 두고 좁으면 줄바꿈한다. */
+.hmi-feedback {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 10px 20px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+.hmi-feedback-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.hmi-feedback .hmi-feedback-head h2 {
+  font-size: 14px;
+  margin: 0;
+}
+.hmi-feedback-head b {
+  font-size: 13px;
+}
+.hmi-feedback-head span {
+  font-size: 12px;
+  color: #6f6252;
+  overflow-wrap: anywhere;
+}
+.hmi-feedback-progress {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  align-content: center;
+}
+.hmi-feedback-progress progress {
+  margin-top: 0;
+  height: 10px;
+}
+/* 상세 항목은 라벨·값 4쌍을 한 줄에 놓는다. 값은 왼쪽 정렬로 라벨 바로 옆에 붙인다. */
+.hmi-card.hmi-feedback dl {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, max-content minmax(0, 1fr));
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 11.5px;
+}
+.hmi-feedback dt {
+  color: #8c7f6e;
+}
+.hmi-card.hmi-feedback dd {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* 고객 원본 카드: 제목과 상단/측면/3D 전환 버튼을 한 줄에 둔다. */
+.hmi-original-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.hmi-original-head h2 {
+  margin: 0;
+}
+.hmi-original .hmi-drawing,
+.hmi-original .hmi-placeholder,
+.hmi-cake3d {
+  background: #faf7f1;
+  border: 1px dashed #d6c9b4;
+  border-radius: 14px;
+}
+/* 3D 캔버스는 원본 2D와 같은 높이를 써서 전환해도 카드 크기가 흔들리지 않게 한다.
+   드래그 회전을 위해 터치 스크롤 제스처를 막는다. */
+.hmi-cake3d {
+  position: relative;
+  height: 290px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+.hmi-cake3d canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hmi-cake3d .model-error {
+  padding: 18px;
+  font-size: 13px;
+  color: #8c7f6e;
+}
+/* 태블릿 이하: 피드백 요약은 위아래로, 상세 항목은 2쌍씩 둔다. */
+@media (max-width: 1100px) {
+  .hmi-feedback {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hmi-card.hmi-feedback dl {
+    grid-template-columns: repeat(2, max-content minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .hmi-cake3d {
+    height: 240px;
+  }
+  .hmi-card.hmi-feedback dl {
+    grid-template-columns: max-content minmax(0, 1fr);
   }
 }

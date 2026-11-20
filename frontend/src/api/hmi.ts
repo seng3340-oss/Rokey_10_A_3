@@ -1,4 +1,4 @@
-import type { DrawingPayload } from "./drawing.ts";
+import type { DrawingPathPayload, DrawingPayload } from "./drawing.ts";
 
 /** 기존 주문 API의 상태 값이다. 로봇의 안전 상태나 운전 모드를 뜻하지 않는다. */
 export const orderStates = [
@@ -67,40 +67,77 @@ export function parseOrder(value: unknown): Order {
   return row;
 }
 
-/** 실제 원본 크기·유한 좌표를 검사한다. SVG는 원본 픽셀 좌표계를 그대로 쓴다. */
+/**
+ * 한 면의 원본 그림 형식을 검사한다. 캔버스 크기·획 수·점 수와 좌표 범위를 확인해
+ * 깨진 그림이 실행 경로처럼 보이지 않게 한다. 주 그림과 추가 면(additional_paths)에 공통 적용한다.
+ */
+function isValidPath(
+  d: DrawingPathPayload | undefined,
+): d is DrawingPathPayload {
+  return Boolean(
+    d &&
+    Number.isInteger(d.canvas_width) &&
+    Number.isInteger(d.canvas_height) &&
+    d.canvas_width > 0 &&
+    d.canvas_width <= 8192 &&
+    d.canvas_height > 0 &&
+    d.canvas_height <= 8192 &&
+    (d.drawing_surface === "top" || d.drawing_surface === "side") &&
+    Array.isArray(d.strokes) &&
+    d.strokes.length <= 100 &&
+    d.strokes.every(
+      (s) =>
+        Array.isArray(s.points) &&
+        s.points.length >= 2 &&
+        s.points.length <= 5000 &&
+        s.points.every(
+          (p) =>
+            Number.isFinite(p.x) &&
+            Number.isFinite(p.y) &&
+            p.x >= 0 &&
+            p.y >= 0 &&
+            p.x <= d.canvas_width &&
+            p.y <= d.canvas_height,
+        ),
+    ),
+  );
+}
+
+/**
+ * 주문 상세를 검사한다. 주 그림의 면은 주문 면과 같아야 하고,
+ * 추가 면은 백엔드 계약대로 최대 1개의 옆면(side)만 허용한다(윗면+옆면 동시 주문).
+ */
 export function parseDetail(value: unknown): OrderDetail {
   const row = parseOrder(value) as OrderDetail;
   const d = row.drawing;
+  const extra = d?.additional_paths ?? [];
   if (
-    !d ||
-    !Number.isInteger(d.canvas_width) ||
-    !Number.isInteger(d.canvas_height) ||
-    d.canvas_width <= 0 ||
-    d.canvas_width > 8192 ||
-    d.canvas_height <= 0 ||
-    d.canvas_height > 8192 ||
+    !isValidPath(d) ||
     d.drawing_surface !== row.drawing_surface ||
-    !Array.isArray(d.strokes) ||
-    d.strokes.length > 100 ||
-    d.strokes.some(
-      (s) =>
-        !Array.isArray(s.points) ||
-        s.points.length < 2 ||
-        s.points.length > 5000 ||
-        s.points.some(
-          (p) =>
-            !Number.isFinite(p.x) ||
-            !Number.isFinite(p.y) ||
-            p.x < 0 ||
-            p.y < 0 ||
-            p.x > d.canvas_width ||
-            p.y > d.canvas_height,
-        ),
-    )
+    !Array.isArray(extra) ||
+    extra.length > 1 ||
+    extra.some((path) => !isValidPath(path) || path.drawing_surface !== "side")
   ) {
     throw new Error("원본 그림 응답 형식을 확인할 수 없습니다.");
   }
   return row;
+}
+
+/**
+ * 주문 그림에서 요청한 면의 원본을 찾는다. 주 그림 → 추가 면 순서로 확인하며
+ * 없는 면을 만들거나 다른 주문과 섞지 않는다. 없으면 null.
+ */
+export function surfaceDrawing(
+  drawing: DrawingPayload | null | undefined,
+  surface: "top" | "side",
+): DrawingPathPayload | null {
+  if (!drawing) return null;
+  if (drawing.drawing_surface === surface) return drawing;
+  return (
+    drawing.additional_paths?.find(
+      (path) => path.drawing_surface === surface,
+    ) ?? null
+  );
 }
 
 /** GET만 허용하는 HMI 전용 조회다. 인증 토큰이나 내부 제어 주소를 사용하지 않는다. */
