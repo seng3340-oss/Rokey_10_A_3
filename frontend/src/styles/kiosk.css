@@ -174,7 +174,7 @@ h1 {
 /* 필기 영역을 더 넓게 배정하고 3D 영역에는 최소 가독 폭을 확보한다. */
 .workbench {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1.3fr);
   gap: 24px;
   align-items: stretch;
 }
@@ -762,5 +762,393 @@ dialog {
   }
   .idle-notice {
     justify-content: flex-start;
+  }
+}
+
+/* 태블릿에서 원본 좌표 비율을 유지하며 실제 필기 영역을 넓힌다. */
+.canvas-wrap {
+  max-width: calc(65vh * 4 / 3);
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  .canvas-wrap {
+    max-width: calc(65vh * 4 / 3);
+  }
+}
+/* 주문 접수와 공정 상태를 고객이 한눈에 확인한다. */
+.order-status {
+  text-align: center;
+  color: #332d28;
+}
+.order-status h2 {
+  margin: 14px 0;
+  font-size: 26px;
+}
+.order-status p {
+  color: #776a5e;
+}
+.order-status progress {
+  width: 100%;
+  height: 14px;
+  margin-top: 18px;
+  accent-color: #b75139;
+}
+.order-status strong {
+  display: block;
+  margin-top: 32px;
+  font-size: 22px;
+}
+
+/* 왼쪽 기준점은 고정하고 3D의 오른쪽 경계만 줄여 상태 공간을 확보한다. */
+.review-stage {
+  position: relative;
+}
+.review-stage .review-model {
+  width: 100%;
+  transition: width 700ms cubic-bezier(0.22, 0.7, 0.2, 1);
+}
+.review-stage .order-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(16px);
+  transition:
+    opacity 450ms ease,
+    transform 600ms ease,
+    visibility 700ms;
+}
+#modal.is-ordering .review-model {
+  width: 54%;
+}
+#modal.is-ordering .order-status {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  transition-delay: 180ms;
+}
+#modal > .rotate-note,
+#modal > .review-controls,
+#modal > #confirm,
+#modal > .idle-notice,
+#modal .review-heading {
+  transition: opacity 400ms ease;
+}
+#modal.is-ordering > .rotate-note,
+#modal.is-ordering > .review-controls,
+#modal.is-ordering > #confirm,
+#modal.is-ordering > .idle-notice,
+#modal.is-ordering .review-heading {
+  opacity: 0;
+  pointer-events: none;
+}
+#modal.is-ordering #payload-panel {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .review-stage .review-model,
+  .review-stage .order-status,
+  #modal > * {
+    transition-duration: 0ms;
+  }
+}
+
+/* 태블릿의 오른쪽 카드는 제목·넓은 모형·시점 버튼을 세로로 정렬한다. */
+@media (min-width: 761px) {
+  .preview-panel {
+    display: flex;
+    flex-direction: column;
+  }
+  .preview-heading,
+  .preview-panel > .rotate-note,
+  .preview-panel > .view-controls {
+    flex-shrink: 0;
+  }
+  .preview-panel > #live3d {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 320px;
+    margin: 12px 0;
+  }
+  .preview-panel > .view-controls {
+    margin-bottom: 8px;
+  }
+}
+
+/* svh에는 크롬 주소창·태블릿 시스템 바를 제외한 화면 높이가 반영된다. */
+@media (min-width: 761px) and (min-height: 520px) {
+  .masthead {
+    height: 66px;
+  }
+  .kiosk-main {
+    height: calc(100svh - 66px);
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    padding: 12px 4% 8px;
+  }
+  .kiosk-main .workbench {
+    min-height: 0;
+  }
+  .kiosk-main .drawing-panel {
+    display: flex;
+    flex-direction: column;
+  }
+  .kiosk-main .drawing-toolbar {
+    padding: 8px 14px;
+    flex-shrink: 0;
+  }
+  .kiosk-main .drawing-stage {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .kiosk-main .stage-label {
+    padding: 8px 14px 0;
+  }
+  .kiosk-main .canvas-wrap {
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    max-height: 100%;
+    aspect-ratio: 4 / 3;
+    min-height: 0;
+  }
+  .kiosk-main #surface-help {
+    padding-bottom: 8px;
+  }
+  .kiosk-main .drawing-bottom {
+    padding: 8px 14px;
+    flex-shrink: 0;
+  }
+  .kiosk-main .preview-panel {
+    padding: 14px;
+  }
+  .kiosk-main .preview-panel > #live3d {
+    min-height: 0;
+  }
+  .kiosk-main .bottom-bar {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .kiosk-main .prototype-note {
+    margin: 0;
+    font-size: 9px;
+  }
+}
+
+/* 설명을 덜어낸 높이를 필기에 배정한다. 확대된 화면 좌표는 캔버스 경계로 역산한다. */
+.canvas-wrap {
+  overflow: hidden;
+}
+#draw[data-surface="top"] {
+  transform: scale(1.12);
+}
+#draw[data-surface="side"] {
+  transform: scaleY(2);
+}
+@media (min-width: 761px) and (min-height: 520px) {
+  .kiosk-main {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .kiosk-main .drawing-stage {
+    grid-template-rows: minmax(0, 1fr);
+    padding: 8px 0;
+  }
+  .kiosk-main .canvas-wrap:has(#draw[data-surface="side"]) {
+    width: 100%;
+    aspect-ratio: auto;
+  }
+}
+
+/* 전체 확인 창을 태블릿의 주소창 아래 여유 있게 맞춘다. */
+#modal {
+  width: min(84vw, 660px);
+  max-height: 88svh;
+  padding: 18px 22px;
+}
+#modal .review-heading h2 {
+  font-size: 20px;
+}
+#modal .idle-notice {
+  margin: 8px 0;
+}
+#modal .review-model {
+  height: clamp(220px, 46svh, 420px);
+  margin: 10px 0;
+}
+#modal .review-controls {
+  margin: 10px 0;
+}
+#modal > .primary {
+  min-height: 48px;
+  padding: 12px 20px;
+}
+#modal .order-status h2 {
+  font-size: 21px;
+}
+@media (max-width: 520px) {
+  #modal {
+    width: 92vw;
+    padding: 14px;
+  }
+  #modal .review-heading h2 {
+    font-size: 17px;
+  }
+}
+
+/* 확인 창의 남는 높이를 3D에 배정해 버튼까지 스크롤 없이 표시한다. */
+#modal[open] {
+  display: flex;
+  flex-direction: column;
+  height: min(88svh, 760px);
+  overflow: hidden;
+}
+#modal .review-heading,
+#modal .idle-notice,
+#modal > .rotate-note,
+#modal > .review-controls,
+#modal > .primary {
+  flex-shrink: 0;
+}
+#modal .idle-notice {
+  justify-content: flex-start;
+}
+#modal .review-stage {
+  flex: 1;
+  min-height: 0;
+  margin: 8px 0;
+}
+#modal .review-model {
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+/* 진행률 바와 숫자를 같은 폭에 배치하고 숫자는 바 바로 아래에 표시한다. */
+#order-progress {
+  display: block;
+  width: 100%;
+  flex-shrink: 0;
+}
+#order-percent {
+  margin-top: 14px;
+}
+
+/* 완료 시 팝업 중앙 하단에 픽업 버튼과 남은 시간을 표시한다. */
+#pickup[hidden] {
+  display: none;
+}
+.pickup-button {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: white;
+  font-size: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pickup-button:active {
+  transform: translateX(-50%);
+}
+.pickup-ring {
+  --remaining: 100%;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(white var(--remaining), #ffffff40 0);
+}
+.pickup-ring > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+  font-size: 14px;
+}
+
+/* 안내는 미리보기 위쪽 1/4 지점에 반투명하게 겹쳐 표시한다. */
+#modal .review-stage > #payload-panel {
+  position: absolute;
+  top: 25%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% - 32px);
+  max-width: 540px;
+  z-index: 3;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: #47372fcc;
+  backdrop-filter: blur(6px);
+  color: white;
+  box-shadow: 0 6px 24px #291c2026;
+  pointer-events: none;
+}
+#modal .review-stage > #payload-panel[hidden] {
+  display: none;
+}
+#modal #result {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 그림이 생긴 뒤 카운트만 부드럽게 드러내며 도구 줄 높이는 유지한다. */
+.drawing-counts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.drawing-idle {
+  --remaining: 100%;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) var(--remaining), #e8e0d6 0);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 350ms ease,
+    transform 350ms ease;
+}
+.drawing-idle.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.drawing-idle > span {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: white;
+  display: grid;
+  place-items: center;
+  color: #795041;
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawing-idle {
+    transition: none;
   }
 }

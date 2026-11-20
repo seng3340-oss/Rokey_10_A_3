@@ -23,12 +23,37 @@ export function ReviewDialog() {
         </span>
       </div>
       {/* 처음 열 때 별도 3D 뷰를 만든다. 원본 텍스처는 일반 미리보기와 공유한다. */}
-      <div
-        id="review3d"
-        className="model-view review-model"
-        role="img"
-        aria-label="제출 전 전체 케이크 3D 확인"
-      ></div>
+      <div className="review-stage">
+        <div
+          id="review3d"
+          className="model-view review-model"
+          role="img"
+          aria-label="케이크 3D 미리보기"
+        ></div>
+        {/* 안내를 미리보기 안에 겹쳐 버튼 영역과 떨어뜨린다. */}
+        <div id="payload-panel" hidden={true}>
+          <p id="result" role="status"></p>
+        </div>
+        {/* 제작 요청 후 미리보기 오른쪽에 공정 상태를 펼친다. */}
+        <section
+          id="order-status"
+          className="order-status"
+          aria-live="polite"
+          aria-hidden="true"
+        >
+          <span className="overline">MY CAKE</span>
+          <h2 id="order-title">케이크를 준비하고 있어요</h2>
+          <p id="order-message">작업을 기다리고 있어요.</p>
+          <progress
+            id="order-progress"
+            aria-label="전체 공정 진행률"
+            max="100"
+            value="0"
+          />
+          <strong id="order-percent">진행률 확인 중</strong>
+          <p id="order-number"></p>
+        </section>
+      </div>
       <p className="rotate-note">
         그림을 확인하며 손가락으로 케이크를 돌려보세요.
       </p>
@@ -41,14 +66,12 @@ export function ReviewDialog() {
       <button id="confirm" className="primary">
         선택한 면 제작 요청
       </button>
-      {/* 제출을 시도한 뒤 요청 내용·접수 결과와 동일 데이터의 내려받기를 공개한다. */}
-      <div id="payload-panel" hidden={true}>
-        <p id="result" role="status"></p>
-        <pre id="payload"></pre>
-        <button id="download" className="quiet">
-          선택한 면 JSON 내려받기
-        </button>
-      </div>
+      <button id="pickup" className="pickup-button" hidden>
+        <span id="pickup-ring" className="pickup-ring" aria-hidden="true">
+          <span id="pickup-seconds">60</span>
+        </span>
+        <span>픽업을 해주세요</span>
+      </button>
     </dialog>
   );
 }
