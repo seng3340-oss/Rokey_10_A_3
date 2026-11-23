@@ -1,249 +1,155 @@
-# 로봇 레터링 케이크
+# CakeBot | 로봇 레터링 케이크
 
-태블릿에 그린 그림을 두산 M0609와 RG2 그리퍼로 케이크에 그리는 프로젝트입니다.
-고객은 그림을 그리고, 운영자는 HMI에서 제작 상황을 확인하는 서비스를 목표로 합니다.
-우선 고정된 케이크의 윗면·옆면 드로잉을 만들고, 이후 케이크 운반과 출고를 추가합니다.
+**태블릿에 그린 그림을 두산 M0609 협동로봇이 케이크 윗면과 옆면에 직접 그립니다.**
 
-현재 브랜치는 드로잉 통합 문제를 함께 확인하기 위한 작업본입니다.
-원뿔대 케이크의 레터링 좌표와 이동 방식은 [표면 드로잉 안내](docs/SURFACE_DRAWING.md)를 참고하세요.
+고객은 3D 미리보기에서 그림이 들어갈 위치를 확인하고 주문합니다. 로봇은 케이크를 작업대에 올리고, 표면의 모양에 맞춰 계산한 경로를 따라 그림을 그린 뒤 출고 위치로 옮깁니다. 운영자는 관리자 화면(HMI)에서 주문별 진행 상황과 오류를 확인합니다.
 
-## 지금 되는 것
+[시연](#시연) · [핵심 구현](#핵심-구현) · [시스템 설계](#시스템-설계) · [설치와 실행](#설치와-실행)
 
-- 고객 화면에서 윗면·옆면 그림을 그리고 3D로 전체 모습 확인
-- 전체 확인 화면에서 60초 동안 조작이 없으면 그림을 유지한 채 수정 화면으로 복귀
-- FastAPI에서 그림 검증, 주문 ID 생성, SQLite 저장·조회와 단일 활성 주문 제한
-- 원본 좌표·실측 치수·TCP 영점을 CakeOrder로 보내는 ROS 브릿지
-- 가상 M0609·RG2와 테이블·타공판·케이크 고정구를 RViz에 함께 표시
+## 시연
 
-HMI는 주문·TM 공정 상태·DP 계획 제어점을 읽는 조회 화면입니다. 웹 → 백엔드 → 브릿지 → TM·DP·RE 연결 코드가 있으며,
-전체 실행기로 준비한 뒤 웹에서 제작 요청을 누르면 선택한 모드의 로봇이 움직입니다.
-옆면의 미세 계단과 손목 회전 한계는 추가 검증이 필요합니다.
+### 실물 제작 시연
 
-## 전체 실행
+[![윗면을 그리는 두산 M0609 로봇과 케이크 작업대](docs/media/robot-poster.jpg)](docs/media/robot-process.mp4)
 
-```bash
-cd ~/ws_cobot_pjt
-bash scripts/start_virtual.sh  # 가상: 펜 돌출 길이 입력, 기본 4cm
-# 또는
-bash scripts/start_real.sh     # 실제: 상면 중앙에 펜촉을 두고 YES 입력
-```
+태블릿에서 그림을 그리는 손과 키오스크 화면을 나란히 볼 수 있습니다. 주문이 접수되면 로봇이 케이크를 작업대에 올려 윗면을 그리고, 펜을 기울여 다시 잡은 뒤 옆면을 그립니다. 영상은 윗면과 옆면 테스트를 각각 촬영해 이어 붙였습니다. [실물 공정 영상 · 1분 50초](docs/media/robot-process.mp4)
 
-프론트·백엔드·로봇·업무 노드·브릿지를 함께 켭니다. 종료는 같은 터미널의 Ctrl+C입니다.
-이미 `sodreal`을 켰다면 `bash scripts/start_real.sh --reuse-driver`를 사용합니다.
-[전체 실행 순서와 옵션](docs/START_SYSTEM.md)에 포트 변경과 준비 검사를 정리했습니다.
+| 윗면 필기 | 옆면 필기 | 케이크 회수 |
+| --- | --- | --- |
+| ![수직으로 잡은 펜으로 케이크 윗면에 하트를 그리는 모습](docs/media/top-drawing.jpg) | ![기울인 펜촉이 케이크 옆면을 따라 글씨를 쓰는 모습](docs/media/side-drawing.jpg) | ![로봇이 집기 도구로 필기를 마친 케이크판을 들어 올리는 모습](docs/media/cake-recovery.jpg) |
 
-## 폴더
+### 고객 키오스크
 
-```text
-ws_cobot_pjt/
-├── frontend/                  # React·TypeScript 고객 화면과 정적 HMI
-├── backend/                   # FastAPI 그림 접수·SQLite 저장·주문 조회
-├── ws_cobot1/
-│   ├── src/
-│   │   ├── cake_decorator/            # 주문 브릿지·업무 노드 개발 위치
-│   │   ├── cake_decorator_interfaces/ # 메시지·서비스·액션 타입
-│   │   ├── cake_workcell_description/  # 테이블·A안 고정구 모델
-│   │   └── cake_workcell_bringup/      # 가상 로봇과 작업 환경 통합 launch
-│   └── doc/                   # 가상 환경 실행·설정 문서
-├── ws_dsr/src/                # 두산·OnRobot RG2 드라이버와 강의 브링업
-├── config/                    # 웹·백엔드 공통 원뿔대 케이크 치수
-├── scripts/                   # 실행·실측 형상 생성 스크립트
-├── docs/                      # 설계·데이터 규격·환경 설명
-├── docker/                    # Docker 설정을 둘 자리
-└── DartPlatform/              # Dart Platform 설치를 둘 자리
-```
+![윗면에 하트를 그리고 옆면 문구를 입력한 뒤 3D 확인과 제작 요청을 하는 키오스크 화면](docs/media/kiosk-demo.gif)
 
-기존 기어 삽입 예제는 최상위에 그대로 보관합니다.
-`node_modules`, `.venv`, `build`, `install`, `log`와 주문 DB는 Git에 올리지 않습니다.
+윗면에 하트를 그리고 옆면에 문구를 쓴 뒤, 3D 미리보기를 돌려 두 면을 확인합니다. 주문하면 화면이 제작 진행률을 보여주고, 작업이 끝나면 픽업을 안내합니다. [키오스크 영상 · 14초](docs/media/kiosk-demo.mp4)
 
-## 웹 실행
+### 관리자 HMI
 
-Python 3.12와 Node.js 22.12 이상을 사용합니다. 터미널 두 개를 엽니다.
+[![완료된 시연 주문의 공정 단계, 로그, 고객 원본 그림을 보여주는 HMI](docs/media/hmi-complete.jpg)](docs/media/hmi-demo.mp4)
 
-**터미널 1 — 백엔드**
+주문을 선택하면 현재 작업 단계, 진행률, 공정 로그와 고객의 원본 그림을 한 화면에서 볼 수 있습니다. 영상에서는 케이크 준비부터 제작 완료까지 다섯 단계를 순서대로 따라갑니다. [HMI 영상 · 38초](docs/media/hmi-demo.mp4)
 
-```bash
+### 예외 대응
+
+[![따개 파지 재시도에 실패해 로봇이 정지하고 키오스크에 제작 문제가 표시된 모습](docs/media/fault-poster.jpg)](docs/media/fault-demo.mp4)
+
+케이크판을 들어 올리는 도구(따개)가 없으면 로봇은 한 번 더 집기를 시도합니다. 두 번째도 실패하면 작업이 멈추고, 관리자가 HMI에서 복구를 확인한 뒤 제작을 다시 시작합니다. 영상에는 펜이나 케이크가 없을 때의 재시도와 별도의 소프트웨어 정지 시험도 담았습니다. [예외 대응 영상 · 1분 39초](docs/media/fault-demo.mp4)
+
+| 키오스크의 제작 문제 안내 | HMI의 복구 대기와 오류 로그 |
+| --- | --- |
+| [![시연 주문의 제작 문제 안내 화면](docs/media/kiosk-fault.jpg)](docs/media/kiosk-fault.jpg) | [![주문 복구 버튼과 플레이트 준비 실패 로그에 빨간 표시를 한 HMI 화면](docs/media/hmi-fault.jpg)](docs/media/hmi-fault.jpg) |
+
+## 핵심 구현
+
+| 기능 | 구현 방식 |
+| --- | --- |
+| **양면 주문** | 윗면과 옆면을 따로 편집합니다. 한 면만 그리거나 두 면을 한 주문으로 접수할 수 있습니다. |
+| **그림을 필기 경로로 변환** | 화면에서 그린 점을 케이크 위의 3D 좌표로 바꿉니다. 윗면은 원형 평면을 사용하고, 옆면은 높이에 따라 반지름을 계산합니다. 획과 획 사이에서는 펜을 들어 선이 이어지지 않게 합니다. |
+| **로봇 동작 순서 제어** | 작업 관리 노드가 케이크 배치, 펜 잡기, 필기, 펜 반납, 케이크 회수를 순서대로 요청합니다. 양면 주문은 윗면을 먼저 그린 뒤 옆면용 자세로 펜을 다시 잡습니다. |
+| **주문 기록과 복구** | FastAPI가 주문을 받고 SQLite에 원본 그림과 작업 상태를 저장합니다. 도구나 케이크를 잡지 못한 것으로 확인되면 해당 단계에서 한 번 더 시도합니다. 다시 실패하면 주문을 복구 대기로 기록하고 새 주문 접수를 멈춥니다. |
+
+## 시스템 설계
+
+### 웹 주문과 ROS 2 노드
+
+~~~mermaid
+flowchart LR
+    customer["태블릿 고객 화면"] -->|"그림과 주문"| api["FastAPI"]
+    api <-->|"원본과 작업 상태"| db[("SQLite")]
+    api <-->|"주문 인수와 상태 보고"| bridge["ROS 주문 브리지"]
+    bridge <-->|"CakeOrder 액션과 피드백"| manager["작업 관리 TM"]
+    manager <-->|"GenerateTrajectory 서비스"| planner["경로 계산 DP"]
+    manager <-->|"도구·필기·운반 요청과 결과"| executor["로봇 실행 RE"]
+    executor -->|"이동과 그리퍼 제어"| driver["M0609·RG2 드라이버"]
+    api -->|"주문·공정·로그 조회"| hmi["관리자 HMI"]
+~~~
+
+주문 브리지가 웹에서 받은 그림의 픽셀 좌표와 케이크 정보를 ROS 2에 전달합니다. 작업 관리 노드(TM)가 공정 순서를 정하면 경로 계산 노드(DP)가 면별 필기 경로를 계산하고, 로봇 실행 노드(RE)가 팔과 그리퍼를 움직입니다. 작업 상태는 브리지를 거쳐 서버에 반영됩니다. [시퀀스와 상태 흐름](docs/architecture/SYSTEM_DESIGN.md) · [그림 데이터 규격](docs/DRAWING_PROTOCOL.md)
+
+### 주문 한 건의 제작 흐름
+
+~~~mermaid
+flowchart TD
+    draft["윗면·옆면 편집과 3D 확인"] --> submit["그림 검증과 주문 저장"]
+    submit --> load["케이크를 작업대에 배치"]
+    load --> top{"윗면 그림이 있는가?"}
+    top -->|"있음"| drawTop["윗면 펜 파지와 필기"]
+    top -->|"없음"| side
+    drawTop --> side{"옆면 그림이 있는가?"}
+    side -->|"있음"| drawSide["옆면 자세로 펜 파지와 필기"]
+    side -->|"없음"| unload
+    drawSide --> unload["펜 반납과 케이크 회수·출고"]
+    unload --> done["주문 완료 기록"]
+~~~
+
+실물 제작에서는 주문에 그림이 있는 면만 그립니다. 두 면 모두 요청하면 윗면부터 그리고, 필기를 마치면 도구를 반납한 뒤 케이크를 출고 위치로 옮깁니다. [표면 좌표 변환](docs/SURFACE_DRAWING.md) · [공정과 예외 처리 기록](docs/HMI_OPERATION.md)
+
+## 운영 환경과 장비
+
+| 구분 | 구성 |
+| --- | --- |
+| 운영체제 | Ubuntu 24.04 LTS |
+| 고객·관리자 화면 | Node.js 22.12 이상, React, TypeScript, Vite, Three.js |
+| 서버·저장 | Python 3.12, FastAPI, Pydantic, Uvicorn, SQLite |
+| 로봇 소프트웨어 | ROS 2 Jazzy, colcon, Doosan ROS 2 드라이버, OnRobot RG2 드라이버 |
+| 가상 실행 | Docker에서 구동하는 가상 DRCF, RViz2 |
+| 제어 장비 | 두산 M0609 협동로봇, OnRobot RG2 그리퍼, 티칭 펜던트 |
+| 작업 도구 | 레터링 펜과 거치대, 케이크판 집기 도구, 케이크 고정구와 작업대 |
+| 입력·운영 장비 | 고객 태블릿, 운영 노트북, 로봇용 유선 LAN, 태블릿용 Wi-Fi |
+
+Python 서버, 웹 화면, ROS 패키지의 의존성은 각 환경의 설정 파일에서 관리합니다. ROS 패키지는 `package.xml`에 필요한 패키지를 명시합니다. [Python requirements.txt](backend/requirements.txt) · [웹 package.json](frontend/package.json) · [웹 package-lock.json](frontend/package-lock.json)
+
+## 설치와 실행
+
+### 1. 새 PC에서 준비
+
+Ubuntu 24.04에 ROS 2 Jazzy와 Node.js 22.12 이상을 설치한 뒤 아래 명령을 실행합니다. 가상 모드를 쓸 경우 현재 사용자 계정에서 Docker를 실행할 수 있어야 합니다.
+
+~~~bash
 git clone https://github.com/seng3340-oss/Rokey_10_A_3.git
 cd Rokey_10_A_3
 
-# 교육장 ROS 환경에서 최초 한 번 준비
 source /opt/ros/jazzy/setup.bash
 sudo apt install python3-colcon-common-extensions python3-rosdep \
-  python3-venv python3-pymodbus python3-scipy python3-yaml
+  python3-venv python3-pymodbus python3-numpy python3-scipy python3-yaml
+
+# rosdep을 처음 사용하는 PC에서는 먼저 sudo rosdep init을 한 번 실행합니다.
+rosdep update
 rosdep install --from-paths ws_dsr/src ws_cobot1/src --ignore-src -r -y
-```
+bash scripts/setup_project.sh
+~~~
 
-아래 실행기는 웹 의존성이나 ROS 빌드가 없으면 자동으로 준비합니다.
-최초 설치·빌드는 인터넷 연결이 필요할 수 있으므로 로봇 LAN으로 전환하기 전에
-`bash scripts/setup_project.sh`로 미리 준비해두면 편합니다.
-다른 PC의 `build`, `install`, `.venv`, `node_modules`는 복사하지 않습니다.
-폴더 이름이나 사용자 이름은 달라도 됩니다.
+준비 스크립트는 웹 의존성을 설치하고 Python 가상환경을 만든 다음, `ws_dsr`의 드라이버와 `ws_cobot1`의 작업 패키지를 차례로 빌드합니다. [로봇 환경 구성](docs/ROBOT_ENVIRONMENT.md)
 
-## 실제 로봇으로 실행
+### 2. 실행 모드 선택
 
-```bash
-bash scripts/start_real.sh
-```
+| 모드 | 실행 명령 | ROS 2 launch |
+| --- | --- | --- |
+| 가상 드로잉 | `bash scripts/start_virtual.sh` | `cake_workcell_bringup virtual.launch.py` |
+| 실제 전체 공정 | `bash scripts/start_real.sh` | `m0609_rg2_bringup bringup.launch.py` (`mode:=real`) |
 
-로봇 기본 주소는 `192.168.1.100`, 모델은 `m0609`, ROS_DOMAIN_ID 기본값은30입니다.
-기존 미완료 주문이 있으면 작업이 실제 중단됐는지 확인한 뒤 RESET을 입력합니다.
-펜을 수직으로 세워 펜촉을 케이크 상면 중앙에 가볍게 맞추고 YES를 입력합니다.
-YES 뒤에는 펜촉 TCP를 계산·적용하고 웹·ROS 업무 노드를 준비합니다.
-웹에서 주문을 제출하면 실제 로봇이 움직입니다. 종료는 실행 터미널에서 Ctrl+C입니다.
+두 스크립트에 `--check`를 붙이면 의존성과 포트, 설정을 먼저 확인할 수 있습니다. 전체 실행 순서는 다음과 같습니다.
 
-펜촉 계산은 실제 상면 높이와 현재 TCP의 XY가 펜촉 XY와 같다는 가정을 사용합니다.
-정밀 교정을 대신하지 않으므로 펜을 다시 잡았거나 배치를 바꿨다면 실제 펜촉을 확인합니다.
-설정한 펜촉 TCP는 종료 후에도 유지되며 이전 TCP 복원 이름을 터미널에 표시합니다.
+1. 로봇 드라이버와 컨트롤러를 시작합니다. 가상 모드의 기본 펜 돌출 길이는 4cm입니다. 실제 모드는 `config/real_robot.json`에서 작업 기준점을 읽습니다.
+2. FastAPI 서버와 주문 저장소를 준비합니다.
+3. 경로 계산(DP), 로봇 실행(RE), 작업 관리(TM) 노드를 차례로 시작합니다.
+4. 주문 브리지와 웹 화면을 시작하고 접속 주소를 출력합니다.
 
-## 로봇 없이 가상 실행
+실제 모드를 실행하기 전에 작업대 배치, 펜촉 TCP와 현장 설정을 확인합니다. 실제 모드에서는 제작 요청이 들어오면 로봇이 움직입니다. [가상 작업셀 실행과 배치](ws_cobot1/doc/VIRTUAL_WORKCELL.md) · [태블릿 네트워크 연결](docs/NETWORK.md)
 
-```bash
-bash scripts/start_virtual.sh
-```
+### 3. 웹 접속과 종료
 
-펜 돌출 길이는 기본4cm이며 실행 시 입력합니다. 가상 로봇·RViz·웹·백엔드·업무 노드를 함께 켭니다.
-실물용 TCP 설정은 가상 모드에 적용하지 않습니다.
-기본 station 모델과 가상 자동 영점의 legacy 배치는 아직 별도로 확인해야 합니다.
+| 화면 | 기본 주소 |
+| --- | --- |
+| 고객 화면 | `http://localhost:8080/` |
+| 관리자 HMI | `http://localhost:8080/hmi` |
+| 고객·관리자 화면 나란히 보기 | `http://localhost:8080/workspace` |
 
-## 화면 접속
+태블릿이 운영 노트북과 같은 Wi-Fi에 연결되어 있으면, 주소의 `localhost`를 노트북의 Wi-Fi IP로 바꿔 접속합니다. 종료하려면 실행한 터미널에서 `Ctrl+C`를 누릅니다.
 
-- 고객 화면: `http://localhost:8080`
-- 태블릿: 같은 Wi-Fi에서 `http://노트북의-Wi-Fi-IP:8080`
-- HMI: 같은 주소의 `/hmi`
+## 설계·검증 자료
 
-로봇용 유선 LAN과 태블릿용 Wi-Fi를 함께 사용할 수 있습니다.
-자세한 설정은 [네트워크 안내](docs/NETWORK.md)를 참고하세요.
-
-## 45도 펜 옆면 이동만 가상 검증
-
-```bash
-bash scripts/start_virtual_side_web_test.sh
-```
-
-RViz에서 케이크 중앙 도착을 확인하고 터미널에 YES를 입력합니다.
-웹 `http://localhost:8081`에서 옆면을 선택해 그림을 제출합니다.
-실물과 분리한 도메인187·별도 주문 DB를 사용하며 펜 반납과 그리퍼 조작은 생략합니다.
-다른 그림을 시험하려면 Ctrl+C 후 같은 명령을 다시 실행합니다.
-
-## 자주 바꾸는 설정
-
-| 파일 | 내용 |
-|---|---|
-| `config/real_robot.json` | 실제 상면 BASE Z=220mm, YES 후 펜촉 TCP 설정 여부 |
-| `config/test_cake.json` | 실제 케이크 윗지름113.5mm·밑지름120mm·높이79mm, 판179×179×2mm |
-| `ws_cobot1/src/cake_decorator/config/workspace_config.yaml` | 옆면 각도17도, 옆면 기준속도60mm/s, 접촉 지름 보정2mm |
-
-지름 보정2mm는 실제 케이크를 키우는 값이 아니라 옆면 펜촉 목표를 반지름 방향으로1mm 바깥에 두는 값입니다.
-그리기 전 도달 가능 자세를 대표점으로 검사합니다. 이 검사는 연속 경로의 충돌·접촉 품질을 보장하지 않습니다.
-
-## 개발할 때
-
-프론트만 실행하려면 `cd frontend && npm run dev`, 백엔드만 실행하려면 아래 명령을 사용합니다.
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ws_cobot_pjt_jihwan/ws_dsr/install/setup.bash
-source ~/ws_cobot_pjt/ws_cobot1/install/local_setup.bash
-export ROS_DOMAIN_ID=30
-ros2 launch cake_workcell_bringup virtual.launch.py
-```
-
-실행하면 `그리퍼 끝에서 펜촉까지 돌출 길이(cm)`를 묻습니다. Enter를 누르면
-기본 4cm를 사용합니다. 입력한 길이는 펜 모델과 `Virtual_Pen_TCP`에 함께 반영되며,
-`가상 펜 준비 완료`가 출력된 뒤 그리기 노드를 사용합니다.
-길이를 미리 지정하려면 `pen_extension_cm:=4`를 launch 명령 뒤에 붙입니다.
-이 설정은 가상 모드 전용입니다. `sodreal`과 실물의 교정된 TCP는 변경하지 않습니다.
-실물에서는 펜촉을 케이크 상면 중심에 맞추고 브릿지에서 YES를 눌러 작업 기준점을 기록합니다.
-
-현재는 보존한 `ws_cobot_pjt_jihwan`의 로봇 설치본을 사용합니다.
-새 `ws_cobot_pjt/ws_dsr`를 빌드한 뒤에는 두 번째 source 경로를 새 설치본으로 바꿉니다.
-`.sh`는 새 설치본이 있으면 그쪽을 우선 사용합니다.
-
-다른 PC에서 처음 실행할 때는 로봇 환경을 준비하고, 작업 환경 패키지도 빌드해야 합니다.
-[가상 환경 빌드·위치 조정 방법](ws_cobot1/doc/VIRTUAL_WORKCELL.md)을 참고합니다.
-
-### 현재 모델 크기와 위치
-
-- 테이블: 가로 1200 × 세로 650mm, 상판 높이 960mm
-- 확정 원뿔대 케이크: 윗지름113.5 / 밑지름120 / 높이79mm
-- 케이크판: 179 × 179 × 두께 2mm 사각판
-- 타공판 조립체: 임시 배치. 현재 케이크 중심은 로봇 BASE 기준 X=500, Y=0mm
-
-원뿔대 치수는 웹과 백엔드가 함께 읽는 `config/test_cake.json`에서 관리합니다.
-RViz 형상 갱신은 `python3 scripts/generate_test_cake_model.py`로 수행합니다.
-고정구 위치는 `ws_cobot1/src/cake_workcell_bringup/config/workcell.yaml`의 임시값입니다.
-실행 원점은 이 배치가 아니라 브릿지 시작 시 접촉 확인한 현재 TCP의 윗면 중심입니다.
-
-RViz에 모델이 보이는 것과 실제 충돌·접촉 검증은 별개입니다.
-현재 타공판 위치와 모델 높이는 실물 설치 좌표나 펜촉 영점으로 확정한 값이 아닙니다.
-
-## 실제 로봇에 연결할 때
-
-교육장에서 노트북과 로봇을 유선으로 연결합니다.
-현재 강의 설정은 M0609, 로봇 주소 `192.168.1.100`, 포트 `12345`, 도메인 ID `30`입니다.
-가상 브링업을 종료한 뒤 별도 터미널에서 실행합니다.
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ws_cobot_pjt_jihwan/ws_dsr/install/setup.bash
-export ROS_DOMAIN_ID=30
-
-ros2 launch m0609_rg2_bringup bringup.launch.py \
-  mode:=real host:=192.168.1.100 port:=12345 model:=m0609
-```
-
-기존 `sodreal` 별칭이 있다면 마지막 launch 명령 대신 사용해도 됩니다.
-새 `ws_dsr`를 빌드했다면 source 경로는 `~/ws_cobot_pjt/ws_dsr/install/setup.bash`를 사용합니다.
-
-이 단계는 **실제 로봇 연결**입니다. 이후 다른 터미널에서도 같은 ROS 환경과 도메인 ID를 설정하고,
-실행하려는 로봇 동작 Python 파일이나 ROS 노드를 별도로 켭니다.
-연결 전용 launch를 켠 것만으로 케이크 드로잉이 시작되지는 않습니다.
-주문 전달 브릿지와 TM·DP·RE 코드가 있으며, 현재는 고정 원뿔대의 드로잉을 검증 중입니다. 케이크 운반까지의 전체 자동 제작은 별도 검증이 필요합니다.
-
-실제 필기 검증 전에는 설치 위치, 활성 TCP·Tool, 펜촉 접촉 높이를 현장에서 확인합니다.
-Real은 기존 강의 브링업을 사용하며, 임시 위치의 테이블·케이크 모델은 추가하지 않았습니다.
-
-## 관련 문서
-
-- [프론트 실행·구성](frontend/README.md)
-- [백엔드 실행·API·테스트](backend/README.md)
-- [그림 데이터 규격](docs/DRAWING_PROTOCOL.md)
-- [로봇 실행환경 이관·빌드](docs/ROBOT_ENVIRONMENT.md)
-- [태블릿 네트워크 연결](docs/NETWORK.md)
-
-- [PM 시퀀스·상태 흐름도](docs/architecture/SYSTEM_DESIGN.md)
-- [ROS 인터페이스 초안과 확인할 항목](docs/architecture/INTERFACES.md)
-- [시스템 설계·통신 규격 보고서 PDF](docs/architecture/report/케이크_시스템설계_통신규격_v0.3.pdf)
-- [확정한 인터페이스 결정](docs/architecture/DECISIONS.md)
-- [인터페이스 패키지 빌드](ws_cobot1/src/cake_decorator_interfaces/README.md)
-
-## 원뿔대 케이크와 주문 브릿지
-
-[단일 주문·브릿지 실행 방법](docs/BRIDGE_TEST.md)을 참고합니다.
-TM은 `/cake/order` Action을 제공해야 하며 브릿지는 TM이 준비된 뒤에만 주문을 인수합니다.
-
-현재 원뿔대·원본 픽셀 계약은 [확정 통신 규격](docs/CYLINDER_PIXEL_CONTRACT.md)을 기준으로 합니다.
-
-직사각형 옆면 입력을 원뿔대 표면으로 옮기는 규칙과 회귀 검사는 [표면 드로잉 안내](docs/SURFACE_DRAWING.md)에 정리했습니다.
-
-### 윗면·옆면 통합 실물 공정
-
-```bash
-cd ~/ws_cobot_pjt
-bash scripts/start_real.sh
-```
-
-이미 `sodreal`을 켰다면 `--reuse-driver`를 붙인다. 케이크 중심을 찍거나 YES를 입력하는 과정 없이 웹 주문을 기다린다.
-두 면을 그리면 하나의 주문으로 접수해 케이크 배치 → 윗면 → 펜 반납·45도 재파지 → 옆면 → J6 되감기·펜 반납 → 케이크 회수 순서로 실행한다.
-한 면만 그린 주문은 해당 면만 실행한다. 중간 실패 시 이후 공정을 실행하지 않는다.
-
-윗면은 `cake_center_pose`의 기본 TCP 기준 Z=513.48mm를 사용한다(기존 티칭 510.39mm에서 총 +3.09mm).
-옆면은 `real_robot.json`의 실제 펜촉 기준 상면 높이 222mm를 사용한다. 두 값은 TCP 기준이 다르다.
-전체 사이클은 아직 실물 통합 시험이 필요하며, 기존 옆면 검증 스크립트는 최종 확인 전까지 남겨 둔다.
-
-## HMI 운용
-
-`/hmi`에서 주문과 공정 상태를, `/workspace`에서 고객 입력과 HMI를 함께 봅니다.
-상태는 플레이트 준비 → 드로잉 → 회수·출고 순서로 표시합니다.
-계획은 DP 응답의 투영이며 실제 펜촉 측정 궤적이나 장비 안전 신호가 아닙니다.
-HMI 제어 버튼은 비활성 상태입니다. [운용 및 장비 없는 검사](docs/HMI_OPERATION.md)를 참고하세요.
+- [시스템 설계와 ROS 통신 규격 PDF](docs/architecture/report/케이크_시스템설계_통신규격_v0.3.pdf) · [인터페이스 결정 기록](docs/architecture/DECISIONS.md)
+- [윗면·옆면 통합과 현장 보정 기록](docs/TOP_SIDE_INTEGRATION.md)
+- [장비 없는 웹·백엔드·ROS 연동 검사](docs/TESTING_HMI.md)
